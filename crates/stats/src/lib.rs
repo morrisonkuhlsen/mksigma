@@ -15,10 +15,11 @@ pub enum StatsError {
     NotNumeric(String),
 }
 
-/// Running count, mean and sum of squared deviations (Welford), plus min and max.
+/// Running sum of weights, weighted mean and weighted sum of squared deviations (West's weighted
+/// form of Welford's method), plus min and max.
 #[derive(Debug, Clone, Copy, Default)]
 struct Moments {
-    n: usize,
+    w: f64,
     mean: f64,
     m2: f64,
     min: f64,
@@ -26,27 +27,37 @@ struct Moments {
 }
 
 impl Moments {
-    fn add(&mut self, x: f64) {
-        if self.n == 0 {
+    fn add(&mut self, x: f64, w: f64) {
+        if w <= 0.0 {
+            return;
+        }
+        if self.w == 0.0 {
             self.min = x;
             self.max = x;
         }
-        self.n += 1;
+        self.w += w;
         let delta = x - self.mean;
-        self.mean += delta / self.n as f64;
-        self.m2 += delta * (x - self.mean);
+        self.mean += delta * w / self.w;
+        self.m2 += w * delta * (x - self.mean);
         self.min = self.min.min(x);
         self.max = self.max.max(x);
     }
 
-    /// Sample standard deviation (n − 1 denominator); undefined below two cases.
+    /// Sample standard deviation with weights as frequencies (W − 1 denominator, as SPSS does);
+    /// undefined unless the weights sum to more than 1.
     fn std_dev(&self) -> Option<f64> {
-        (self.n > 1).then(|| (self.m2 / (self.n - 1) as f64).sqrt())
+        (self.w > 1.0).then(|| (self.m2 / (self.w - 1.0)).sqrt())
     }
 }
 
+/// N is the sum of weights, shown rounded to a whole number as SPSS shows it.
+fn n_cell(w: f64) -> Cell {
+    Cell::Int(w.round() as i64)
+}
+
 /// `DESCRIPTIVES`: N, minimum, maximum, mean and standard deviation of each variable, with
-/// missing values excluded variable by variable, and a "Valid N (listwise)" row.
+/// missing values excluded variable by variable, and a "Valid N (listwise)" row. Under
+/// `WEIGHT BY` each case counts as its weight; cases with no valid positive weight are left out.
 pub fn descriptives(ds: &Dataset, names: &[String]) -> Result<Table, StatsError> {
     let mut vars = Vec::with_capacity(names.len());
     for name in names {
@@ -57,30 +68,32 @@ pub fn descriptives(ds: &Dataset, names: &[String]) -> Result<Table, StatsError>
         vars.push((var, ds.column(index).unwrap_or_default()));
     }
 
+    let weights: Vec<f64> = (0..ds.n_cases()).map(|case| ds.case_weight(case)).collect();
+
     let mut rows = Vec::with_capacity(vars.len() + 1);
     for (var, column) in &vars {
         let mut m = Moments::default();
-        for v in column.iter().filter(|v| !var.is_missing(v)) {
+        for (v, w) in column.iter().zip(&weights).filter(|(v, _)| !var.is_missing(v)) {
             if let Some(x) = v.as_num() {
-                m.add(x);
+                m.add(x, *w);
             }
         }
         let num = |value: f64| Cell::Num { value, decimals: 2 };
-        let cells = if m.n == 0 {
+        let cells = if m.w == 0.0 {
             vec![Cell::Int(0), Cell::Empty, Cell::Empty, Cell::Empty, Cell::Empty]
         } else {
-            vec![Cell::Int(i64::try_from(m.n).unwrap_or(i64::MAX)), num(m.min), num(m.max), num(m.mean), m.std_dev().map_or(Cell::Empty, num)]
+            vec![n_cell(m.w), num(m.min), num(m.max), num(m.mean), m.std_dev().map_or(Cell::Empty, num)]
         };
         rows.push((var.display_name().to_string(), cells));
     }
 
-    let listwise = (0..ds.n_cases())
-        .filter(|&case| vars.iter().all(|(var, column)| column.get(case).is_some_and(|v| matches!(v, Value::Num(_)) && !var.is_missing(v))))
-        .count();
-    rows.push((
-        "Valid N (listwise)".to_string(),
-        vec![Cell::Int(i64::try_from(listwise).unwrap_or(i64::MAX)), Cell::Empty, Cell::Empty, Cell::Empty, Cell::Empty],
-    ));
+    let listwise: f64 = weights
+        .iter()
+        .enumerate()
+        .filter(|&(case, _)| vars.iter().all(|(var, column)| column.get(case).is_some_and(|v| matches!(v, Value::Num(_)) && !var.is_missing(v))))
+        .map(|(_, w)| w)
+        .sum();
+    rows.push(("Valid N (listwise)".to_string(), vec![n_cell(listwise), Cell::Empty, Cell::Empty, Cell::Empty, Cell::Empty]));
 
     Ok(Table {
         title: "Descriptive Statistics".to_string(),
@@ -131,6 +144,60 @@ mod tests {
         assert_eq!(y[1], Cell::Num { value: 1.0, decimals: 2 });
         assert_eq!(y[3], Cell::Num { value: 6.0, decimals: 2 });
         assert_eq!(t.rows[2], ("Valid N (listwise)".to_string(), vec![Cell::Int(6), Cell::Empty, Cell::Empty, Cell::Empty, Cell::Empty]));
+    }
+
+    fn num(cell: &Cell) -> f64 {
+        match cell {
+            Cell::Num { value, .. } => *value,
+            other => panic!("not a number: {other:?}"),
+        }
+    }
+
+    /// Integer weights behave exactly like repeating each case that many times.
+    #[test]
+    fn integer_weights_equal_repeated_cases() {
+        let (xs, ws) = ([1.0, 2.0, 3.0, 10.0], [1.0, 2.0, 3.0, 1.0]);
+        let mut weighted = Dataset::new();
+        weighted.add_variable(Variable::numeric("x")).unwrap();
+        weighted.add_variable(Variable::numeric("w")).unwrap();
+        let mut repeated = Dataset::new();
+        repeated.add_variable(Variable::numeric("x")).unwrap();
+        for (x, w) in xs.iter().zip(ws) {
+            weighted.push_case(vec![Value::Num(*x), Value::Num(w)]).unwrap();
+            for _ in 0..w as usize {
+                repeated.push_case(vec![Value::Num(*x)]).unwrap();
+            }
+        }
+        weighted.weight = Some(1);
+        let a = descriptives(&weighted, &["x".into()]).unwrap();
+        let b = descriptives(&repeated, &["x".into()]).unwrap();
+        // 1,2,2,3,3,3,10: mean 24/7.
+        assert_eq!(a.rows[0].1[0], Cell::Int(7));
+        assert!((num(&a.rows[0].1[3]) - 24.0 / 7.0).abs() < 1e-12);
+        for col in 1..5 {
+            assert!((num(&a.rows[0].1[col]) - num(&b.rows[0].1[col])).abs() < 1e-12, "column {col}");
+        }
+        assert_eq!(a.rows[1], b.rows[1]);
+    }
+
+    #[test]
+    fn fractional_and_invalid_weights() {
+        let mut ds = Dataset::new();
+        ds.add_variable(Variable::numeric("x")).unwrap();
+        ds.add_variable(Variable::numeric("w")).unwrap();
+        // The last three cases have no valid weight and are left out.
+        for (x, w) in [(2.0, Value::Num(0.5)), (4.0, Value::Num(1.5)), (100.0, Value::Num(0.0)), (100.0, Value::Num(-2.0)), (100.0, Value::SysMis)] {
+            ds.push_case(vec![Value::Num(x), w]).unwrap();
+        }
+        ds.weight = Some(1);
+        let t = descriptives(&ds, &["x".into()]).unwrap();
+        let row = &t.rows[0].1;
+        // W = 2, mean = (0.5·2 + 1.5·4) / 2 = 3.5, Σw(x − mean)² = 0.5·2.25 + 1.5·0.25 = 1.5.
+        assert_eq!(row[0], Cell::Int(2));
+        assert_eq!((num(&row[1]), num(&row[2])), (2.0, 4.0));
+        assert!((num(&row[3]) - 3.5).abs() < 1e-12);
+        assert!((num(&row[4]) - 1.5f64.sqrt()).abs() < 1e-12);
+        assert_eq!(t.rows[1].1[0], Cell::Int(2));
     }
 
     #[test]

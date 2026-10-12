@@ -269,6 +269,19 @@ impl Dataset {
     pub fn column(&self, index: usize) -> Option<&[Value]> {
         self.columns.get(index).map(Vec::as_slice)
     }
+
+    /// The weight of `case` under `WEIGHT BY`: 1 when cases aren't weighted. A case whose weight
+    /// is missing, zero, negative or not a number weighs 0, which leaves it out of procedures.
+    pub fn case_weight(&self, case: usize) -> f64 {
+        let Some(index) = self.weight else { return 1.0 };
+        let (Some(var), Some(value)) = (self.variables.get(index), self.columns.get(index).and_then(|c| c.get(case))) else {
+            return 0.0;
+        };
+        match value {
+            Value::Num(w) if *w > 0.0 && w.is_finite() && !var.is_missing(value) => *w,
+            _ => 0.0,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -291,6 +304,21 @@ mod tests {
         ds.push_case(vec![Value::Num(1.0)]).unwrap();
         assert_eq!(ds.n_cases(), 1);
         assert_eq!(ds.add_variable(Variable::numeric("y")), Err(DatasetError::NotEmpty));
+    }
+
+    #[test]
+    fn case_weights() {
+        let mut ds = Dataset::new();
+        let mut w = Variable::numeric("w");
+        w.missing = MissingValues::Discrete(vec![Value::Num(9.0)]);
+        ds.add_variable(w).unwrap();
+        for v in [Value::Num(2.5), Value::Num(0.0), Value::Num(-1.0), Value::Num(9.0), Value::SysMis] {
+            ds.push_case(vec![v]).unwrap();
+        }
+        assert_eq!(ds.case_weight(0), 1.0);
+        ds.weight = Some(0);
+        let weights: Vec<f64> = (0..ds.n_cases()).map(|c| ds.case_weight(c)).collect();
+        assert_eq!(weights, [2.5, 0.0, 0.0, 0.0, 0.0]);
     }
 
     #[test]
