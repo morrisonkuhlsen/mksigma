@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*"]
+default-members = ["crates/*", "apps/mksigma", "apps/mksigma-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.90"
+
+[workspace.dependencies]
+# internal
+mksigma-core = { path = "crates/core" }
+mksigma-sav = { path = "crates/sav" }
+mksigma-stats = { path = "crates/stats" }
+mksigma-syntax = { path = "crates/syntax" }
+mksigma-output = { path = "crates/output" }
+mksigma-engine = { path = "crates/engine" }
+mksigma-ui-egui = { path = "crates/ui-egui" }
+
+# foundation
+thiserror = "2"
+
+# ui
+egui = "0.36"
+eframe = { version = "0.36", default-features = false }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

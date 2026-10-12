@@ -1,0 +1,18 @@
+[package]
+name = "mksigma-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "MK Sigma command-line interface"
+
+[lints]
+workspace = true
+
+[dependencies]
+mksigma-engine = { workspace = true }
+mksigma-output = { workspace = true }
+
+[[bin]]
+name = "mksigma-cli"
+path = "src/main.rs"
