@@ -86,6 +86,51 @@ impl Format {
     pub const fn new(kind: FormatKind, width: u16, decimals: u8) -> Self {
         Self { kind, width, decimals }
     }
+
+    /// `v` as this format shows it, without padding. Number formats are covered; date and time
+    /// formats show the underlying number until they are implemented.
+    pub fn render(&self, v: &Value) -> String {
+        let x = match v {
+            Value::SysMis => return ".".to_string(),
+            Value::Str(s) => return s.clone(),
+            Value::Num(x) => *x,
+        };
+        let d = usize::from(self.decimals);
+        match self.kind {
+            FormatKind::Comma => grouped(x, d, ',', '.'),
+            FormatKind::Dot => grouped(x, d, '.', ','),
+            FormatKind::Dollar => {
+                let s = grouped(x.abs(), d, ',', '.');
+                if x < 0.0 { format!("-${s}") } else { format!("${s}") }
+            }
+            FormatKind::Pct => format!("{x:.d$}%"),
+            FormatKind::E => format!("{x:.d$E}"),
+            FormatKind::N => format!("{x:0w$.0}", w = usize::from(self.width)),
+            _ => format!("{x:.d$}"),
+        }
+    }
+}
+
+/// `x` with `decimals` places and digits grouped in threes (`1,234,567.89`).
+fn grouped(x: f64, decimals: usize, separator: char, point: char) -> String {
+    let plain = format!("{:.decimals$}", x.abs());
+    let (int, frac) = plain.split_once('.').map_or((plain.as_str(), None), |(i, f)| (i, Some(f)));
+    let mut out = String::with_capacity(plain.len() + plain.len() / 3 + 1);
+    if x < 0.0 && plain.bytes().any(|b| b.is_ascii_digit() && b != b'0') {
+        out.push('-');
+    }
+    let digits = int.chars().count();
+    for (i, c) in int.chars().enumerate() {
+        if i > 0 && (digits - i) % 3 == 0 {
+            out.push(separator);
+        }
+        out.push(c);
+    }
+    if let Some(frac) = frac {
+        out.push(point);
+        out.push_str(frac);
+    }
+    out
 }
 
 impl std::fmt::Display for Format {
@@ -304,6 +349,21 @@ mod tests {
         ds.push_case(vec![Value::Num(1.0)]).unwrap();
         assert_eq!(ds.n_cases(), 1);
         assert_eq!(ds.add_variable(Variable::numeric("y")), Err(DatasetError::NotEmpty));
+    }
+
+    #[test]
+    fn renders_number_formats() {
+        let v = Value::Num(-1234567.891);
+        assert_eq!(Format::new(FormatKind::F, 8, 2).render(&v), "-1234567.89");
+        assert_eq!(Format::new(FormatKind::Comma, 12, 2).render(&v), "-1,234,567.89");
+        assert_eq!(Format::new(FormatKind::Dot, 12, 1).render(&v), "-1.234.567,9");
+        assert_eq!(Format::new(FormatKind::Dollar, 12, 0).render(&v), "-$1,234,568");
+        assert_eq!(Format::new(FormatKind::F, 3, 0).render(&Value::Num(4.0)), "4");
+        assert_eq!(Format::new(FormatKind::Pct, 6, 1).render(&Value::Num(12.34)), "12.3%");
+        assert_eq!(Format::new(FormatKind::N, 5, 0).render(&Value::Num(42.0)), "00042");
+        assert_eq!(Format::new(FormatKind::Comma, 8, 0).render(&Value::Num(999.0)), "999");
+        assert_eq!(Format::new(FormatKind::F, 8, 2).render(&Value::SysMis), ".");
+        assert_eq!(Format::new(FormatKind::A, 8, 0).render(&Value::Str("abc".into())), "abc");
     }
 
     #[test]

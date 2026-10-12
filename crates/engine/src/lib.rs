@@ -78,6 +78,37 @@ impl Session {
                 let table = mksigma_stats::descriptives(&self.dataset, variables)?;
                 self.output.push(Item::Table(table));
             }
+            Command::Frequencies { variables, table, order, statistics } => {
+                use mksigma_stats::{FrequenciesOrder as O, FrequenciesStatistic as S};
+                use mksigma_syntax::{FreqOrder, FreqStatistic};
+                let options = mksigma_stats::FrequenciesOptions {
+                    variables: variables.clone(),
+                    table: *table,
+                    order: match order {
+                        FreqOrder::AscendingValue => O::AscendingValue,
+                        FreqOrder::DescendingValue => O::DescendingValue,
+                        FreqOrder::AscendingFrequency => O::AscendingFrequency,
+                        FreqOrder::DescendingFrequency => O::DescendingFrequency,
+                    },
+                    statistics: statistics
+                        .iter()
+                        .map(|s| match s {
+                            FreqStatistic::Mean => S::Mean,
+                            FreqStatistic::SeMean => S::SeMean,
+                            FreqStatistic::Mode => S::Mode,
+                            FreqStatistic::StdDev => S::StdDev,
+                            FreqStatistic::Variance => S::Variance,
+                            FreqStatistic::Range => S::Range,
+                            FreqStatistic::Minimum => S::Minimum,
+                            FreqStatistic::Maximum => S::Maximum,
+                            FreqStatistic::Sum => S::Sum,
+                        })
+                        .collect(),
+                };
+                for item in mksigma_stats::frequencies(&self.dataset, &options)? {
+                    self.output.push(item);
+                }
+            }
             Command::DisplayDictionary => {
                 for table in dictionary::tables(&self.dataset) {
                     self.output.push(Item::Table(table));
@@ -113,6 +144,6 @@ mod tests {
     fn reports_errors() {
         let mut s = Session::with_sample().unwrap();
         assert!(matches!(s.run_syntax("DESCRIPTIVES nope."), Err(EngineError::Stats(_))));
-        assert!(matches!(s.run_syntax("FREQUENCIES age."), Err(EngineError::Syntax(_))));
+        assert!(matches!(s.run_syntax("CROSSTABS age."), Err(EngineError::Syntax(_))));
     }
 }

@@ -25,7 +25,12 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
 - Variable View with editing
 
 ## M2 — the introductory-course core
-`FREQUENCIES`, `CROSSTABS` (χ², Fisher), `T-TEST` (one-sample, independent, paired),
+Done: case weights (`WEIGHT BY` from the file), `DESCRIPTIVES` weighted, `FREQUENCIES` (frequency
+tables with labels and missing sections, `/FORMAT` order and `NOTABLE`, `/STATISTICS` mean,
+SE mean, mode, std. deviation, variance, range, minimum, maximum, sum). To do in `FREQUENCIES`:
+median, percentiles, skewness, kurtosis, charts, `TO` and `ALL` in variable lists.
+
+Next: `CROSSTABS` (χ², Fisher), `T-TEST` (one-sample, independent, paired),
 `ONEWAY`, `CORRELATIONS`, `REGRESSION` (linear), `LOGISTIC REGRESSION`.
 
 ## M3 — Output Viewer

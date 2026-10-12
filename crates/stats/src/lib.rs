@@ -7,6 +7,10 @@ use mksigma_core::{Dataset, Value};
 use mksigma_output::{Cell, Table};
 use thiserror::Error;
 
+mod frequencies;
+
+pub use frequencies::{Options as FrequenciesOptions, Order as FrequenciesOrder, Statistic as FrequenciesStatistic, frequencies};
+
 #[derive(Debug, Error, PartialEq)]
 pub enum StatsError {
     #[error("variable {0} does not exist")]
