@@ -21,6 +21,8 @@ mksigma-ui-egui = { path = "crates/ui-egui" }
 
 # foundation
 thiserror = "2"
+# Text in system files can be in any legacy code page (record 7.20 or 7.3 says which).
+encoding_rs = "0.8"
 
 # ui
 egui = "0.36"

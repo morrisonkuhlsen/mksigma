@@ -75,9 +75,16 @@ fn table_to_text(t: &Table) -> String {
             *w = (*w).max(cell.chars().count());
         }
     }
+    // Text columns align left, number columns right; the stub column holds labels.
+    let right: Vec<bool> = std::iter::once(false)
+        .chain(
+            (0..t.columns.len())
+                .map(|col| t.rows.iter().filter_map(|(_, cells)| cells.get(col)).any(|c| matches!(c, Cell::Num { .. } | Cell::Int(_)))),
+        )
+        .collect();
     let line = |row: &[String]| -> String {
         let cells: Vec<String> =
-            row.iter().zip(&widths).enumerate().map(|(i, (c, w))| if i == 0 { format!("{c:<w$}") } else { format!("{c:>w$}") }).collect();
+            row.iter().zip(&widths).zip(&right).map(|((c, w), right)| if *right { format!("{c:>w$}") } else { format!("{c:<w$}") }).collect();
         cells.join("  ").trim_end().to_string()
     };
     let mut out = format!("{}\n{}\n", t.title, line(&header));

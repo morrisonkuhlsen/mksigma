@@ -38,6 +38,93 @@ pub enum Measure {
     Scale,
 }
 
+/// Display format family, as in Variable View's Type column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatKind {
+    /// Plain number (`F`).
+    F,
+    Comma,
+    Dot,
+    Dollar,
+    Pct,
+    /// Scientific notation (`E`).
+    E,
+    /// Restricted numeric with leading zeros (`N`).
+    N,
+    Date,
+    ADate,
+    EDate,
+    SDate,
+    JDate,
+    QYr,
+    MoYr,
+    WkYr,
+    DateTime,
+    YmdHms,
+    Time,
+    DTime,
+    MTime,
+    WkDay,
+    Month,
+    /// String (`A`).
+    A,
+    /// String shown as hex (`AHEX`).
+    AHex,
+    /// A format MK Sigma doesn't model yet, by its system-file code.
+    Other(u8),
+}
+
+/// How values display: family, total width and decimal places (`F8.2`, `A20`, `DATE11`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Format {
+    pub kind: FormatKind,
+    pub width: u16,
+    pub decimals: u8,
+}
+
+impl Format {
+    pub const fn new(kind: FormatKind, width: u16, decimals: u8) -> Self {
+        Self { kind, width, decimals }
+    }
+}
+
+impl std::fmt::Display for Format {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self.kind {
+            FormatKind::F => "F",
+            FormatKind::Comma => "COMMA",
+            FormatKind::Dot => "DOT",
+            FormatKind::Dollar => "DOLLAR",
+            FormatKind::Pct => "PCT",
+            FormatKind::E => "E",
+            FormatKind::N => "N",
+            FormatKind::Date => "DATE",
+            FormatKind::ADate => "ADATE",
+            FormatKind::EDate => "EDATE",
+            FormatKind::SDate => "SDATE",
+            FormatKind::JDate => "JDATE",
+            FormatKind::QYr => "QYR",
+            FormatKind::MoYr => "MOYR",
+            FormatKind::WkYr => "WKYR",
+            FormatKind::DateTime => "DATETIME",
+            FormatKind::YmdHms => "YMDHMS",
+            FormatKind::Time => "TIME",
+            FormatKind::DTime => "DTIME",
+            FormatKind::MTime => "MTIME",
+            FormatKind::WkDay => "WKDAY",
+            FormatKind::Month => "MONTH",
+            FormatKind::A => "A",
+            FormatKind::AHex => "AHEX",
+            FormatKind::Other(code) => return write!(f, "format {code} ({})", self.width),
+        };
+        write!(f, "{name}{}", self.width)?;
+        if self.decimals > 0 || matches!(self.kind, FormatKind::F | FormatKind::Comma | FormatKind::Dot | FormatKind::Dollar | FormatKind::Pct) {
+            write!(f, ".{}", self.decimals)?;
+        }
+        Ok(())
+    }
+}
+
 /// User-missing values: up to three discrete values, or a range plus one discrete value.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum MissingValues {
@@ -56,6 +143,7 @@ pub struct Variable {
     pub name: String,
     pub label: Option<String>,
     pub var_type: VarType,
+    pub format: Format,
     pub measure: Measure,
     pub value_labels: Vec<(Value, String)>,
     pub missing: MissingValues,
@@ -67,10 +155,29 @@ impl Variable {
             name: name.into(),
             label: None,
             var_type: VarType::Numeric,
+            format: Format::new(FormatKind::F, 8, 2),
             measure: Measure::Scale,
             value_labels: Vec::new(),
             missing: MissingValues::None,
         }
+    }
+
+    /// A string variable `width` bytes wide (1 to 32767).
+    pub fn string(name: impl Into<String>, width: u16) -> Self {
+        Self {
+            name: name.into(),
+            label: None,
+            var_type: VarType::String(width),
+            format: Format::new(FormatKind::A, width, 0),
+            measure: Measure::Nominal,
+            value_labels: Vec::new(),
+            missing: MissingValues::None,
+        }
+    }
+
+    /// The label attached to `v`, if any.
+    pub fn value_label(&self, v: &Value) -> Option<&str> {
+        self.value_labels.iter().find(|(value, _)| value == v).map(|(_, label)| label.as_str())
     }
 
     pub fn with_label(mut self, label: impl Into<String>) -> Self {
@@ -95,7 +202,7 @@ impl Variable {
     }
 }
 
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Clone, Error, PartialEq)]
 pub enum DatasetError {
     #[error("a variable named {0} already exists")]
     DuplicateName(String),
@@ -105,11 +212,17 @@ pub enum DatasetError {
     CaseWidth { expected: usize, got: usize },
 }
 
-/// Variables and their values, stored by column.
+/// Variables and their values, stored by column, plus file-level metadata.
 #[derive(Debug, Clone, Default)]
 pub struct Dataset {
     variables: Vec<Variable>,
     columns: Vec<Vec<Value>>,
+    /// File label (`FILE LABEL`).
+    pub label: Option<String>,
+    /// Document lines (`DOCUMENT`).
+    pub documents: Vec<String>,
+    /// Index of the weight variable (`WEIGHT BY`), if cases are weighted.
+    pub weight: Option<usize>,
 }
 
 impl Dataset {

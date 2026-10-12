@@ -11,3 +11,4 @@ workspace = true
 [dependencies]
 mksigma-core = { workspace = true }
 thiserror = { workspace = true }
+encoding_rs = { workspace = true }

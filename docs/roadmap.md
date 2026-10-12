@@ -13,8 +13,11 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
 - **Columnar storage on Apache Arrow** (`arrow` or `polars`) behind the `core` API, so large
   datasets, connectors and dashboards share one in-memory format. Decide before the `.sav`
   reader lands.
-- `.sav` reader (header, variable records, value labels, documents, extension records,
-  bytecode compression), then `.zsav` and the writer
+- `.sav` reader — **started**: both byte orders, uncompressed and bytecode-compressed data,
+  variable and value labels, user-missing values, print formats, long names, measurement
+  levels, documents, weight, character encoding; `DISPLAY DICTIONARY`. To do: `.zsav` (zlib)
+  data, very long strings (> 255 bytes) as one variable, long-string value labels and missing
+  values (records 7.21/7.22), variable attributes, multiple-response sets. Then the writer.
 - CSV and `.xlsx` import (`GET DATA`)
 - **Recorded data preparation** (Power Query style): every transformation is a syntax command
   shown as a list of applied steps that can be edited, reordered and replayed: `COMPUTE`,

@@ -14,14 +14,15 @@ One workflow, end to end and reproducible:
 Every step is syntax, so analyses can be rerun, reviewed and driven by agents (CLI, later MCP).
 Runs natively on macOS, Windows, Linux and BSD, and later on the web via WebAssembly.
 
-> Early skeleton. Today it runs `DESCRIPTIVES` on a built-in sample dataset; see
-> [`docs/roadmap.md`](docs/roadmap.md).
+> Early days. Today it reads `.sav` files and runs `DESCRIPTIVES` and `DISPLAY DICTIONARY`;
+> see [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Quick start
 
 ```sh
 cargo run -p mksigma                                              # desktop app
-cargo run -p mksigma-cli -- run 'DESCRIPTIVES VARIABLES=age income score.'
+cargo run -p mksigma-cli -- run 'DESCRIPTIVES VARIABLES=age income score.'   # sample data
+cargo run -p mksigma-cli -- run --in data.sav 'DISPLAY DICTIONARY.'
 cargo test
 ```
 

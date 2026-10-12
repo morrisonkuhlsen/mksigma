@@ -8,6 +8,8 @@ use thiserror::Error;
 pub enum Command {
     /// `DESCRIPTIVES [VARIABLES=] var...`
     Descriptives { variables: Vec<String> },
+    /// `DISPLAY DICTIONARY`
+    DisplayDictionary,
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -82,6 +84,13 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
         Some((Token::Word(w), rest)) => (w.as_str(), rest),
         _ => return Err(SyntaxError::UnknownCommand(String::new())),
     };
+    if is_keyword(name, "DISPLAY") {
+        return match rest {
+            [] => Ok(Command::DisplayDictionary),
+            [Token::Word(w)] if is_keyword(w, "DICTIONARY") => Ok(Command::DisplayDictionary),
+            _ => Err(SyntaxError::Expected { command: "DISPLAY", expected: "DICTIONARY" }),
+        };
+    }
     if is_keyword(name, "DESCRIPTIVES") {
         let rest = match rest {
             [Token::Word(w), Token::Equals, rest @ ..] if is_keyword(w, "VARIABLES") => rest,
@@ -116,6 +125,13 @@ mod tests {
         assert_eq!(parse("DESCRIPTIVES VARIABLES=age income."), Ok(vec![desc(&["age", "income"])]));
         assert_eq!(parse("desc age income."), Ok(vec![desc(&["age", "income"])]));
         assert_eq!(parse("DES var=age.\nDESCRIPTIVES income"), Ok(vec![desc(&["age"]), desc(&["income"])]));
+    }
+
+    #[test]
+    fn display_dictionary() {
+        assert_eq!(parse("DISPLAY DICTIONARY."), Ok(vec![Command::DisplayDictionary]));
+        assert_eq!(parse("disp dic."), Ok(vec![Command::DisplayDictionary]));
+        assert!(parse("DISPLAY LABELS.").is_err());
     }
 
     #[test]

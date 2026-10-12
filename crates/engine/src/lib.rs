@@ -7,6 +7,8 @@ use mksigma_output::{Item, Output};
 use mksigma_syntax::{Command, SyntaxError};
 use thiserror::Error;
 
+mod dictionary;
+
 pub use mksigma_core as core;
 pub use mksigma_output as output;
 
@@ -18,6 +20,8 @@ pub enum EngineError {
     Stats(#[from] mksigma_stats::StatsError),
     #[error(transparent)]
     Dataset(#[from] DatasetError),
+    #[error(transparent)]
+    Sav(#[from] mksigma_sav::SavError),
 }
 
 #[derive(Debug, Default)]
@@ -53,6 +57,13 @@ impl Session {
         Ok(Self { dataset: ds, output: Output::default() })
     }
 
+    /// Replaces the active dataset with a system file's. Returns the reader's warnings.
+    pub fn open_sav(&mut self, bytes: &[u8]) -> Result<Vec<String>, EngineError> {
+        let file = mksigma_sav::read(bytes)?;
+        self.dataset = file.dataset;
+        Ok(file.warnings)
+    }
+
     /// Runs a syntax program. Commands before a failing one keep their output.
     pub fn run_syntax(&mut self, src: &str) -> Result<(), EngineError> {
         for command in mksigma_syntax::parse(src)? {
@@ -66,6 +77,11 @@ impl Session {
             Command::Descriptives { variables } => {
                 let table = mksigma_stats::descriptives(&self.dataset, variables)?;
                 self.output.push(Item::Table(table));
+            }
+            Command::DisplayDictionary => {
+                for table in dictionary::tables(&self.dataset) {
+                    self.output.push(Item::Table(table));
+                }
             }
         }
         Ok(())
@@ -83,6 +99,14 @@ mod tests {
         let text = s.output.to_text();
         assert!(text.starts_with("Descriptive Statistics\n"), "{text}");
         assert!(text.contains("Valid N (listwise)  8"), "{text}");
+    }
+
+    #[test]
+    fn displays_the_dictionary() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("DISPLAY DICTIONARY.").unwrap();
+        let text = s.output.to_text();
+        assert!(text.contains("income         2  Monthly income  Scale              F8.2"), "{text}");
     }
 
     #[test]
