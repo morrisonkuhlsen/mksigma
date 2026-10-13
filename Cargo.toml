@@ -23,6 +23,8 @@ mksigma-ui-egui = { path = "crates/ui-egui" }
 thiserror = "2"
 # Text in system files can be in any legacy code page (record 7.20 or 7.3 says which).
 encoding_rs = "0.8"
+# Distribution functions (chi-square, t, F) for significance levels. MIT, pure Rust.
+statrs = { version = "0.19", default-features = false }
 
 # ui
 egui = "0.36"

@@ -12,3 +12,4 @@ workspace = true
 mksigma-core = { workspace = true }
 mksigma-output = { workspace = true }
 thiserror = { workspace = true }
+statrs = { workspace = true }

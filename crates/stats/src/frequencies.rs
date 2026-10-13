@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use mksigma_core::{Dataset, Value, VarType, Variable};
 use mksigma_output::{Cell, Item, Table};
 
-use crate::{Moments, StatsError, n_cell};
+use crate::{Moments, StatsError, n_cell, value_text};
 
 /// Row order of a frequency table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -117,11 +117,6 @@ fn count(var: &Variable, column: &[Value], weights: &[f64], order: Order) -> Cou
         Order::DescendingFrequency => valid.sort_by(|a, b| b.1.total_cmp(&a.1)),
     }
     Counts { valid, user_missing, system_missing }
-}
-
-/// A value's label, else the value in the variable's format.
-fn value_text(var: &Variable, v: &Value) -> String {
-    var.value_label(v).map_or_else(|| var.format.render(v), str::to_string)
 }
 
 fn percent(part: f64, whole: f64) -> Cell {

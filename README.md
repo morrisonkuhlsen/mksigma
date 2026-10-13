@@ -16,7 +16,8 @@ Runs natively on macOS, Windows, Linux and BSD, and later on the web via WebAsse
 
 > Early days. Today it reads and writes `.sav` files, edits data and the dictionary (every edit
 > recorded as syntax, with undo), transforms data with `COMPUTE`, `IF`, `RECODE` and `SELECT IF`,
-> and runs `DESCRIPTIVES`, `FREQUENCIES` and `DISPLAY DICTIONARY`;
+> and runs `DESCRIPTIVES`, `FREQUENCIES`, `CROSSTABS` (χ², Fisher), `T-TEST`, `ONEWAY` and
+> `DISPLAY DICTIONARY`, with results checked against scipy;
 > see [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Quick start

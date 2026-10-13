@@ -54,7 +54,15 @@ pub struct Session {
 
 /// Whether a command changes the data (and so is an applied step) rather than analysing it.
 fn changes_data(command: &Command) -> bool {
-    !matches!(command, Command::Descriptives { .. } | Command::Frequencies { .. } | Command::DisplayDictionary)
+    !matches!(
+        command,
+        Command::Descriptives { .. }
+            | Command::Frequencies { .. }
+            | Command::DisplayDictionary
+            | Command::Crosstabs { .. }
+            | Command::TTest { .. }
+            | Command::Oneway { .. }
+    )
 }
 
 impl Session {
@@ -360,6 +368,50 @@ impl Session {
                     self.output.push(Item::Table(table));
                 }
             }
+            Command::Crosstabs { rows, columns, cells, chisq } => {
+                let options = mksigma_stats::CrosstabsOptions {
+                    rows: rows.clone(),
+                    columns: columns.clone(),
+                    cells: mksigma_stats::CrosstabsCells {
+                        count: cells.count,
+                        expected: cells.expected,
+                        row: cells.row,
+                        column: cells.column,
+                        total: cells.total,
+                    },
+                    chisq: *chisq,
+                };
+                self.output.items.extend(mksigma_stats::crosstabs(&self.dataset, &options)?);
+            }
+            Command::TTest { test, ci } => {
+                use mksigma_syntax::{Literal, TTestSpec};
+                let value = |l: &Literal| match l {
+                    Literal::Num(x) => Value::Num(*x),
+                    Literal::Str(s) => Value::Str(s.clone()),
+                };
+                let test = match test {
+                    TTestSpec::OneSample { variables, test_value } => {
+                        mksigma_stats::TTest::OneSample { variables: variables.clone(), test_value: *test_value }
+                    }
+                    TTestSpec::Independent { variables, group, first, second } => mksigma_stats::TTest::Independent {
+                        variables: variables.clone(),
+                        group: group.clone(),
+                        first: value(first),
+                        second: value(second),
+                    },
+                    TTestSpec::Paired { pairs } => mksigma_stats::TTest::Paired { pairs: pairs.clone() },
+                };
+                self.output.items.extend(mksigma_stats::t_test(&self.dataset, &test, *ci)?);
+            }
+            Command::Oneway { dependents, factor, descriptives, homogeneity } => {
+                let options = mksigma_stats::OnewayOptions {
+                    dependents: dependents.clone(),
+                    factor: factor.clone(),
+                    descriptives: *descriptives,
+                    homogeneity: *homogeneity,
+                };
+                self.output.items.extend(mksigma_stats::oneway(&self.dataset, &options)?);
+            }
         }
         Ok(Vec::new())
     }
@@ -650,6 +702,25 @@ mod tests {
         assert!(s.move_step(0, true).is_err());
         assert!(s.move_step(2, false).is_err());
         assert!(s.remove_step(9).is_err());
+    }
+
+    #[test]
+    fn analyses_run_and_are_not_steps() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax(
+            "RECODE age (LO THRU 30 = 1) (ELSE = 2) INTO grupo.\n\
+             CROSSTABS grupo BY grupo /STATISTICS=CHISQ.\n\
+             T-TEST GROUPS=grupo(1 2) /VARIABLES=income.\n\
+             T-TEST /TESTVAL=70 /VARIABLES=score.\n\
+             T-TEST PAIRS=age WITH score (PAIRED).\n\
+             ONEWAY income BY grupo /STATISTICS=DESCRIPTIVES HOMOGENEITY.",
+        )
+        .unwrap();
+        assert_eq!(s.steps().len(), 1, "only the RECODE changed the data");
+        let text = s.output.to_text();
+        for title in ["Crosstabulation", "Chi-Square Tests", "Independent Samples Test", "One-Sample Test", "Paired Samples Test", "ANOVA"] {
+            assert!(text.contains(title), "{title} missing from:\n{text}");
+        }
     }
 
     #[test]

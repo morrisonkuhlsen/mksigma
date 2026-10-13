@@ -7,11 +7,13 @@ use thiserror::Error;
 mod dictionary;
 mod expr;
 mod lexer;
+mod procedures;
 mod transform;
 
 pub use dictionary::{Level, Literal, MissingSpec, NewVariables, ValueLabelList};
 pub use expr::{BinOp, Expr};
 use lexer::Token;
+pub use procedures::{CrosstabCells, TTestSpec};
 pub use transform::{RecodeFrom, RecodeGroup, RecodeSpec, RecodeTo};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,6 +51,12 @@ pub enum Command {
     Recode(Vec<RecodeGroup>),
     /// `SELECT IF condition`: keeps the cases where it is true.
     SelectIf(Expr),
+    /// `CROSSTABS [/TABLES=] rows BY columns [/STATISTICS=CHISQ] [/CELLS=...]`
+    Crosstabs { rows: Vec<String>, columns: Vec<String>, cells: CrosstabCells, chisq: bool },
+    /// `T-TEST` one-sample, independent-samples or paired; `ci` is the confidence level.
+    TTest { test: TTestSpec, ci: f64 },
+    /// `ONEWAY dependents BY factor [/STATISTICS=DESCRIPTIVES HOMOGENEITY]`
+    Oneway { dependents: Vec<String>, factor: String, descriptives: bool, homogeneity: bool },
 }
 
 /// Row order of a frequency table (`/FORMAT`).
@@ -182,6 +190,19 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
         return result;
     }
     let rest = &merge_signs(rest)[..];
+    // `T-TEST` reaches here as `T`, `-`, `TEST`.
+    if name.eq_ignore_ascii_case("T")
+        && let [Token::Minus, Token::Word(test), rest @ ..] = rest
+        && test.eq_ignore_ascii_case("TEST")
+    {
+        return procedures::t_test(rest);
+    }
+    if is_keyword(name, "CROSSTABS") {
+        return procedures::crosstabs(rest);
+    }
+    if is_keyword(name, "ONEWAY") {
+        return procedures::oneway(rest);
+    }
     if is_keyword(name, "DISPLAY") {
         return match rest {
             [] => Ok(Command::DisplayDictionary),

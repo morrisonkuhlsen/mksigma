@@ -3,11 +3,20 @@
 //! independently computed reference values (see `docs/architecture.md`, "Numerical parity").
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use mksigma_core::{Dataset, Value};
+use mksigma_core::{Dataset, Value, Variable};
 use mksigma_output::{Cell, Table};
 use thiserror::Error;
 
+mod crosstabs;
+mod dist;
 mod frequencies;
+mod groups;
+mod oneway;
+mod ttest;
+
+pub use crosstabs::{Cells as CrosstabsCells, Options as CrosstabsOptions, crosstabs};
+pub use oneway::{Options as OnewayOptions, oneway};
+pub use ttest::{TTest, t_test};
 
 pub use frequencies::{Options as FrequenciesOptions, Order as FrequenciesOrder, Statistic as FrequenciesStatistic, frequencies};
 
@@ -52,6 +61,16 @@ impl Moments {
     fn std_dev(&self) -> Option<f64> {
         (self.w > 1.0).then(|| (self.m2 / (self.w - 1.0)).sqrt())
     }
+}
+
+/// A value's label, else the value in the variable's format.
+pub(crate) fn value_text(var: &Variable, v: &Value) -> String {
+    var.value_label(v).map_or_else(|| var.format.render(v), str::to_string)
+}
+
+/// A statistic shown with `decimals` places, or empty when it can't be computed.
+pub(crate) fn num(value: Option<f64>, decimals: u8) -> Cell {
+    value.filter(|v| v.is_finite()).map_or(Cell::Empty, |value| Cell::Num { value, decimals })
 }
 
 /// N is the sum of weights, shown rounded to a whole number as SPSS shows it.

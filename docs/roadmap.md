@@ -62,7 +62,13 @@ tables with labels and missing sections, `/FORMAT` order and `NOTABLE`, `/STATIS
 SE mean, mode, std. deviation, variance, range, minimum, maximum, sum). To do in `FREQUENCIES`:
 median, percentiles, skewness, kurtosis, charts, `TO` and `ALL` in variable lists.
 
-Next: `CROSSTABS` (χ², Fisher), `T-TEST` (one-sample, independent, paired),
+Done: `CROSSTABS` (counts, expected, row/column/total percentages; Pearson, continuity
+correction, likelihood ratio, Fisher's exact for 2×2, linear-by-linear; expected-count note),
+`T-TEST` (one-sample, independent with Levene and pooled/Welch, paired with correlation;
+confidence level), `ONEWAY` (ANOVA, descriptives, Levene). All checked against scipy.
+
+Next: `CORRELATIONS`, `REGRESSION` (linear), `LOGISTIC REGRESSION`, post hoc tests for `ONEWAY`,
+`NPAR TESTS`. Earlier list, for reference: `CROSSTABS` (χ², Fisher), `T-TEST` (one-sample, independent, paired),
 `ONEWAY`, `CORRELATIONS`, `REGRESSION` (linear), `LOGISTIC REGRESSION`.
 
 ## M3 — Output Viewer
