@@ -103,6 +103,7 @@ fn file_open_uses_the_dialog_and_loads_the_file() {
             count.set(count.get() + 1);
             Some(picked.clone())
         })),
+        ..Services::default()
     };
     let mut h = harness(SigmaApp::new(services));
     h.get_by_label("File").click();
@@ -242,4 +243,78 @@ fn history_pastes_into_the_syntax_editor() {
     h.get_by_label("Paste into syntax").click();
     h.run_steps(3);
     assert_eq!(h.state().syntax, "DESCRIPTIVES age.\nDESCRIPTIVES age.");
+}
+
+fn temp_path(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("mksigma-{}-{name}", std::process::id()))
+}
+
+#[test]
+fn save_as_writes_a_file_that_reopens_the_same() {
+    let path = temp_path("save-as.sav");
+    let picked = path.clone();
+    let suggested = Rc::new(std::cell::RefCell::new(String::new()));
+    let seen = suggested.clone();
+    let services = Services {
+        pick_save: Some(Box::new(move |s: &str| {
+            *seen.borrow_mut() = s.to_string();
+            Some(picked.clone())
+        })),
+        now: Some(Box::new(|| 951_782_400)),
+        ..Services::default()
+    };
+    let mut h = harness(SigmaApp::new(services));
+    h.state_mut().run_edit("VARIABLE LABELS age 'Idade'.");
+    h.run_steps(2);
+    assert!(h.state().session.modified);
+    h.get_by_label("File").click();
+    h.run_steps(3);
+    h.get_by_label("Save").click();
+    h.run_steps(3);
+
+    let app = h.state();
+    assert_eq!(*suggested.borrow(), "Untitled.sav", "the sample has no file yet, so Save asks where");
+    assert!(!app.session.modified);
+    assert_eq!(app.file_path.as_deref(), Some(path.as_path()));
+    assert!(matches!(&app.status, Some(Status::Info(s)) if s.starts_with("Saved ")), "{:?}", app.status);
+    let bytes = std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    let mut reopened = SigmaApp::default();
+    assert!(reopened.open_bytes("again.sav", &bytes));
+    assert_eq!(reopened.session.dataset.variables(), app.session.dataset.variables());
+    assert_eq!(reopened.session.dataset.column(1), app.session.dataset.column(1));
+}
+
+#[test]
+fn save_goes_back_to_the_opened_file_without_asking() {
+    let path = temp_path("opened.sav");
+    std::fs::write(&path, tiny_sav()).unwrap();
+    let asked = Rc::new(Cell::new(0));
+    let count = asked.clone();
+    let services = Services {
+        pick_save: Some(Box::new(move |_: &str| {
+            count.set(count.get() + 1);
+            None
+        })),
+        ..Services::default()
+    };
+    let mut app = SigmaApp::new(services);
+    app.open_path(&path);
+    app.run_edit("VARIABLE LABELS SCORE 'Nota'.");
+    app.save();
+    assert_eq!(asked.get(), 0);
+    let mut again = SigmaApp::default();
+    again.open_path(&path);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(again.session.dataset.variables()[0].label.as_deref(), Some("Nota"));
+}
+
+#[test]
+fn a_failed_save_keeps_the_changes_marked_unsaved() {
+    let mut app = SigmaApp::default();
+    app.run_edit("VARIABLE LABELS age 'Idade'.");
+    app.save_to(std::path::Path::new("/nonexistent-dir/x.sav"));
+    assert!(matches!(&app.status, Some(Status::Error(_))));
+    assert!(app.session.modified);
+    assert_eq!(app.file_path, None);
 }

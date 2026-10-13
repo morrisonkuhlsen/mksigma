@@ -17,7 +17,12 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   variable and value labels, user-missing values, print formats, long names, measurement
   levels, documents, weight, character encoding; `DISPLAY DICTIONARY`. To do: `.zsav` (zlib)
   data, very long strings (> 255 bytes) as one variable, long-string value labels and missing
-  values (records 7.21/7.22), variable attributes, multiple-response sets. Then the writer.
+  values (record 7.22), variable attributes, multiple-response sets.
+- `.sav` writer — **done**: little-endian UTF-8, bytecode-compressed or uncompressed; unique
+  short names plus long names (7.13), labels, user-missing values (LO/HI ranges), value labels
+  including strings over 8 bytes (7.21, read too), measurement levels (7.11), documents,
+  weight, file label. Checked by round trip and by reading our files with ReadStat
+  (pyreadstat). To do: `.zsav`, strings over 255 bytes, long-string missing values.
 - CSV and `.xlsx` import (`GET DATA`)
 - **Recorded data preparation** (Power Query style): every transformation is a syntax command
   shown as a list of applied steps that can be edited, reordered and replayed: `COMPUTE`,
@@ -29,8 +34,10 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   measurement level, format) turns every edit into syntax (`RENAME VARIABLES`, `VARIABLE LABELS`,
   `VALUE LABELS`, `MISSING VALUES`, `VARIABLE LEVEL`, `FORMATS`), which runs through the engine
   and lands in the session **History** (pastable into the syntax editor): the first recorded
-  steps. Data View edits cells in place. Commands are all-or-nothing. Next: undo, adding
-  variables and cases, saving (the `.sav` writer).
+  steps. Data View edits cells in place. Commands are all-or-nothing.
+- Saving — **done**: File ▸ Save (Ctrl+S) and Save As… (Ctrl+Shift+S), written to a temporary
+  file and renamed over the target; `•` in the title while there are unsaved changes;
+  `mksigma-cli run --out`. Next: undo, adding variables and cases.
 
 ## M2 — the introductory-course core
 Done: case weights (`WEIGHT BY` from the file), `DESCRIPTIVES` weighted, `FREQUENCIES` (frequency

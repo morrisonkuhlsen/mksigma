@@ -12,6 +12,7 @@ mod edit;
 
 pub use mksigma_core as core;
 pub use mksigma_output as output;
+pub use mksigma_sav::timestamp;
 pub use mksigma_syntax::quote;
 
 #[derive(Debug, Error, PartialEq)]
@@ -36,6 +37,8 @@ pub struct Session {
     pub output: Output,
     /// Every command that ran successfully, as written: the session's reproducible history.
     pub journal: Vec<String>,
+    /// Whether the data or dictionary changed since the file was opened or saved.
+    pub modified: bool,
 }
 
 impl Session {
@@ -69,7 +72,17 @@ impl Session {
     pub fn open_sav(&mut self, bytes: &[u8]) -> Result<Vec<String>, EngineError> {
         let file = mksigma_sav::read(bytes)?;
         self.dataset = file.dataset;
+        self.modified = false;
         Ok(file.warnings)
+    }
+
+    /// The active dataset as a bytecode-compressed system file, and anything that couldn't be
+    /// written. `created` is the header's date and time (`mksigma_sav::timestamp`).
+    pub fn save_sav(&mut self, created: (String, String)) -> Result<(Vec<u8>, Vec<String>), EngineError> {
+        let options = mksigma_sav::WriteOptions { compression: mksigma_sav::Compression::Bytecode, created };
+        let written = mksigma_sav::write(&self.dataset, &options)?;
+        self.modified = false;
+        Ok(written)
     }
 
     /// Runs a syntax program. Commands before a failing one keep their effect and output, and
@@ -84,7 +97,9 @@ impl Session {
 
     /// Edits one cell from typed text (Data View). Not a syntax command, so not journaled.
     pub fn set_cell(&mut self, case: usize, variable: usize, input: &str) -> Result<(), EngineError> {
-        edit::set_cell(&mut self.dataset, case, variable, input)
+        edit::set_cell(&mut self.dataset, case, variable, input)?;
+        self.modified = true;
+        Ok(())
     }
 
     pub fn execute(&mut self, command: &Command) -> Result<(), EngineError> {
@@ -94,7 +109,10 @@ impl Session {
             | Command::MissingValues(_)
             | Command::VariableLevel(_)
             | Command::Formats(_)
-            | Command::RenameVariables(_) => edit::apply(&mut self.dataset, command)?,
+            | Command::RenameVariables(_) => {
+                edit::apply(&mut self.dataset, command)?;
+                self.modified = true;
+            }
             Command::Descriptives { variables } => {
                 let table = mksigma_stats::descriptives(&self.dataset, variables)?;
                 self.output.push(Item::Table(table));
@@ -200,6 +218,21 @@ mod tests {
         assert!(s.run_syntax("VALUE LABELS age 'a' 'b'.").is_err(), "numeric values must be numbers");
         assert!(s.run_syntax("FORMATS age (A8).").is_err());
         assert!(s.run_syntax("MISSING VALUES age (5 THRU 1).").is_err());
+    }
+
+    #[test]
+    fn save_and_reopen() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("VALUE LABELS age 23 'Youngest'.").unwrap();
+        assert!(s.modified);
+        let (bytes, warnings) = s.save_sav(mksigma_sav::timestamp(0)).unwrap();
+        assert!(warnings.is_empty() && !s.modified);
+        let mut t = Session::new();
+        t.open_sav(&bytes).unwrap();
+        assert_eq!(t.dataset.variables(), s.dataset.variables());
+        assert_eq!(t.dataset.column(1), s.dataset.column(1));
+        s.run_syntax("DESCRIPTIVES age.").unwrap();
+        assert!(!s.modified, "analysis doesn't modify the data");
     }
 
     #[test]

@@ -107,6 +107,32 @@ fn encoding(name: Option<&[u8]>, code_page: Option<i32>, warnings: &mut Vec<Stri
     }
 }
 
+/// Labels for one long string variable from record 7.21: the variable's name and its
+/// `(value, label)` pairs, raw.
+type LongLabels<'a> = (String, Vec<(&'a [u8], &'a [u8])>);
+
+/// Record 7.21, value labels of strings over 8 bytes. Per variable: name length and name,
+/// width, label count; per label: value length and value, label length and label.
+fn long_string_value_labels<'a>(body: &'a [u8], big_endian: bool, text: &dyn Fn(&[u8]) -> String) -> Result<Vec<LongLabels<'a>>, SavError> {
+    let mut b = Cursor::new(body, big_endian);
+    let mut out = Vec::new();
+    while b.remaining() > 0 {
+        let len = b.count("long string label variable name")?;
+        let name = text(b.take(len)?);
+        let _width = b.count("long string label width")?;
+        let n = b.count("long string label count")?;
+        let mut labels = Vec::with_capacity(n.min(b.remaining() / 8));
+        for _ in 0..n {
+            let len = b.count("long string label value")?;
+            let value = b.take(len)?;
+            let len = b.count("long string label")?;
+            labels.push((value, b.take(len)?));
+        }
+        out.push((name, labels));
+    }
+    Ok(out)
+}
+
 pub(crate) fn decode(encoding: &'static Encoding, bytes: &[u8]) -> String {
     let (text, _) = encoding.decode_without_bom_handling(bytes);
     text.trim_end_matches([' ', '\0']).to_string()
@@ -150,6 +176,7 @@ pub(crate) fn read(bytes: &[u8], flavour: Flavour) -> Result<Dictionary, SavErro
     let mut measures: Option<Vec<i32>> = None;
     let mut long_names: Option<&[u8]> = None;
     let mut encoding_name: Option<&[u8]> = None;
+    let mut long_string_labels: Vec<&[u8]> = Vec::new();
 
     loop {
         let record_offset = c.pos();
@@ -261,7 +288,8 @@ pub(crate) fn read(bytes: &[u8], flavour: Flavour) -> Result<Dictionary, SavErro
                     13 => long_names = Some(body),
                     14 => warnings.push("very long string variables (over 255 bytes) are read as their 255-byte parts".into()),
                     20 => encoding_name = Some(body),
-                    21 | 22 => warnings.push("value labels and missing values of long string variables are not read yet".into()),
+                    21 => long_string_labels.push(body),
+                    22 => warnings.push("missing values of long string variables are not read yet".into()),
                     _ => {}
                 }
             }
@@ -286,6 +314,11 @@ pub(crate) fn read(bytes: &[u8], flavour: Flavour) -> Result<Dictionary, SavErro
             text(b).split('\t').filter_map(|pair| pair.split_once('=')).map(|(s, l)| (s.to_string(), l.trim_end_matches('\0').to_string())).collect()
         })
         .unwrap_or_default();
+
+    let mut long_labels = Vec::new();
+    for body in long_string_labels {
+        long_labels.extend(long_string_value_labels(body, c.big_endian, &text)?);
+    }
 
     let mut dataset = Dataset::new();
     let mut layout = Vec::with_capacity(vars.len());
@@ -314,6 +347,11 @@ pub(crate) fn read(bytes: &[u8], flavour: Flavour) -> Result<Dictionary, SavErro
         for set in label_sets.iter().filter(|s| s.segments.contains(&(raw.segment + 1))) {
             for (v, label) in &set.labels {
                 var.value_labels.push((value(*v), text(label)));
+            }
+        }
+        for (owner, labels) in &long_labels {
+            if owner.eq_ignore_ascii_case(&var.name) || owner.eq_ignore_ascii_case(&text(raw.name)) {
+                var.value_labels.extend(labels.iter().map(|(v, l)| (Value::Str(text(v)), text(l))));
             }
         }
         layout.push((raw.width, raw.width.div_ceil(8).max(1)));

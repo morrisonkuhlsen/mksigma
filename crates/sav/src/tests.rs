@@ -255,3 +255,106 @@ fn an_incomplete_last_case_is_dropped_with_a_warning() {
     assert_eq!(f.dataset.n_cases(), 2);
     assert_eq!(f.warnings.len(), 2, "{:?}", f.warnings);
 }
+
+mod round_trip {
+    use mksigma_core::{Dataset, Format, FormatKind, Measure, MissingValues, Value, Variable};
+
+    use crate::{Compression, WriteOptions, read, timestamp, write};
+
+    /// Every dictionary feature the writer handles, and values that take each compression path.
+    fn dataset() -> Dataset {
+        let mut ds = Dataset::new();
+        let mut q = Variable::numeric("satisfacao_geral_2026").with_label("Satisfação geral — 2026");
+        q.format = Format::new(FormatKind::F, 3, 0);
+        q.measure = Measure::Ordinal;
+        q.missing = MissingValues::Range { low: f64::MIN, high: 0.0, discrete: Some(999.0) };
+        q.value_labels = vec![(Value::Num(1.0), "Muito insatisfeito".into()), (Value::Num(5.0), "Muito satisfeito".into())];
+        ds.add_variable(q).unwrap();
+        // Same first 8 letters: needs a different short name.
+        let mut q2 = Variable::numeric("satisfacao_geral_2025");
+        q2.format = Format::new(FormatKind::Comma, 10, 2);
+        ds.add_variable(q2).unwrap();
+        let mut city = Variable::string("cidade", 10);
+        city.label = Some("Cidade".into());
+        // Over 8 bytes: these go in record 7.21.
+        city.value_labels =
+            vec![(Value::Str("São Paulo".into()), "Capital paulista".into()), (Value::Str("Brasília".into()), "Capital federal".into())];
+        ds.add_variable(city).unwrap();
+        let mut uf = Variable::string("uf", 2);
+        uf.missing = MissingValues::Discrete(vec![Value::Str("XX".into())]);
+        uf.value_labels = vec![(Value::Str("SP".into()), "São Paulo".into())];
+        ds.add_variable(uf).unwrap();
+        let mut born = Variable::numeric("nascimento");
+        born.format = Format::new(FormatKind::Date, 11, 0);
+        ds.add_variable(born).unwrap();
+        let mut w = Variable::numeric("peso");
+        w.missing = MissingValues::Discrete(vec![Value::Num(-1.0), Value::Num(-2.0)]);
+        ds.add_variable(w).unwrap();
+        let cases = [
+            (Value::Num(3.0), Value::Num(1234.5), "São Paulo", "SP", Value::Num(1.3e10), Value::Num(1.0)),
+            (Value::Num(-99.0), Value::Num(151.0), "", "XX", Value::SysMis, Value::Num(2.5)),
+            (Value::SysMis, Value::Num(152.0), "exatamente", "RJ", Value::Num(-1e300), Value::Num(-1.0)),
+            (Value::Num(0.5), Value::Num(-100.0), "Brasília", "DF", Value::Num(0.0), Value::Num(1e-9)),
+        ];
+        for (q, q2, city, uf, born, w) in cases {
+            ds.push_case(vec![q, q2, Value::Str(city.into()), Value::Str(uf.into()), born, w]).unwrap();
+        }
+        ds.label = Some("Pesquisa de satisfação".into());
+        ds.documents = vec!["Coletado em outubro.".into(), "Segunda linha.".into()];
+        ds.weight = Some(5);
+        ds
+    }
+
+    #[test]
+    fn write_then_read_gives_the_same_dataset() {
+        let original = dataset();
+        for compression in [Compression::Bytecode, Compression::None] {
+            let options = WriteOptions { compression, created: timestamp(951_782_400) };
+            let (bytes, warnings) = write(&original, &options).unwrap();
+            assert!(warnings.is_empty(), "{warnings:?}");
+            let f = read(&bytes).unwrap();
+            assert!(f.warnings.is_empty(), "{:?}", f.warnings);
+            assert_eq!(f.compression, compression);
+            assert_eq!(f.created, "29 Feb 00 00:00:00");
+            let ds = &f.dataset;
+            assert_eq!(ds.label, original.label);
+            assert_eq!(ds.documents, original.documents);
+            assert_eq!(ds.weight, Some(5));
+            assert_eq!(ds.n_cases(), original.n_cases());
+            for (i, (a, b)) in ds.variables().iter().zip(original.variables()).enumerate() {
+                let mut expected = b.clone();
+                // LO is written as the smallest number above system-missing.
+                if let MissingValues::Range { low, .. } = &mut expected.missing
+                    && *low <= -1e300
+                {
+                    *low = f64::from_bits(0xffef_ffff_ffff_fffe);
+                }
+                assert_eq!(*a, expected, "variable {i}");
+                assert_eq!(ds.column(i), original.column(i), "values of {}", b.name);
+            }
+        }
+    }
+
+    #[test]
+    fn short_names_are_unique() {
+        let (bytes, _) = write(&dataset(), &WriteOptions::default()).unwrap();
+        // The first variable record's name field starts 176 + 24 bytes in.
+        assert_eq!(&bytes[200..208], b"SATISFAC");
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("SATISFAC=satisfacao_geral_2026\tSATISF_1=satisfacao_geral_2025"), "long names record");
+    }
+
+    #[test]
+    fn timestamps() {
+        assert_eq!(timestamp(0), ("01 Jan 70".into(), "00:00:00".into()));
+        assert_eq!(timestamp(951_782_400 + 3_723), ("29 Feb 00".into(), "01:02:03".into()));
+        assert_eq!(timestamp(1_760_284_800), ("12 Oct 25".into(), "16:00:00".into()));
+    }
+
+    #[test]
+    fn strings_over_255_bytes_are_refused() {
+        let mut ds = Dataset::new();
+        ds.add_variable(Variable::string("long", 300)).unwrap();
+        assert!(write(&ds, &WriteOptions::default()).is_err());
+    }
+}

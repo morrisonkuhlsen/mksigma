@@ -18,11 +18,20 @@ pub use views::ValueLabelsDialog;
 use edit::{Commit, syntax_for, value_labels_syntax};
 use views::DialogOutcome;
 
+/// A file dialog: shows it (with a suggested name, for saving) and returns the chosen path, or
+/// `None` when cancelled.
+pub type PickOpen = Box<dyn Fn() -> Option<PathBuf>>;
+pub type PickSave = Box<dyn Fn(&str) -> Option<PathBuf>>;
+
 /// What the app provides from the platform.
 #[derive(Default)]
 pub struct Services {
     /// Shows an open-file dialog; `None` when cancelled.
-    pub pick_open: Option<Box<dyn Fn() -> Option<PathBuf>>>,
+    pub pick_open: Option<PickOpen>,
+    /// Shows a save-file dialog suggesting a file name; `None` when cancelled.
+    pub pick_save: Option<PickSave>,
+    /// Seconds since 1970, for the saved file's creation time.
+    pub now: Option<Box<dyn Fn() -> i64>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,11 +56,13 @@ pub struct SigmaApp {
     pub status: Option<Status>,
     /// Name of the open file, shown in the window title.
     pub file_name: Option<String>,
+    /// Where Save writes: the file opened or last saved, if it came from disk.
+    pub file_path: Option<PathBuf>,
     /// The cell being edited, if any.
     pub editing: Option<Editing>,
     pub value_labels_dialog: Option<ValueLabelsDialog>,
     services: Services,
-    title_dirty: bool,
+    title: String,
 }
 
 impl Default for SigmaApp {
@@ -75,10 +86,11 @@ impl SigmaApp {
             syntax: "FREQUENCIES VARIABLES=age /FORMAT=NOTABLE /STATISTICS.\nDESCRIPTIVES VARIABLES=age income score.".to_string(),
             status,
             file_name: None,
+            file_path: None,
             editing: None,
             value_labels_dialog: None,
             services,
-            title_dirty: true,
+            title: String::new(),
         }
     }
 
@@ -87,14 +99,63 @@ impl SigmaApp {
         match std::fs::read(path) {
             Ok(bytes) => {
                 let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
-                self.open_bytes(&name, &bytes);
+                if self.open_bytes(&name, &bytes) {
+                    self.file_path = Some(path.to_path_buf());
+                }
             }
             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
         }
     }
 
+    /// Saves to the current file, or asks where when there is none.
+    pub fn save(&mut self) {
+        match self.file_path.clone() {
+            Some(path) => self.save_to(&path),
+            None => self.save_as(),
+        }
+    }
+
+    pub fn save_as(&mut self) {
+        let suggested = self.file_name.clone().unwrap_or_else(|| "Untitled.sav".to_string());
+        if let Some(path) = self.services.pick_save.as_ref().and_then(|pick| pick(&suggested)) {
+            self.save_to(&path);
+        }
+    }
+
+    /// Writes next to the target and renames over it, so a failed save never leaves a half-written
+    /// file in place of the old one.
+    pub fn save_to(&mut self, path: &Path) {
+        let now = self.services.now.as_ref().map_or(0, |now| now());
+        let (bytes, warnings) = match self.session.save_sav(mksigma_engine::timestamp(now)) {
+            Ok(written) => written,
+            Err(e) => {
+                self.status = Some(Status::Error(e.to_string()));
+                return;
+            }
+        };
+        let temporary = path.with_extension("sav.saving");
+        let written = std::fs::write(&temporary, &bytes).and_then(|()| std::fs::rename(&temporary, path));
+        let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+        match written {
+            Ok(()) => {
+                let summary = format!("Saved {name}");
+                self.status =
+                    Some(if warnings.is_empty() { Status::Info(summary) } else { Status::Warning(format!("{summary}. {}", warnings.join("; "))) });
+                self.file_name = Some(name);
+                self.file_path = Some(path.to_path_buf());
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&temporary);
+                // The data wasn't written, so it still has unsaved changes.
+                self.session.modified = true;
+                self.status = Some(Status::Error(format!("{name}: {e}")));
+            }
+        }
+    }
+
     /// Opens a system file's bytes (a path read, or a file dropped where there is no path).
-    pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) {
+    /// Returns whether it opened; on failure the open dataset stays.
+    pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) -> bool {
         match self.session.open_sav(bytes) {
             Ok(warnings) => {
                 let ds = &self.session.dataset;
@@ -102,11 +163,15 @@ impl SigmaApp {
                 self.status =
                     Some(if warnings.is_empty() { Status::Info(summary) } else { Status::Warning(format!("{summary}. {}", warnings.join("; "))) });
                 self.file_name = Some(name.to_string());
-                self.title_dirty = true;
+                self.file_path = None;
                 self.editing = None;
                 self.value_labels_dialog = None;
+                true
             }
-            Err(e) => self.status = Some(Status::Error(format!("{name}: {e}"))),
+            Err(e) => {
+                self.status = Some(Status::Error(format!("{name}: {e}")));
+                false
+            }
         }
     }
 
@@ -149,10 +214,10 @@ impl SigmaApp {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.handle_input(ui.ctx());
-        if self.title_dirty {
-            let title = self.file_name.as_ref().map_or_else(|| "MK Sigma".to_string(), |f| format!("{f} — MK Sigma"));
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title));
-            self.title_dirty = false;
+        let title = format!("{}{} — MK Sigma", if self.session.modified { "• " } else { "" }, self.file_name.as_deref().unwrap_or("Untitled"));
+        if title != self.title {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title = title;
         }
 
         ui.horizontal(|ui| {
@@ -160,6 +225,14 @@ impl SigmaApp {
                 if ui.button("Open…").clicked() {
                     ui.close();
                     self.open_dialog();
+                }
+                if ui.button("Save").clicked() {
+                    ui.close();
+                    self.save();
+                }
+                if ui.button("Save As…").clicked() {
+                    ui.close();
+                    self.save_as();
                 }
             });
             ui.separator();
@@ -197,8 +270,14 @@ impl SigmaApp {
     }
 
     fn handle_input(&mut self, ctx: &egui::Context) {
-        let open = ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O)));
-        if open {
+        let shortcut = |modifiers, key| ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(modifiers, key)));
+        // The longer shortcut first, so Ctrl+Shift+S isn't taken as Ctrl+S.
+        if shortcut(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::S) {
+            self.save_as();
+        } else if shortcut(egui::Modifiers::COMMAND, egui::Key::S) {
+            self.save();
+        }
+        if shortcut(egui::Modifiers::COMMAND, egui::Key::O) {
             self.open_dialog();
         }
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
@@ -206,7 +285,9 @@ impl SigmaApp {
             let path = file.path();
             let name = path.file_name().map_or_else(|| "dropped file".to_string(), |n| n.to_string_lossy().into_owned());
             match file.bytes() {
-                Ok(bytes) => self.open_bytes(&name, &bytes),
+                Ok(bytes) => {
+                    self.open_bytes(&name, &bytes);
+                }
                 Err(e) => self.status = Some(Status::Error(format!("{name}: {e}"))),
             }
         }

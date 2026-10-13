@@ -4,8 +4,9 @@
 //! A system file is a 176-byte header, a dictionary (variable, value-label, document and
 //! extension records, ended by record 999) and the cases, either raw or bytecode-compressed.
 //! Reading supports both byte orders, user-missing values, value labels, long variable names,
-//! measurement levels and the character encoding. Not yet: `.zsav` (zlib) data, very long
-//! strings (over 255 bytes) as one variable, long-string value labels and missing values.
+//! measurement levels and the character encoding. Writing produces little-endian UTF-8 files,
+//! uncompressed or bytecode-compressed. Not yet: `.zsav` (zlib) data, very long strings (over
+//! 255 bytes) as one variable, long-string value labels and missing values.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod cursor;
@@ -13,6 +14,9 @@ mod data;
 mod dictionary;
 #[cfg(test)]
 mod tests;
+mod writer;
+
+pub use writer::{WriteOptions, timestamp, write};
 
 use mksigma_core::{Dataset, DatasetError};
 use thiserror::Error;

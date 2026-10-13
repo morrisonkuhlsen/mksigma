@@ -13,11 +13,21 @@ impl eframe::App for App {
     }
 }
 
+/// Seconds since 1970, for saved files' creation time.
+#[allow(clippy::disallowed_methods)] // the desktop app is native only
+fn now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
+}
+
 fn main() -> eframe::Result {
     let services = Services {
         pick_open: Some(Box::new(|| {
             rfd::FileDialog::new().add_filter("SPSS Statistics data (.sav, .zsav)", &["sav", "zsav"]).add_filter("All files", &["*"]).pick_file()
         })),
+        pick_save: Some(Box::new(|suggested: &str| {
+            rfd::FileDialog::new().add_filter("SPSS Statistics data (.sav)", &["sav"]).set_file_name(suggested).save_file()
+        })),
+        now: Some(Box::new(now)),
     };
     let mut app = SigmaApp::new(services);
     if let Some(path) = std::env::args_os().nth(1) {

@@ -25,6 +25,7 @@ cargo run -p mksigma                                              # desktop app,
 cargo run -p mksigma -- data.sav                                  # or File ▸ Open, or drop a file
 cargo run -p mksigma-cli -- run 'DESCRIPTIVES VARIABLES=age income score.'   # sample data
 cargo run -p mksigma-cli -- run --in data.sav 'DISPLAY DICTIONARY.'
+cargo run -p mksigma-cli -- run --in data.sav --out fixed.sav "VARIABLE LABELS q1 'Satisfaction'." 
 cargo test
 cargo run -p mksigma-ui-egui --example snapshot -- --in data.sav out.png   # offscreen UI render
 ```
