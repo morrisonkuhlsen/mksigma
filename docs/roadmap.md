@@ -22,7 +22,9 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
 - **Recorded data preparation** (Power Query style): every transformation is a syntax command
   shown as a list of applied steps that can be edited, reordered and replayed: `COMPUTE`,
   `RECODE`, `SELECT IF`, `SORT CASES`, `AGGREGATE`, `MERGE FILES`
-- Variable View with editing
+- Desktop app: File ▸ Open (native dialog, Ctrl+O), drag and drop, opening a file given on the
+  command line, Data View (virtualized rows, value-labels toggle, missing values dimmed) and a
+  read-only Variable View — **done**. Next: editing in Variable View and Data View.
 
 ## M2 — the introductory-course core
 Done: case weights (`WEIGHT BY` from the file), `DESCRIPTIVES` weighted, `FREQUENCIES` (frequency

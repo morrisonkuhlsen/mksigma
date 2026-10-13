@@ -25,6 +25,12 @@ publishable dashboards. Scope and order: `docs/roadmap.md`.
 - **No vendor assets.** No IBM or Microsoft iconography, artwork, sample files or templates.
   Feature and command names (`DESCRIPTIVES`, `FREQUENCIES`, "Variable View") are fine.
 
+## Looking at the UI
+Render it offscreen: `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav]
+[--variables] [--labels] [--run 'SYNTAX'] out.png`. Never screenshot the desktop: it captures
+whatever else the person has open. UI behaviour is tested headless with `egui_kittest`
+(`crates/ui-egui/tests/`); platform services such as the file dialog come in through `Services`.
+
 ## Quality gates
 `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` before every
 commit.

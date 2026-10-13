@@ -20,10 +20,12 @@ Runs natively on macOS, Windows, Linux and BSD, and later on the web via WebAsse
 ## Quick start
 
 ```sh
-cargo run -p mksigma                                              # desktop app
+cargo run -p mksigma                                              # desktop app, sample data
+cargo run -p mksigma -- data.sav                                  # or File ▸ Open, or drop a file
 cargo run -p mksigma-cli -- run 'DESCRIPTIVES VARIABLES=age income score.'   # sample data
 cargo run -p mksigma-cli -- run --in data.sav 'DISPLAY DICTIONARY.'
 cargo test
+cargo run -p mksigma-ui-egui --example snapshot -- --in data.sav out.png   # offscreen UI render
 ```
 
 ## Layout

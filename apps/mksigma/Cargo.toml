@@ -13,3 +13,4 @@ workspace = true
 mksigma-ui-egui = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
+rfd = { workspace = true }

@@ -12,3 +12,6 @@ workspace = true
 mksigma-engine = { workspace = true }
 mksigma-output = { workspace = true }
 egui = { workspace = true }
+
+[dev-dependencies]
+egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
