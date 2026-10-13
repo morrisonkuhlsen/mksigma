@@ -232,17 +232,71 @@ fn editing_a_data_cell() {
     assert_eq!(h.state().session.dataset.column(1).unwrap()[1], Value::Num(4200.0));
 }
 
+fn with_steps() -> Harness<'static, SigmaApp> {
+    let mut app = SigmaApp::default();
+    app.session.run_syntax("NUMERIC bonus.\nCOMPUTE bonus = score / 10.\nSELECT IF (bonus > 7).\nDESCRIPTIVES age.").unwrap();
+    harness(app)
+}
+
 #[test]
-fn history_pastes_into_the_syntax_editor() {
-    let mut h = harness(SigmaApp::default());
-    h.state_mut().syntax = "DESCRIPTIVES age.".into();
-    h.get_by_label("▶ Run").click();
+fn the_steps_panel_lists_data_changes_only() {
+    let h = with_steps();
+    assert!(shows(&h, "Applied steps (3)"), "DESCRIPTIVES is not a step");
+    assert!(shows(&h, "SELECT IF (bonus > 7)."));
+    assert_eq!(h.state().session.dataset.n_cases(), 5);
+}
+
+#[test]
+fn switching_a_step_off_and_on_replays_the_data() {
+    let mut h = with_steps();
+    // The first checkbox is Data View's "Value labels"; the steps' follow in order.
+    let filter = || egui::accesskit::Role::CheckBox;
+    h.query_all_by_role(filter()).nth(3).unwrap().click();
     h.run_steps(3);
-    h.get_by_label("History (1)").click();
+    assert!(!h.state().session.steps()[2].enabled);
+    assert_eq!(h.state().session.dataset.n_cases(), 8);
+    h.query_all_by_role(filter()).nth(3).unwrap().click();
     h.run_steps(3);
-    h.get_by_label("Paste into syntax").click();
+    assert_eq!(h.state().session.dataset.n_cases(), 5);
+}
+
+#[test]
+fn remove_and_move_steps() {
+    let mut h = with_steps();
+    h.get_all_by_label("remove").nth(2).unwrap().click();
     h.run_steps(3);
-    assert_eq!(h.state().syntax, "DESCRIPTIVES age.\nDESCRIPTIVES age.");
+    assert_eq!(h.state().session.steps().len(), 2);
+    assert_eq!(h.state().session.dataset.n_cases(), 8);
+    // COMPUTE before NUMERIC: COMPUTE makes the variable, so NUMERIC fails and is skipped.
+    h.get_all_by_label("up").nth(1).unwrap().click();
+    h.run_steps(3);
+    let steps = h.state().session.steps();
+    assert_eq!(steps[0].label(), "COMPUTE bonus = score / 10.");
+    assert!(steps[1].error.as_deref().is_some_and(|e| e.contains("already exists")), "{:?}", steps[1].error);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(3);
+    assert_eq!(h.state().session.steps()[0].label(), "NUMERIC bonus.", "the move is undoable");
+}
+
+#[test]
+fn rewriting_a_step() {
+    let mut h = with_steps();
+    edit(&mut h, "SELECT IF (bonus > 7).", "SELECT IF (bonus > 7.5).");
+    press(&mut h, egui::Key::Enter);
+    assert_eq!(h.state().session.dataset.n_cases(), 3);
+    edit(&mut h, "SELECT IF (bonus > 7.5).", "SELECT IF (.");
+    press(&mut h, egui::Key::Enter);
+    assert!(matches!(h.state().status, Some(Status::Error(_))));
+    assert_eq!(h.state().session.steps()[2].label(), "SELECT IF (bonus > 7.5).", "a bad rewrite changes nothing");
+}
+
+#[test]
+fn steps_paste_into_the_syntax_editor() {
+    let mut h = with_steps();
+    h.state_mut().syntax.clear();
+    h.get_by_label("Paste steps into syntax").click();
+    h.run_steps(3);
+    assert_eq!(h.state().syntax, "NUMERIC bonus.\nCOMPUTE bonus = score / 10.\nSELECT IF (bonus > 7).");
 }
 
 fn temp_path(name: &str) -> std::path::PathBuf {

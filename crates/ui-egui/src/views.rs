@@ -218,7 +218,7 @@ pub(crate) fn value_labels_dialog(ctx: &egui::Context, dialog: &mut ValueLabelsD
             for (i, (value, label)) in dialog.rows.iter_mut().enumerate() {
                 ui.add(egui::TextEdit::singleline(value).desired_width(80.0).hint_text("value"));
                 ui.add(egui::TextEdit::singleline(label).desired_width(220.0).hint_text("label"));
-                if ui.small_button("✕").on_hover_text("Remove").clicked() {
+                if ui.small_button("remove").clicked() {
                     remove = Some(i);
                 }
                 ui.end_row();

@@ -17,7 +17,12 @@ pub enum Field {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Variable(usize, Field),
-    Cell { case: usize, var: usize },
+    Cell {
+        case: usize,
+        var: usize,
+    },
+    /// A command step's text in the Applied steps panel.
+    Step(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +46,9 @@ pub enum Commit {
     OpenValueLabels(usize),
     InsertCase(usize),
     DeleteCase(usize),
+    EnableStep(usize, bool),
+    MoveStep(usize, bool),
+    RemoveStep(usize),
 }
 
 /// Shows `display` (left-aligned, or right-aligned for numbers when `right`), or a text box

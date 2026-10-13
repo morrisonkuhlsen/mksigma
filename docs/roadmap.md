@@ -31,7 +31,12 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   rules and functions (`ABS SQRT EXP LN LG10 RND TRUNC MOD SUM MEAN SD VARIANCE MIN MAX` with
   `.n`, `NMISS NVALID MISSING SYSMIS VALUE RANGE ANY`, `CONCAT UPCASE LOWER LTRIM RTRIM LENGTH
   SUBSTR INDEX NUMBER STRING`). Checked against pandas. To do: `SORT CASES`, `AGGREGATE`,
-  `MERGE FILES`, `DO IF`, `COUNT`, date functions, the steps panel.
+  `MERGE FILES`, `DO IF`, `COUNT`, date functions.
+- **Applied steps panel** — **done**: every change to the data since the file was opened (data
+  commands, cell edits, inserted and deleted cases) is a step; switch one off, rewrite its
+  command, move or remove it, and the data is replayed from the file. Steps that fail on replay
+  are skipped and shown in red with the reason. Step changes are undoable. Next: steps saved
+  with the file (a `.sps` beside the `.sav`), inserting a step in the middle.
 - Desktop app: File ▸ Open (native dialog, Ctrl+O), drag and drop, opening a file given on the
   command line, Data View (virtualized rows, value-labels toggle, missing values dimmed) and a
   Variable View — **done**.

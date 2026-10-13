@@ -2,7 +2,8 @@
 //! touching the screen.
 //!
 //! `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav] [--variables] [--labels]
-//!  [--run 'SYNTAX'] [--size 1280x800] out.png`
+//!  [--run 'SYNTAX'] [--disable N]... [--size 1280x800] out.png` (`--disable` switches off applied
+//!  step N, counting from 1, after `--run`)
 
 use mksigma_ui_egui::{SigmaApp, View};
 
@@ -12,6 +13,7 @@ fn main() -> Result<(), String> {
     let mut size = (1280.0f32, 800.0f32);
     let mut out = "snapshot.png".to_string();
     let mut run = None;
+    let mut disable: Vec<usize> = Vec::new();
     let mut i = 0;
     while let Some(arg) = args.get(i) {
         match arg.as_str() {
@@ -26,6 +28,10 @@ fn main() -> Result<(), String> {
                 i += 1;
                 run = args.get(i).cloned();
             }
+            "--disable" => {
+                i += 1;
+                disable.push(args.get(i).and_then(|n| n.parse::<usize>().ok()).filter(|n| *n > 0).ok_or("--disable needs a step number")? - 1);
+            }
             "--size" => {
                 i += 1;
                 if let Some((w, h)) = args.get(i).and_then(|s| s.split_once('x')) {
@@ -39,6 +45,9 @@ fn main() -> Result<(), String> {
     if let Some(syntax) = run {
         app.syntax = syntax;
         let _ = app.session.run_syntax(&app.syntax);
+    }
+    for step in disable {
+        app.session.set_step_enabled(step, false).map_err(|e| e.to_string())?;
     }
     let mut harness = egui_kittest::Harness::builder()
         .with_size(egui::vec2(size.0, size.1))

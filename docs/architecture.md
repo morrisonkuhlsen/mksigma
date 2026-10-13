@@ -26,3 +26,18 @@ later HTML/PDF export.
 ## Engine (`engine`)
 `Session` owns the active dataset and the output, and is the single entry point for syntax,
 menus, the CLI and a future MCP server.
+
+## Applied steps and undo (`engine`)
+The session keeps the dataset as opened (`base`) and the **applied steps**: every change to the
+data since, in order — data commands as written, and Data View edits (cell, insert/delete case).
+The current dataset is always `base` with the enabled steps applied.
+
+- Normal work is incremental: a command changes the dataset directly and records the smallest
+  edits that reverse it (metadata before/after, a column, removed cases) for undo.
+- Changing the steps (switch off, rewrite, move, remove) replays them from `base`. A step that
+  fails on replay is skipped and keeps its error; replay doesn't run analyses.
+- Undo covers both: incremental entries reverse their edits and drop their step; step-list
+  entries restore the previous list and replay.
+- Invariant, tested: replaying the steps gives exactly the incrementally built dataset.
+- Cost: `base` is a second copy of the data as opened. Fine for survey-sized files; large data
+  will want a columnar, copy-on-write store (see the Arrow item in the roadmap).

@@ -234,6 +234,13 @@ impl SigmaApp {
 
     fn apply_edit(&mut self, target: Target, text: &str) {
         match target {
+            Target::Step(i) => {
+                let unchanged = self.session.steps().get(i).and_then(|s| s.syntax()).is_some_and(|s| s.trim() == text.trim());
+                if !unchanged {
+                    let result = self.session.replace_step(i, text);
+                    self.report(result);
+                }
+            }
             Target::Cell { case, var } => {
                 if let Err(e) = self.session.set_cell(case, var, text) {
                     self.status = Some(Status::Error(e.to_string()));
@@ -356,7 +363,7 @@ impl SigmaApp {
     }
 
     fn left_pane(&mut self, ui: &mut egui::Ui) {
-        let syntax_height = 200.0;
+        let syntax_height = 300.0;
         let table_height = (ui.available_height() - syntax_height).max(120.0);
         let mut edits = Vec::new();
         let mut commits = Vec::new();
@@ -368,20 +375,7 @@ impl SigmaApp {
             self.apply_edit(target, &text);
         }
         for commit in commits {
-            match commit {
-                Commit::Syntax(syntax) => self.run_edit(&syntax),
-                Commit::OpenValueLabels(i) => {
-                    self.value_labels_dialog = self.session.dataset.variables().get(i).map(|v| ValueLabelsDialog::new(i, v));
-                }
-                Commit::InsertCase(case) => {
-                    let result = self.session.insert_case(case);
-                    self.report(result);
-                }
-                Commit::DeleteCase(case) => {
-                    let result = self.session.delete_case(case);
-                    self.report(result);
-                }
-            }
+            self.apply_commit(commit);
         }
 
         ui.separator();
@@ -391,25 +385,99 @@ impl SigmaApp {
                 self.run_syntax();
             }
         });
-        ui.add(egui::TextEdit::multiline(&mut self.syntax).code_editor().desired_rows(5).desired_width(f32::INFINITY));
-        let journal = &self.session.journal;
+        ui.add(egui::TextEdit::multiline(&mut self.syntax).code_editor().desired_rows(4).desired_width(f32::INFINITY));
+        self.steps_panel(ui);
+    }
+
+    fn apply_commit(&mut self, commit: Commit) {
+        let result = match commit {
+            Commit::Syntax(syntax) => {
+                self.run_edit(&syntax);
+                Ok(())
+            }
+            Commit::OpenValueLabels(i) => {
+                self.value_labels_dialog = self.session.dataset.variables().get(i).map(|v| ValueLabelsDialog::new(i, v));
+                Ok(())
+            }
+            Commit::InsertCase(case) => self.session.insert_case(case),
+            Commit::DeleteCase(case) => self.session.delete_case(case),
+            Commit::EnableStep(i, enabled) => self.session.set_step_enabled(i, enabled),
+            Commit::MoveStep(i, up) => self.session.move_step(i, up),
+            Commit::RemoveStep(i) => self.session.remove_step(i),
+        };
+        self.report(result);
+    }
+
+    /// Applied steps, Power Query style: every change to the data since the file was opened.
+    /// Switch a step off, click its command to rewrite it, move or remove it; the data is
+    /// replayed from the file.
+    fn steps_panel(&mut self, ui: &mut egui::Ui) {
+        let mut edits = Vec::new();
+        let mut commits = Vec::new();
         let mut paste = false;
-        egui::CollapsingHeader::new(format!("History ({})", journal.len())).id_salt("history").show(ui, |ui| {
-            if !journal.is_empty() && ui.small_button("Paste into syntax").clicked() {
+        let steps = self.session.steps();
+        let count = steps.len();
+        egui::CollapsingHeader::new(format!("Applied steps ({count})")).id_salt("steps").default_open(true).show(ui, |ui| {
+            if steps.iter().any(|s| s.enabled && s.syntax().is_some()) && ui.small_button("Paste steps into syntax").clicked() {
                 paste = true;
             }
-            egui::ScrollArea::vertical().id_salt("history-list").max_height(90.0).stick_to_bottom(true).show(ui, |ui| {
-                for line in journal {
-                    ui.monospace(line);
+            egui::ScrollArea::vertical().id_salt("steps-list").max_height(110.0).stick_to_bottom(true).show(ui, |ui| {
+                let text_width = (ui.available_width() - 210.0).max(120.0);
+                for (i, step) in steps.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        let mut enabled = step.enabled;
+                        if ui.checkbox(&mut enabled, "").on_hover_text("Apply this step").changed() {
+                            commits.push(Commit::EnableStep(i, enabled));
+                        }
+                        // A step that failed the last replay: red number, the reason on hover.
+                        let number = egui::RichText::new(format!("{:>2}", i + 1));
+                        match &step.error {
+                            Some(error) => {
+                                ui.label(number.color(ui.visuals().error_fg_color)).on_hover_text(format!("Skipped: {error}"));
+                            }
+                            None => {
+                                ui.label(number.weak());
+                            }
+                        }
+                        let mut text = egui::RichText::new(step.label()).monospace();
+                        if !step.enabled {
+                            text = text.weak().strikethrough();
+                        } else if step.error.is_some() {
+                            text = text.color(ui.visuals().error_fg_color);
+                        }
+                        if step.syntax().is_some() {
+                            let source = step.label();
+                            edit::editable(ui, &mut self.editing, &mut edits, Target::Step(i), text, || source, text_width, ROW_HEIGHT, false);
+                        } else {
+                            ui.add_sized([text_width, ROW_HEIGHT], egui::Label::new(text).truncate());
+                        }
+                        // Plain words: the default font has no arrow or cross glyphs.
+                        if ui.add_enabled(i > 0, egui::Button::new("up").small()).on_hover_text("Move this step earlier").clicked() {
+                            commits.push(Commit::MoveStep(i, true));
+                        }
+                        if ui.add_enabled(i + 1 < count, egui::Button::new("down").small()).on_hover_text("Move this step later").clicked() {
+                            commits.push(Commit::MoveStep(i, false));
+                        }
+                        if ui.small_button("remove").on_hover_text("Remove this step").clicked() {
+                            commits.push(Commit::RemoveStep(i));
+                        }
+                    });
                 }
             });
         });
         if paste {
-            let history = self.session.journal.join("\n");
+            let lines: Vec<&str> = self.session.steps().iter().filter(|s| s.enabled).filter_map(|s| s.syntax()).collect();
+            let text = lines.join("\n");
             if !self.syntax.ends_with('\n') && !self.syntax.is_empty() {
                 self.syntax.push('\n');
             }
-            self.syntax.push_str(&history);
+            self.syntax.push_str(&text);
+        }
+        for (target, text) in edits {
+            self.apply_edit(target, &text);
+        }
+        for commit in commits {
+            self.apply_commit(commit);
         }
     }
 
