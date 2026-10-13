@@ -9,7 +9,9 @@ use thiserror::Error;
 
 mod dictionary;
 mod edit;
+mod expr;
 mod history;
+mod transform;
 
 use history::{Edit, History, Step};
 
@@ -178,6 +180,10 @@ impl Session {
             }
             Command::Numeric(_) | Command::String(_) => return edit::new_variables(&mut self.dataset, command),
             Command::DeleteVariables(names) => return edit::delete_variables(&mut self.dataset, names),
+            Command::Compute { target, expr } => return transform::compute(&mut self.dataset, target, expr, None),
+            Command::If { cond, target, expr } => return transform::compute(&mut self.dataset, target, expr, Some(cond)),
+            Command::Recode(groups) => return transform::recode(&mut self.dataset, groups),
+            Command::SelectIf(cond) => return transform::select_if(&mut self.dataset, cond),
             Command::Descriptives { variables } => {
                 let table = mksigma_stats::descriptives(&self.dataset, variables)?;
                 self.output.push(Item::Table(table));
@@ -358,6 +364,68 @@ mod tests {
         assert_eq!(s.dataset.column(3).unwrap()[0], Value::Str(String::new()));
         assert!(s.run_syntax("DELETE VARIABLES age nope.").is_err());
         assert_eq!(s.dataset.variables().len(), 4);
+    }
+
+    fn nums(s: &Session, var: &str) -> Vec<Option<f64>> {
+        let (i, _) = s.dataset.variable(var).unwrap();
+        s.dataset.column(i).unwrap().iter().map(Value::as_num).collect()
+    }
+
+    #[test]
+    fn compute_and_if() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("COMPUTE renda_k = income / 1000.\nCOMPUTE age = age + 1.\nIF (score >= 75) aprovado = 1.\nIF (score < 75) aprovado = 0.")
+            .unwrap();
+        assert_eq!(nums(&s, "renda_k")[..3], [Some(1.8), Some(4.2), Some(5.1)]);
+        assert_eq!(nums(&s, "age")[..2], [Some(24.0), Some(36.0)], "a variable can use its own old value");
+        // Scores 61 74 69 80 58 72 88 77.
+        assert_eq!(nums(&s, "aprovado"), [Some(0.0), Some(0.0), Some(0.0), Some(1.0), Some(0.0), Some(0.0), Some(1.0), Some(1.0)]);
+        s.run_syntax("STRING faixa (A6).\nIF (age >= 40) faixa = 'senior'.\nIF (age < 40) faixa = CONCAT('jr-', STRING(age, F2.0)).").unwrap();
+        let (f, _) = s.dataset.variable("faixa").unwrap();
+        assert_eq!(s.dataset.column(f).unwrap()[..3], [Value::Str("jr-24".into()), Value::Str("jr-36".into()), Value::Str("senior".into())]);
+        assert!(s.run_syntax("COMPUTE nome = 'x'.").is_err(), "new string variables need STRING first");
+        assert!(s.run_syntax("COMPUTE faixa = 1.").is_err(), "a number into a string variable");
+        assert!(s.run_syntax("IF ('x') a = 1.").is_err());
+    }
+
+    #[test]
+    fn recode_in_place_and_into() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("MISSING VALUES score (88).\nRECODE age (LO THRU 29 = 1) (30 THRU 44 = 2) (45 THRU HI = 3) INTO faixa.").unwrap();
+        // Ages 23 35 41 29 52 47 31 26.
+        assert_eq!(nums(&s, "faixa"), [1.0, 2.0, 2.0, 1.0, 3.0, 3.0, 2.0, 1.0].map(Some));
+        assert_eq!(nums(&s, "age")[0], Some(23.0), "INTO leaves the source alone");
+        s.run_syntax("RECODE score (MISSING = 0) (80 THRU HI = 3) (ELSE = COPY).").unwrap();
+        assert_eq!(nums(&s, "score"), [61.0, 74.0, 69.0, 3.0, 58.0, 72.0, 0.0, 77.0].map(Some), "88 is user-missing: MISSING wins, it comes first");
+        s.run_syntax("RECODE income (2200 = SYSMIS).").unwrap();
+        assert_eq!(nums(&s, "income")[7], None);
+        assert_eq!(nums(&s, "income")[0], Some(1800.0), "unmatched values stay in place");
+        s.run_syntax("STRING uf (A2).\nRECODE faixa (1 = 'SP') (ELSE = 'RJ') INTO uf.").unwrap();
+        let (u, _) = s.dataset.variable("uf").unwrap();
+        assert_eq!(s.dataset.column(u).unwrap()[..2], [Value::Str("SP".into()), Value::Str("RJ".into())]);
+        assert!(s.run_syntax("RECODE uf ('SP' = 1).").is_err(), "in place, a string stays a string");
+        assert!(s.run_syntax("RECODE age ('a' = 1).").is_err(), "a numeric variable takes numbers on the left");
+        assert!(s.run_syntax("RECODE age (1 = 'x') INTO novo.").is_err(), "a new text target needs STRING first");
+    }
+
+    #[test]
+    fn select_if_and_undoing_transformations() {
+        let mut s = Session::with_sample().unwrap();
+        let original: Vec<Vec<Value>> = (0..3).map(|i| s.dataset.column(i).unwrap().to_vec()).collect();
+        s.run_syntax("COMPUTE dobro = age * 2.\nRECODE score (LO THRU 69 = 0) (ELSE = 1).\nSELECT IF (age < 40 AND income > 2000).").unwrap();
+        // Kept: 35/4200, 29/2600, 31/3100, 26/2200.
+        assert_eq!(nums(&s, "age"), [35.0, 29.0, 31.0, 26.0].map(Some));
+        assert_eq!(nums(&s, "dobro"), [70.0, 58.0, 62.0, 52.0].map(Some));
+        assert_eq!(s.undo_label(), Some("SELECT IF (age < 40 AND income > 2000)."));
+        while s.undo().unwrap() {}
+        assert_eq!(s.dataset.variables().len(), 3);
+        for (i, column) in original.iter().enumerate() {
+            assert_eq!(s.dataset.column(i).unwrap(), column.as_slice());
+        }
+        while s.redo().unwrap() {}
+        assert_eq!(s.dataset.n_cases(), 4);
+        s.run_syntax("SELECT IF (age > 0).").unwrap();
+        assert_eq!(s.undo_label(), Some("SELECT IF (age < 40 AND income > 2000)."), "keeping every case is not a step");
     }
 
     #[test]

@@ -14,7 +14,8 @@ One workflow, end to end and reproducible:
 Every step is syntax, so analyses can be rerun, reviewed and driven by agents (CLI, later MCP).
 Runs natively on macOS, Windows, Linux and BSD, and later on the web via WebAssembly.
 
-> Early days. Today it reads `.sav` files, edits data and the dictionary (every edit recorded as syntax),
+> Early days. Today it reads and writes `.sav` files, edits data and the dictionary (every edit
+> recorded as syntax, with undo), transforms data with `COMPUTE`, `IF`, `RECODE` and `SELECT IF`,
 > and runs `DESCRIPTIVES`, `FREQUENCIES` and `DISPLAY DICTIONARY`;
 > see [`docs/roadmap.md`](docs/roadmap.md).
 

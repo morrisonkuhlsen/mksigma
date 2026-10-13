@@ -487,6 +487,79 @@ impl Dataset {
         Ok(self.columns.iter_mut().map(|c| c.remove(index)).collect())
     }
 
+    /// Replaces a variable's values; returns the old ones. The new values must fit the type.
+    pub fn replace_column(&mut self, index: usize, values: Vec<Value>) -> Result<Vec<Value>, DatasetError> {
+        let var = self.variables.get(index).ok_or(DatasetError::NoVariable(index))?;
+        if values.len() != self.n_cases() {
+            return Err(DatasetError::ColumnLength { expected: self.n_cases(), got: values.len() });
+        }
+        for v in &values {
+            match (var.var_type, v) {
+                (VarType::Numeric, Value::Num(_) | Value::SysMis) | (VarType::String(_), Value::Str(_)) => {}
+                (VarType::Numeric, _) => return Err(DatasetError::NeedsNumber(var.name.clone())),
+                (VarType::String(_), _) => return Err(DatasetError::NeedsText(var.name.clone())),
+            }
+        }
+        let column = self.columns.get_mut(index).ok_or(DatasetError::NoVariable(index))?;
+        Ok(std::mem::replace(column, values))
+    }
+
+    /// Removes the cases at `indexes` (ascending, no repeats) and returns their values, in the
+    /// same order. One pass over each column, however many cases go.
+    pub fn remove_cases(&mut self, indexes: &[usize]) -> Result<Vec<Vec<Value>>, DatasetError> {
+        let n = self.n_cases();
+        if let Some(bad) = indexes.iter().find(|i| **i >= n) {
+            return Err(DatasetError::NoCase(*bad));
+        }
+        if !indexes.windows(2).all(|w| matches!(w, [a, b] if a < b)) {
+            return Err(DatasetError::NoCase(n));
+        }
+        let mut removed = vec![Vec::with_capacity(self.variables.len()); indexes.len()];
+        for column in &mut self.columns {
+            let mut targets = indexes.iter().copied().enumerate().peekable();
+            let mut kept = Vec::with_capacity(n - indexes.len());
+            for (i, v) in std::mem::take(column).into_iter().enumerate() {
+                match targets.peek() {
+                    Some(&(slot, at)) if at == i => {
+                        if let Some(row) = removed.get_mut(slot) {
+                            row.push(v);
+                        }
+                        targets.next();
+                    }
+                    _ => kept.push(v),
+                }
+            }
+            *column = kept;
+        }
+        Ok(removed)
+    }
+
+    /// Puts back cases removed by `remove_cases`, at the same indexes.
+    pub fn restore_cases(&mut self, indexes: &[usize], rows: Vec<Vec<Value>>) -> Result<(), DatasetError> {
+        let total = self.n_cases() + indexes.len();
+        if indexes.len() != rows.len() || indexes.iter().any(|i| *i >= total) || rows.iter().any(|r| r.len() != self.variables.len()) {
+            return Err(DatasetError::CaseWidth { expected: self.variables.len(), got: rows.first().map_or(0, Vec::len) });
+        }
+        let mut columns: Vec<std::vec::IntoIter<Value>> = std::mem::take(&mut self.columns).into_iter().map(Vec::into_iter).collect();
+        let mut rebuilt: Vec<Vec<Value>> = (0..columns.len()).map(|_| Vec::with_capacity(total)).collect();
+        let mut rows = rows.into_iter().map(Vec::into_iter).collect::<Vec<_>>().into_iter();
+        let mut next_restored = indexes.iter().copied().peekable();
+        let mut current = None;
+        for i in 0..total {
+            let restore = next_restored.peek() == Some(&i);
+            if restore {
+                next_restored.next();
+                current = rows.next();
+            }
+            for (c, out) in columns.iter_mut().zip(rebuilt.iter_mut()) {
+                let v = if restore { current.as_mut().and_then(Iterator::next) } else { c.next() };
+                out.push(v.unwrap_or(Value::SysMis));
+            }
+        }
+        self.columns = rebuilt;
+        Ok(())
+    }
+
     /// Replaces the whole dictionary with one describing the same variables (same count and
     /// types), as undoing a dictionary change does.
     pub fn replace_variables(&mut self, variables: Vec<Variable>) -> Result<(), DatasetError> {
@@ -650,6 +723,34 @@ mod tests {
         ds.replace_variables(vars).unwrap();
         assert_eq!(ds.variables()[1].label.as_deref(), Some("A"));
         assert_eq!(ds.replace_variables(vec![]), Err(DatasetError::DictionaryMismatch));
+    }
+
+    #[test]
+    fn replace_columns_and_remove_and_restore_many_cases() {
+        let mut ds = Dataset::new();
+        ds.add_variable(Variable::numeric("x")).unwrap();
+        ds.add_variable(Variable::string("s", 2)).unwrap();
+        for i in 0..6 {
+            ds.push_case(vec![Value::Num(f64::from(i)), Value::Str(i.to_string())]).unwrap();
+        }
+        let old = ds.replace_column(0, (0..6).map(|i| Value::Num(f64::from(i) * 10.0)).collect()).unwrap();
+        assert_eq!(old[5], Value::Num(5.0));
+        assert!(ds.replace_column(0, vec![Value::Num(1.0)]).is_err(), "wrong length");
+        assert!(ds.replace_column(1, vec![Value::Num(1.0); 6]).is_err(), "wrong type");
+
+        let removed = ds.remove_cases(&[0, 2, 5]).unwrap();
+        assert_eq!(
+            removed,
+            [
+                vec![Value::Num(0.0), Value::Str("0".into())],
+                vec![Value::Num(20.0), Value::Str("2".into())],
+                vec![Value::Num(50.0), Value::Str("5".into())]
+            ]
+        );
+        assert_eq!(ds.column(1).unwrap(), [Value::Str("1".into()), Value::Str("3".into()), Value::Str("4".into())]);
+        assert!(ds.remove_cases(&[1, 1]).is_err());
+        ds.restore_cases(&[0, 2, 5], removed).unwrap();
+        assert_eq!(ds.column(0).unwrap(), (0..6).map(|i| Value::Num(f64::from(i) * 10.0)).collect::<Vec<_>>());
     }
 
     #[test]

@@ -25,8 +25,13 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   (pyreadstat). To do: `.zsav`, strings over 255 bytes, long-string missing values.
 - CSV and `.xlsx` import (`GET DATA`)
 - **Recorded data preparation** (Power Query style): every transformation is a syntax command
-  shown as a list of applied steps that can be edited, reordered and replayed: `COMPUTE`,
-  `RECODE`, `SELECT IF`, `SORT CASES`, `AGGREGATE`, `MERGE FILES`
+  shown as a list of applied steps that can be edited, reordered and replayed.
+  **Done:** `COMPUTE`, `IF`, `RECODE` (values, `LO THRU HI` ranges, `MISSING`, `SYSMIS`, `ELSE`,
+  `COPY`, `INTO`), `SELECT IF`, all undoable; expressions with SPSS precedence and missing-value
+  rules and functions (`ABS SQRT EXP LN LG10 RND TRUNC MOD SUM MEAN SD VARIANCE MIN MAX` with
+  `.n`, `NMISS NVALID MISSING SYSMIS VALUE RANGE ANY`, `CONCAT UPCASE LOWER LTRIM RTRIM LENGTH
+  SUBSTR INDEX NUMBER STRING`). Checked against pandas. To do: `SORT CASES`, `AGGREGATE`,
+  `MERGE FILES`, `DO IF`, `COUNT`, date functions, the steps panel.
 - Desktop app: File ▸ Open (native dialog, Ctrl+O), drag and drop, opening a file given on the
   command line, Data View (virtualized rows, value-labels toggle, missing values dimmed) and a
   Variable View — **done**.

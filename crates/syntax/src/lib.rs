@@ -5,10 +5,14 @@
 use thiserror::Error;
 
 mod dictionary;
+mod expr;
 mod lexer;
+mod transform;
 
 pub use dictionary::{Level, Literal, MissingSpec, NewVariables, ValueLabelList};
+pub use expr::{BinOp, Expr};
 use lexer::Token;
+pub use transform::{RecodeFrom, RecodeGroup, RecodeSpec, RecodeTo};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -37,6 +41,14 @@ pub enum Command {
     String(Vec<(Vec<String>, String)>),
     /// `DELETE VARIABLES varlist`
     DeleteVariables(Vec<String>),
+    /// `COMPUTE target = expression`
+    Compute { target: String, expr: Expr },
+    /// `IF (condition) target = expression`
+    If { cond: Expr, target: String, expr: Expr },
+    /// `RECODE varlist (old = new)... [INTO varlist] [/...]`
+    Recode(Vec<RecodeGroup>),
+    /// `SELECT IF condition`: keeps the cases where it is true.
+    SelectIf(Expr),
 }
 
 /// Row order of a frequency table (`/FORMAT`).
@@ -143,11 +155,33 @@ pub fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "''"))
 }
 
+/// Outside expressions a `-` is always a sign: `VALUE LABELS q -1 'No answer'`.
+fn merge_signs(tokens: &[Token]) -> Vec<Token> {
+    let mut out: Vec<Token> = Vec::with_capacity(tokens.len());
+    let mut iter = tokens.iter().peekable();
+    while let Some(t) = iter.next() {
+        if *t == Token::Minus
+            && let Some(Token::Word(w)) = iter.peek()
+            && w.starts_with(|c: char| c.is_ascii_digit() || c == '.')
+        {
+            out.push(Token::Word(format!("-{w}")));
+            iter.next();
+            continue;
+        }
+        out.push(t.clone());
+    }
+    out
+}
+
 fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     let (name, rest) = match tokens.split_first() {
         Some((Token::Word(w), rest)) => (w.as_str(), rest),
         _ => return Err(SyntaxError::UnknownCommand(String::new())),
     };
+    if let Some(result) = transform::parse(name, rest) {
+        return result;
+    }
+    let rest = &merge_signs(rest)[..];
     if is_keyword(name, "DISPLAY") {
         return match rest {
             [] => Ok(Command::DisplayDictionary),
@@ -283,6 +317,21 @@ mod tests {
     }
 
     #[test]
+    fn negative_values_outside_expressions() {
+        assert_eq!(
+            parse("VALUE LABELS q -1 'No answer' -2.5 'Other'."),
+            Ok(vec![Command::ValueLabels(vec![(
+                vec!["q".to_string()],
+                vec![(Literal::Num(-1.0), "No answer".into()), (Literal::Num(-2.5), "Other".into())]
+            )])])
+        );
+        assert_eq!(
+            parse("MISSING VALUES x (-1, -9)."),
+            Ok(vec![Command::MissingValues(vec![(vec!["x".to_string()], MissingSpec::Discrete(vec![Literal::Num(-1.0), Literal::Num(-9.0)]))])])
+        );
+    }
+
+    #[test]
     fn display_dictionary() {
         assert_eq!(parse("DISPLAY DICTIONARY."), Ok(vec![Command::DisplayDictionary]));
         assert_eq!(parse("disp dic."), Ok(vec![Command::DisplayDictionary]));
@@ -300,6 +349,6 @@ mod tests {
     fn errors() {
         assert_eq!(parse("FOO bar."), Err(SyntaxError::UnknownCommand("FOO".into())));
         assert!(matches!(parse("DESCRIPTIVES."), Err(SyntaxError::Expected { .. })));
-        assert_eq!(parse("DESCRIPTIVES a & b."), Err(SyntaxError::UnexpectedChar('&')));
+        assert_eq!(parse("DESCRIPTIVES a % b."), Err(SyntaxError::UnexpectedChar('%')));
     }
 }

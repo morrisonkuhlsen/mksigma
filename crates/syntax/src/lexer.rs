@@ -11,10 +11,36 @@ pub(crate) enum Token {
     /// A quoted string, quotes removed (`'it''s'` is `it's`).
     Str(String),
     Equals,
+    /// `/`: a subcommand separator, or division inside an expression.
     Slash,
     LParen,
     RParen,
     Comma,
+    Plus,
+    /// `-` between operands; a `-` that starts a number (`= -1`, `(-2`) is part of the word.
+    Minus,
+    Star,
+    /// `**`
+    Power,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    /// `<>` or `~=`
+    Ne,
+    /// `&`
+    And,
+    /// `|`
+    Or,
+    /// `~`
+    Not,
+}
+
+impl Token {
+    /// Whether a `-` after this token is subtraction rather than the sign of a number.
+    fn ends_operand(&self) -> bool {
+        matches!(self, Token::Word(_) | Token::Str(_) | Token::RParen)
+    }
 }
 
 /// One command's tokens and its source text, period included.
@@ -46,6 +72,32 @@ pub(crate) fn commands(src: &str) -> Result<Vec<Lexed>, SyntaxError> {
         start.get_or_insert(i);
         match c {
             '=' => tokens.push(Token::Equals),
+            '+' => tokens.push(Token::Plus),
+            '*' if chars.peek().is_some_and(|(_, n)| *n == '*') => {
+                chars.next();
+                tokens.push(Token::Power);
+            }
+            '*' => tokens.push(Token::Star),
+            '&' => tokens.push(Token::And),
+            '|' => tokens.push(Token::Or),
+            '<' | '>' | '~' => {
+                let next = chars.peek().map(|(_, n)| *n);
+                let token = match (c, next) {
+                    ('<', Some('=')) => Token::Le,
+                    ('>', Some('=')) => Token::Ge,
+                    ('<', Some('>')) | ('~', Some('=')) => Token::Ne,
+                    ('<', _) => Token::Lt,
+                    ('>', _) => Token::Gt,
+                    _ => Token::Not,
+                };
+                if matches!(token, Token::Le | Token::Ge | Token::Ne) {
+                    chars.next();
+                }
+                tokens.push(token);
+            }
+            '-' if tokens.last().is_some_and(Token::ends_operand) || !chars.peek().is_some_and(|(_, n)| n.is_ascii_digit() || *n == '.') => {
+                tokens.push(Token::Minus);
+            }
             '/' => tokens.push(Token::Slash),
             '(' => tokens.push(Token::LParen),
             ')' => tokens.push(Token::RParen),
@@ -112,7 +164,9 @@ mod tests {
                 w("VALUE"),
                 w("LABELS"),
                 w("q"),
-                w("-1"),
+                // After a name, `-` could be subtraction; commands without expressions merge it back.
+                Minus,
+                w("1"),
                 Str("Don't know".into()),
                 w("2.5"),
                 Str("a. b".into()),
@@ -134,6 +188,49 @@ mod tests {
         let c = commands("  DESC age.\nFREQ  sex /FORMAT=NOTABLE.\nDISPLAY").unwrap();
         let sources: Vec<&str> = c.iter().map(|c| c.source.as_str()).collect();
         assert_eq!(sources, ["DESC age.", "FREQ  sex /FORMAT=NOTABLE.", "DISPLAY"]);
+    }
+
+    #[test]
+    fn operators_and_the_two_minuses() {
+        use Token::*;
+        let w = |s: &str| Word(s.into());
+        assert_eq!(
+            tokens("x = -1 + a-1 - (-2) ** 2 >= b <> c ~= d & ~e | f <= g < h > i."),
+            [
+                w("x"),
+                Equals,
+                w("-1"),
+                Plus,
+                w("a"),
+                Minus,
+                w("1"),
+                Minus,
+                LParen,
+                w("-2"),
+                RParen,
+                Power,
+                w("2"),
+                Ge,
+                w("b"),
+                Ne,
+                w("c"),
+                Ne,
+                w("d"),
+                And,
+                Not,
+                w("e"),
+                Or,
+                w("f"),
+                Le,
+                w("g"),
+                Lt,
+                w("h"),
+                Gt,
+                w("i")
+            ]
+        );
+        assert_eq!(tokens("a*b/c"), [w("a"), Star, w("b"), Slash, w("c")]);
+        assert_eq!(tokens("- x"), [Minus, w("x")]);
     }
 
     #[test]

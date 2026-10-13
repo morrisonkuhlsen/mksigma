@@ -7,12 +7,45 @@ use mksigma_core::{Dataset, DatasetError, Value, Variable};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Edit {
-    Dictionary { before: Vec<Variable>, after: Vec<Variable> },
-    Cell { case: usize, var: usize, before: Value, after: Value },
-    InsertVariable { index: usize, var: Variable, column: Vec<Value> },
-    RemoveVariable { index: usize, var: Variable, column: Vec<Value> },
-    InsertCase { index: usize, values: Vec<Value> },
-    RemoveCase { index: usize, values: Vec<Value> },
+    Dictionary {
+        before: Vec<Variable>,
+        after: Vec<Variable>,
+    },
+    Cell {
+        case: usize,
+        var: usize,
+        before: Value,
+        after: Value,
+    },
+    InsertVariable {
+        index: usize,
+        var: Variable,
+        column: Vec<Value>,
+    },
+    RemoveVariable {
+        index: usize,
+        var: Variable,
+        column: Vec<Value>,
+    },
+    InsertCase {
+        index: usize,
+        values: Vec<Value>,
+    },
+    RemoveCase {
+        index: usize,
+        values: Vec<Value>,
+    },
+    /// A variable's values replaced (`COMPUTE`, `RECODE`).
+    Column {
+        index: usize,
+        before: Vec<Value>,
+        after: Vec<Value>,
+    },
+    /// Cases removed at once (`SELECT IF`), with their values.
+    RemoveCases {
+        indexes: Vec<usize>,
+        rows: Vec<Vec<Value>>,
+    },
 }
 
 impl Edit {
@@ -24,6 +57,8 @@ impl Edit {
             Edit::RemoveVariable { index, .. } => ds.remove_variable(*index).map(drop),
             Edit::InsertCase { index, values } => ds.insert_case(*index, values.clone()),
             Edit::RemoveCase { index, .. } => ds.remove_case(*index).map(drop),
+            Edit::Column { index, after, .. } => ds.replace_column(*index, after.clone()).map(drop),
+            Edit::RemoveCases { indexes, .. } => ds.remove_cases(indexes).map(drop),
         }
     }
 
@@ -35,6 +70,8 @@ impl Edit {
             Edit::RemoveVariable { index, var, column } => ds.insert_variable(*index, var.clone(), column.clone()),
             Edit::InsertCase { index, .. } => ds.remove_case(*index).map(drop),
             Edit::RemoveCase { index, values } => ds.insert_case(*index, values.clone()),
+            Edit::Column { index, before, .. } => ds.replace_column(*index, before.clone()).map(drop),
+            Edit::RemoveCases { indexes, rows } => ds.restore_cases(indexes, rows.clone()),
         }
     }
 }
