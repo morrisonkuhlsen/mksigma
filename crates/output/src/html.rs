@@ -30,6 +30,7 @@ svg .grid { stroke: var(--line); stroke-width: 1; }
 svg .bar { fill: var(--bar); stroke: var(--bg); stroke-width: 1; }
 svg .point { fill: var(--bar); fill-opacity: 0.75; }
 svg path.curve { fill: none; stroke: var(--curve); stroke-width: 2; }
+svg .median { stroke: var(--fg); stroke-width: 2.5; }
 svg text { fill: var(--fg); font-family: inherit; }
 svg .tick { font-size: 11px; fill: var(--muted); }
 svg .label { font-size: 12px; }

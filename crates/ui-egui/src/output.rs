@@ -17,7 +17,14 @@ pub struct OutputState {
 /// What the user asked for in the viewer this frame.
 pub(crate) enum OutputAction {
     None,
-    Export,
+    Export(ExportFormat),
+}
+
+/// What the Output is exported as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportFormat {
+    Html,
+    Pdf,
 }
 
 pub(crate) fn output_view(ui: &mut egui::Ui, output: &mut Output, state: &mut OutputState) -> OutputAction {
@@ -30,7 +37,10 @@ pub(crate) fn output_view(ui: &mut egui::Ui, output: &mut Output, state: &mut Ou
                 state.transposed.clear();
             }
             if ui.small_button("Export HTML").on_hover_text("Save the Output as a web page").clicked() {
-                action = OutputAction::Export;
+                action = OutputAction::Export(ExportFormat::Html);
+            }
+            if ui.small_button("Export PDF").on_hover_text("Save the Output as a PDF document").clicked() {
+                action = OutputAction::Export(ExportFormat::Pdf);
             }
         }
     });
@@ -110,12 +120,13 @@ fn draw_chart(ui: &mut egui::Ui, c: &Chart) {
     for shape in chart::layout(c, f64::from(size.0), f64::from(size.1)) {
         match shape {
             Shape::Line { from, to, stroke } => {
-                let color = match stroke {
-                    Stroke::Axis => text_color,
-                    Stroke::Grid => grid,
-                    Stroke::Curve => curve,
+                let (width, color) = match stroke {
+                    Stroke::Axis => (1.0, text_color),
+                    Stroke::Grid => (1.0, grid),
+                    Stroke::Curve => (2.0, curve),
+                    Stroke::Median => (2.5, text_color),
                 };
-                painter.line_segment([at(from.0, from.1), at(to.0, to.1)], egui::Stroke::new(1.0, color));
+                painter.line_segment([at(from.0, from.1), at(to.0, to.1)], egui::Stroke::new(width, color));
             }
             Shape::Rect { x, y, width, height } => {
                 let r = egui::Rect::from_min_size(at(x, y), egui::vec2(width as f32, height as f32));

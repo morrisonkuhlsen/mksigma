@@ -12,12 +12,36 @@ pub enum Chart {
     Bar { title: String, x_label: String, y_label: String, bars: Vec<(String, f64)> },
     /// Points (x, y).
     Scatter { title: String, x_label: String, y_label: String, points: Vec<(f64, f64)> },
+    /// One box per group.
+    Boxplot { title: String, x_label: String, y_label: String, boxes: Vec<BoxStats> },
+}
+
+/// A box of a boxplot: the hinges and median, the whisker ends (the most extreme values within
+/// 1.5 box lengths), outliers (1.5 to 3 box lengths out) and extremes (beyond 3).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoxStats {
+    pub label: String,
+    pub low: f64,
+    pub q1: f64,
+    pub median: f64,
+    pub q3: f64,
+    pub high: f64,
+    pub outliers: Vec<f64>,
+    pub extremes: Vec<f64>,
 }
 
 impl Chart {
     pub fn title(&self) -> &str {
         match self {
-            Chart::Histogram { title, .. } | Chart::Bar { title, .. } | Chart::Scatter { title, .. } => title,
+            Chart::Histogram { title, .. } | Chart::Bar { title, .. } | Chart::Scatter { title, .. } | Chart::Boxplot { title, .. } => title,
+        }
+    }
+
+    pub fn set_title(&mut self, new: &str) {
+        match self {
+            Chart::Histogram { title, .. } | Chart::Bar { title, .. } | Chart::Scatter { title, .. } | Chart::Boxplot { title, .. } => {
+                *title = new.to_string();
+            }
         }
     }
 }
@@ -28,6 +52,8 @@ pub enum Stroke {
     Axis,
     Grid,
     Curve,
+    /// A boxplot's median: thick.
+    Median,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,6 +286,48 @@ pub fn layout(chart: &Chart, width: f64, height: f64) -> Vec<Shape> {
                 out.push(Shape::Circle { x: f.x(*x, xr), y: f.y(*y, yr), radius: 3.0 });
             }
         }
+        Chart::Boxplot { title, x_label, y_label, boxes } => {
+            axis_titles(&mut out, &f, width, title, x_label, y_label);
+            let all = boxes.iter().flat_map(|b| [b.low, b.high].into_iter().chain(b.outliers.iter().copied()).chain(b.extremes.iter().copied()));
+            let (lo, hi) = all.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| (a.min(v), b.max(v)));
+            let yr = y_axis(&mut out, &f, lo, hi);
+            let slot = (f.right - f.left) / boxes.len().max(1) as f64;
+            for (i, b) in boxes.iter().enumerate() {
+                let center = f.left + slot * (i as f64 + 0.5);
+                let half = (slot * 0.25).min(40.0);
+                let (y1, y3) = (f.y(b.q1, yr), f.y(b.q3, yr));
+                out.push(Shape::Rect { x: center - half, y: y3, width: half * 2.0, height: (y1 - y3).max(0.0) });
+                let ym = f.y(b.median, yr);
+                out.push(Shape::Line { from: (center - half, ym), to: (center + half, ym), stroke: Stroke::Median });
+                for (end, hinge) in [(b.low, b.q1), (b.high, b.q3)] {
+                    let (ye, yh) = (f.y(end, yr), f.y(hinge, yr));
+                    out.push(Shape::Line { from: (center, yh), to: (center, ye), stroke: Stroke::Axis });
+                    out.push(Shape::Line { from: (center - half / 2.0, ye), to: (center + half / 2.0, ye), stroke: Stroke::Axis });
+                }
+                for v in &b.outliers {
+                    out.push(Shape::Circle { x: center, y: f.y(*v, yr), radius: 3.0 });
+                }
+                for v in &b.extremes {
+                    out.push(Shape::Text {
+                        x: center,
+                        y: f.y(*v, yr) + 4.0,
+                        text: "*".into(),
+                        anchor: Anchor::Middle,
+                        size: TextSize::Normal,
+                        vertical: false,
+                    });
+                }
+                out.push(Shape::Text {
+                    x: center,
+                    y: f.bottom + 18.0,
+                    text: b.label.clone(),
+                    anchor: Anchor::Middle,
+                    size: TextSize::Small,
+                    vertical: false,
+                });
+            }
+            out.push(Shape::Line { from: (f.left, f.bottom), to: (f.right, f.bottom), stroke: Stroke::Axis });
+        }
     }
     out
 }
@@ -279,6 +347,7 @@ pub fn svg(chart: &Chart, width: f64, height: f64) -> String {
                     Stroke::Axis => "axis",
                     Stroke::Grid => "grid",
                     Stroke::Curve => "curve",
+                    Stroke::Median => "median",
                 };
                 s.push_str(&format!(r#"<line class="{class}" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}"/>"#, from.0, from.1, to.0, to.1));
             }
@@ -340,6 +409,15 @@ mod tests {
             },
             Chart::Bar { title: "b".into(), x_label: "c".into(), y_label: "Count".into(), bars: vec![("A".into(), 4.0), ("B".into(), 9.0)] },
             Chart::Scatter { title: "s".into(), x_label: "x".into(), y_label: "y".into(), points: vec![(1.0, 2.0), (3.0, -1.0), (2.0, 5.5)] },
+            Chart::Boxplot {
+                title: "box".into(),
+                x_label: "g".into(),
+                y_label: "y".into(),
+                boxes: vec![
+                    BoxStats { label: "A".into(), low: 1.0, q1: 3.0, median: 5.0, q3: 8.0, high: 15.0, outliers: vec![], extremes: vec![40.0] },
+                    BoxStats { label: "B".into(), low: 2.0, q1: 4.0, median: 4.5, q3: 6.0, high: 9.0, outliers: vec![12.0], extremes: vec![] },
+                ],
+            },
         ];
         for chart in &charts {
             let shapes = layout(chart, 480.0, 320.0);

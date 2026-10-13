@@ -67,6 +67,7 @@ fn changes_data(command: &Command) -> bool {
             | Command::NparTests(_)
             | Command::Logistic { .. }
             | Command::Graph { .. }
+            | Command::Examine { .. }
     )
 }
 
@@ -376,6 +377,14 @@ impl Session {
                     }
                 }
             }
+            Command::Examine { variables, by, descriptives, boxplot, stemleaf } => {
+                let options =
+                    mksigma_stats::ExamineOptions { variables: variables.clone(), by: by.clone(), descriptives: *descriptives, boxplot: *boxplot };
+                self.output.items.extend(mksigma_stats::examine(&self.dataset, &options)?);
+                if *stemleaf {
+                    self.output.push(Item::Text("Stem-and-leaf plots are not drawn yet.".into()));
+                }
+            }
             Command::Graph { chart, title } => {
                 use mksigma_syntax::{BarStat, GraphSpec};
                 let mut item = match chart {
@@ -390,10 +399,7 @@ impl Session {
                     GraphSpec::Scatter { x, y } => mksigma_stats::scatter(&self.dataset, x, y)?,
                 };
                 if let (Some(title), Item::Chart(chart)) = (title, &mut item) {
-                    use mksigma_output::Chart;
-                    match chart {
-                        Chart::Histogram { title: t, .. } | Chart::Bar { title: t, .. } | Chart::Scatter { title: t, .. } => t.clone_from(title),
-                    }
+                    chart.set_title(title);
                 }
                 self.output.push(item);
             }

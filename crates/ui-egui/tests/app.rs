@@ -465,4 +465,11 @@ fn charts_pivot_and_html_export() {
     std::fs::remove_file(&path).unwrap();
     assert!(html.contains("Descriptive Statistics") && html.contains("<svg"));
     assert!(matches!(&h.state().status, Some(Status::Info(s)) if s.starts_with("Exported the Output")));
+
+    // The same Output as a PDF.
+    h.get_by_label("Export PDF").click();
+    h.run_steps(3);
+    let pdf = std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(pdf.starts_with(b"%PDF-") && pdf.ends_with(b"%%EOF\n"));
 }

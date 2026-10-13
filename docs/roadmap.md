@@ -88,7 +88,12 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   layout is computed once and drawn by egui on screen and as SVG in exports. Tables pivot
   (transpose) in the viewer. File > Export Output as HTML (and `mksigma-cli --html`): one
   self-contained page, light and dark, printable.
-- To do: boxplots, clustered bars, pie; pivot layers; chart and table editing; PDF export.
+- **Done (second part):** `EXAMINE` (Descriptives with trimmed mean, IQR, skewness and kurtosis
+  with standard errors; boxplots on Tukey's hinges with outliers and extremes, by group);
+  PDF export (File menu, Output button, `mksigma-cli --pdf`): A4, standard Helvetica (nothing
+  embedded) with Windows-1252 text, tables split across pages with their header repeated and
+  wrapped headers, the same chart layouts, page numbers.
+- To do: clustered bars, pie, stem-and-leaf; pivot layers; chart and table editing.
 - Pivot tables (transpose, move layers), charts (histogram, bar, scatter, boxplot)
 - **Cross-filtering:** items from one dataset share a filter; selecting a bar or a table
   category filters the other items

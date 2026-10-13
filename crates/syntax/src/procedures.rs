@@ -191,6 +191,61 @@ fn by_group(tokens: &[Token]) -> Option<(Vec<String>, String, f64, f64)> {
     }
 }
 
+pub(crate) fn examine(rest: &[Token]) -> Result<Command, SyntaxError> {
+    const CMD: &str = "EXAMINE";
+    let bad = |expected| SyntaxError::Expected { command: CMD, expected };
+    let (mut lists, mut descriptives, mut boxplot, mut stemleaf) = (None, true, true, true);
+    for (name, tokens) in subcommands(rest) {
+        let values = || words(tokens).ok_or(bad("keywords"));
+        match name {
+            None => lists = Some(tokens),
+            Some(n) if is_keyword(n, "VARIABLES") => lists = Some(tokens),
+            Some(n) if is_keyword(n, "PLOT") => {
+                (boxplot, stemleaf) = (false, false);
+                for w in values()? {
+                    match w.to_ascii_uppercase().as_str() {
+                        "BOXPLOT" => boxplot = true,
+                        "STEMLEAF" => stemleaf = true,
+                        "NONE" => {}
+                        _ => return Err(unsupported(CMD, &format!("/PLOT={w}"))),
+                    }
+                }
+            }
+            Some(n) if is_keyword(n, "STATISTICS") => {
+                descriptives = false;
+                for w in values()? {
+                    match w.to_ascii_uppercase().as_str() {
+                        "DESCRIPTIVES" => descriptives = true,
+                        "NONE" => {}
+                        _ => return Err(unsupported(CMD, &format!("/STATISTICS={w}"))),
+                    }
+                }
+            }
+            Some(n) if is_keyword(n, "CINTERVAL") => {
+                if !matches!(tokens, [Token::Word(level)] if level == "95") {
+                    return Err(unsupported(CMD, "confidence levels other than 95"));
+                }
+            }
+            // What SPSS pastes by default; the totals and comparisons here match it.
+            Some(n) if is_keyword(n, "COMPARE") || is_keyword(n, "MISSING") || is_keyword(n, "NOTOTAL") || is_keyword(n, "TOTAL") => {}
+            Some(n) => return Err(unsupported(CMD, &format!("/{n}"))),
+        }
+    }
+    let tokens = lists.ok_or(bad("VARIABLES=variables [BY group]"))?;
+    let at = tokens.iter().position(|t| matches!(t, Token::Word(w) if w.eq_ignore_ascii_case("BY")));
+    let (variables, by) = match at {
+        Some(at) => match (words(tokens.get(..at).unwrap_or_default()), words(tokens.get(at + 1..).unwrap_or_default()).as_deref()) {
+            (Some(vars), Some([group])) => (vars, Some(group.clone())),
+            _ => return Err(bad("variables BY one grouping variable")),
+        },
+        None => (words(tokens).ok_or(bad("variable names"))?, None),
+    };
+    if variables.is_empty() {
+        return Err(bad("VARIABLES=variables [BY group]"));
+    }
+    Ok(Command::Examine { variables, by, descriptives, boxplot, stemleaf })
+}
+
 pub(crate) fn graph(rest: &[Token]) -> Result<Command, SyntaxError> {
     const CMD: &str = "GRAPH";
     let bad = |expected| SyntaxError::Expected { command: CMD, expected };
@@ -680,6 +735,22 @@ mod tests {
         );
         assert!(parse("ONEWAY y BY a b.").is_err(), "one factor");
         assert!(parse("ONEWAY y BY g /POSTHOC=SCHEFFE.").is_err());
+    }
+
+    #[test]
+    fn examine_syntax_as_spss_pastes_it() {
+        assert_eq!(
+            one(
+                "EXAMINE VARIABLES=pos BY regiao /PLOT BOXPLOT STEMLEAF /COMPARE GROUPS /STATISTICS DESCRIPTIVES /CINTERVAL 95 /MISSING LISTWISE /NOTOTAL."
+            ),
+            Command::Examine { variables: names(&["pos"]), by: Some("regiao".into()), descriptives: true, boxplot: true, stemleaf: true }
+        );
+        assert_eq!(
+            one("EXAMINE renda /PLOT=BOXPLOT /STATISTICS=NONE."),
+            Command::Examine { variables: names(&["renda"]), by: None, descriptives: false, boxplot: true, stemleaf: false }
+        );
+        assert!(parse("EXAMINE x /PLOT=NPPLOT.").is_err());
+        assert!(parse("EXAMINE x /CINTERVAL 90.").is_err());
     }
 
     #[test]

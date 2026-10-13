@@ -36,6 +36,8 @@ pub enum Command {
     /// `GRAPH /HISTOGRAM[(NORMAL)]=x`, `/BAR(SIMPLE)=COUNT BY x`, `/BAR(SIMPLE)=MEAN(y) BY x`,
     /// `/SCATTERPLOT(BIVAR)=x WITH y`, with an optional `/TITLE='...'`.
     Graph { chart: GraphSpec, title: Option<String> },
+    /// `EXAMINE VARIABLES=vars [BY group] [/PLOT=BOXPLOT STEMLEAF] [/STATISTICS=DESCRIPTIVES]`
+    Examine { variables: Vec<String>, by: Option<String>, descriptives: bool, boxplot: bool, stemleaf: bool },
     /// `VARIABLE LABELS var 'label' [/var 'label']...`
     VariableLabels(Vec<(String, String)>),
     /// `VALUE LABELS varlist value 'label'... [/varlist ...]` (replaces existing labels)
@@ -222,6 +224,9 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     }
     if is_keyword(name, "ONEWAY") {
         return procedures::oneway(rest);
+    }
+    if is_keyword(name, "EXAMINE") {
+        return procedures::examine(rest);
     }
     if is_keyword(name, "GRAPH") {
         return procedures::graph(rest);

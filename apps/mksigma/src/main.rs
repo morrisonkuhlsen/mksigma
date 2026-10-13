@@ -29,7 +29,13 @@ fn main() -> eframe::Result {
         })),
         now: Some(Box::new(now)),
         pick_export: Some(Box::new(|suggested: &str| {
-            rfd::FileDialog::new().add_filter("Web page (.html)", &["html", "htm"]).set_file_name(suggested).save_file()
+            let dialog = rfd::FileDialog::new().set_file_name(suggested);
+            let dialog = if suggested.ends_with(".pdf") {
+                dialog.add_filter("PDF document (.pdf)", &["pdf"])
+            } else {
+                dialog.add_filter("Web page (.html)", &["html", "htm"])
+            };
+            dialog.save_file()
         })),
     };
     let mut app = SigmaApp::new(services);
