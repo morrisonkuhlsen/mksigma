@@ -37,7 +37,14 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   steps. Data View edits cells in place. Commands are all-or-nothing.
 - Saving — **done**: File ▸ Save (Ctrl+S) and Save As… (Ctrl+Shift+S), written to a temporary
   file and renamed over the target; `•` in the title while there are unsaved changes;
-  `mksigma-cli run --out`. Next: undo, adding variables and cases.
+  `mksigma-cli run --out`.
+- Undo and redo — **done**: every change to the data (syntax commands, cell edits, cases) is
+  one step, stored as the smallest reversible record (metadata before/after, old value, the
+  removed column); undoing a command also takes it out of the History. Edit menu names the
+  step; Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y when no text box has the keyboard.
+- Adding and deleting — **done**: `NUMERIC`, `STRING`, `DELETE VARIABLES`; blank last rows in
+  Data View (adds a case) and Variable View (adds a numeric variable); right-click a case
+  number to insert or delete a case, a variable number to delete it.
 
 ## M2 — the introductory-course core
 Done: case weights (`WEIGHT BY` from the file), `DESCRIPTIVES` weighted, `FREQUENCIES` (frequency

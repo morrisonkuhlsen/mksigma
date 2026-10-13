@@ -328,6 +328,10 @@ pub enum DatasetError {
     NeedsText(String),
     #[error("{0} is a numeric variable and needs a number")]
     NeedsNumber(String),
+    #[error("a new variable needs {expected} values, one per case, not {got}")]
+    ColumnLength { expected: usize, got: usize },
+    #[error("a dictionary must keep the same variables and types")]
+    DictionaryMismatch,
 }
 
 /// Mutable access to a variable's label, format, measurement level, value labels and missing
@@ -411,6 +415,87 @@ impl Dataset {
 
     pub fn column(&self, index: usize) -> Option<&[Value]> {
         self.columns.get(index).map(Vec::as_slice)
+    }
+
+    /// The value a new case or variable starts with: system-missing, or blank text.
+    pub fn blank(var: &Variable) -> Value {
+        match var.var_type {
+            VarType::Numeric => Value::SysMis,
+            VarType::String(_) => Value::Str(String::new()),
+        }
+    }
+
+    /// A case of blanks, one per variable.
+    pub fn blank_case(&self) -> Vec<Value> {
+        self.variables.iter().map(Self::blank).collect()
+    }
+
+    /// Inserts a variable at `index` (at most the variable count) with one value per case.
+    pub fn insert_variable(&mut self, index: usize, var: Variable, column: Vec<Value>) -> Result<(), DatasetError> {
+        if index > self.variables.len() {
+            return Err(DatasetError::NoVariable(index));
+        }
+        if self.variable(&var.name).is_some() {
+            return Err(DatasetError::DuplicateName(var.name));
+        }
+        if !self.variables.is_empty() && column.len() != self.n_cases() {
+            return Err(DatasetError::ColumnLength { expected: self.n_cases(), got: column.len() });
+        }
+        self.variables.insert(index, var);
+        self.columns.insert(index, column);
+        if let Some(w) = self.weight.as_mut().filter(|w| **w >= index) {
+            *w += 1;
+        }
+        Ok(())
+    }
+
+    /// Removes a variable and returns it with its values. Removing the weight variable turns
+    /// weighting off.
+    pub fn remove_variable(&mut self, index: usize) -> Result<(Variable, Vec<Value>), DatasetError> {
+        if index >= self.variables.len() {
+            return Err(DatasetError::NoVariable(index));
+        }
+        let var = self.variables.remove(index);
+        let column = if index < self.columns.len() { self.columns.remove(index) } else { Vec::new() };
+        self.weight = match self.weight {
+            Some(w) if w == index => None,
+            Some(w) if w > index => Some(w - 1),
+            w => w,
+        };
+        Ok((var, column))
+    }
+
+    /// Inserts a case at `index` (at most the case count).
+    pub fn insert_case(&mut self, index: usize, values: Vec<Value>) -> Result<(), DatasetError> {
+        if index > self.n_cases() {
+            return Err(DatasetError::NoCase(index));
+        }
+        if values.len() != self.variables.len() {
+            return Err(DatasetError::CaseWidth { expected: self.variables.len(), got: values.len() });
+        }
+        for (column, v) in self.columns.iter_mut().zip(values) {
+            column.insert(index, v);
+        }
+        Ok(())
+    }
+
+    /// Removes a case and returns its values.
+    pub fn remove_case(&mut self, index: usize) -> Result<Vec<Value>, DatasetError> {
+        if index >= self.n_cases() {
+            return Err(DatasetError::NoCase(index));
+        }
+        Ok(self.columns.iter_mut().map(|c| c.remove(index)).collect())
+    }
+
+    /// Replaces the whole dictionary with one describing the same variables (same count and
+    /// types), as undoing a dictionary change does.
+    pub fn replace_variables(&mut self, variables: Vec<Variable>) -> Result<(), DatasetError> {
+        let same_shape = variables.len() == self.variables.len() && variables.iter().zip(&self.variables).all(|(a, b)| a.var_type == b.var_type);
+        if !same_shape {
+            return Err(DatasetError::DictionaryMismatch);
+        }
+        self.variables = variables;
+        Ok(())
     }
 
     /// A variable to change in place. Its name and type are fixed here: rename through
@@ -535,6 +620,36 @@ mod tests {
         assert_eq!(ds.column(1).unwrap()[0], Value::Str("S".into()), "2 bytes would split the ã, so it stops before it");
         assert_eq!(ds.set_value(0, 0, Value::Str("a".into())), Err(DatasetError::NeedsNumber("X".into())));
         assert_eq!(ds.set_value(5, 0, Value::Num(1.0)), Err(DatasetError::NoCase(5)));
+    }
+
+    #[test]
+    fn insert_and_remove_variables_and_cases() {
+        let mut ds = Dataset::new();
+        ds.add_variable(Variable::numeric("a")).unwrap();
+        ds.add_variable(Variable::numeric("w")).unwrap();
+        ds.push_case(vec![Value::Num(1.0), Value::Num(2.0)]).unwrap();
+        ds.weight = Some(1);
+
+        ds.insert_variable(0, Variable::string("s", 4), vec![Value::Str("x".into())]).unwrap();
+        assert_eq!(ds.weight, Some(2), "the weight index follows its variable");
+        assert_eq!(ds.insert_variable(0, Variable::numeric("A"), vec![Value::SysMis]), Err(DatasetError::DuplicateName("A".into())));
+        assert!(matches!(ds.insert_variable(0, Variable::numeric("b"), vec![]), Err(DatasetError::ColumnLength { .. })));
+
+        ds.insert_case(0, ds.blank_case()).unwrap();
+        assert_eq!(ds.n_cases(), 2);
+        assert_eq!(ds.column(0).unwrap()[0], Value::Str(String::new()));
+        assert_eq!(ds.remove_case(1).unwrap(), [Value::Str("x".into()), Value::Num(1.0), Value::Num(2.0)]);
+        assert!(ds.remove_case(5).is_err());
+
+        let (var, column) = ds.remove_variable(2).unwrap();
+        assert_eq!((var.name.as_str(), column.len()), ("w", 1));
+        assert_eq!(ds.weight, None, "removing the weight variable turns weighting off");
+
+        let mut vars = ds.variables().to_vec();
+        vars[1].label = Some("A".into());
+        ds.replace_variables(vars).unwrap();
+        assert_eq!(ds.variables()[1].label.as_deref(), Some("A"));
+        assert_eq!(ds.replace_variables(vec![]), Err(DatasetError::DictionaryMismatch));
     }
 
     #[test]

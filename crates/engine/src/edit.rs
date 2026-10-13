@@ -1,11 +1,13 @@
 //! Dictionary commands (`VARIABLE LABELS`, `VALUE LABELS`, `MISSING VALUES`, `VARIABLE LEVEL`,
-//! `FORMATS`, `RENAME VARIABLES`) and cell edits. A command is checked in full before anything
-//! changes, so a failing command leaves the dataset as it was.
+//! `FORMATS`, `RENAME VARIABLES`, `NUMERIC`, `STRING`, `DELETE VARIABLES`) and cell and case
+//! edits. A command is checked in full before anything changes, so a failing command leaves the
+//! dataset as it was. Each returns the `Edit`s that undo and redo it.
 
-use mksigma_core::{Dataset, Format, Measure, MissingValues, Value, VarType, Variable, is_valid_name};
+use mksigma_core::{Dataset, Format, FormatKind, Measure, MissingValues, Value, VarType, Variable, is_valid_name};
 use mksigma_syntax::{Command, Level, Literal, MissingSpec};
 
 use crate::EngineError;
+use crate::history::Edit;
 
 enum Change {
     Label(usize, Option<String>),
@@ -161,7 +163,8 @@ pub(crate) fn apply(ds: &mut Dataset, command: &Command) -> Result<(), EngineErr
 
 /// A cell edit as typed: numeric variables take a number, or nothing (or `.`) for
 /// system-missing; string variables take the text.
-pub(crate) fn set_cell(ds: &mut Dataset, case: usize, var: usize, input: &str) -> Result<(), EngineError> {
+/// Sets a cell from typed text. Typing in the row after the last case adds a case first.
+pub(crate) fn set_cell(ds: &mut Dataset, case: usize, var: usize, input: &str) -> Result<Vec<Edit>, EngineError> {
     let v = variable(ds, var)?;
     let value = match v.var_type {
         VarType::Numeric => match input.trim() {
@@ -175,6 +178,69 @@ pub(crate) fn set_cell(ds: &mut Dataset, case: usize, var: usize, input: &str) -
         },
         VarType::String(_) => Value::Str(input.trim_end().to_string()),
     };
+    let mut edits = Vec::new();
+    if case == ds.n_cases() {
+        let values = ds.blank_case();
+        ds.insert_case(case, values.clone())?;
+        edits.push(Edit::InsertCase { index: case, values });
+    }
+    let before = ds.column(var).and_then(|c| c.get(case)).cloned().ok_or(mksigma_core::DatasetError::NoCase(case))?;
     ds.set_value(case, var, value)?;
-    Ok(())
+    let after = ds.column(var).and_then(|c| c.get(case)).cloned().unwrap_or(Value::SysMis);
+    edits.push(Edit::Cell { case, var, before, after });
+    Ok(edits)
+}
+
+/// `NUMERIC` and `STRING`: new variables at the end, blank in every case.
+pub(crate) fn new_variables(ds: &mut Dataset, command: &Command) -> Result<Vec<Edit>, EngineError> {
+    let mut planned: Vec<Variable> = Vec::new();
+    let groups: Vec<(&Vec<String>, Option<&str>, bool)> = match command {
+        Command::Numeric(groups) => groups.iter().map(|(v, f)| (v, f.as_deref(), false)).collect(),
+        Command::String(groups) => groups.iter().map(|(v, f)| (v, Some(f.as_str()), true)).collect(),
+        _ => return Ok(Vec::new()),
+    };
+    for (names, format, string) in groups {
+        let format: Option<Format> = format.map(str::parse).transpose().map_err(EngineError::Invalid)?;
+        for name in names {
+            if !is_valid_name(name) {
+                return Err(EngineError::Dataset(mksigma_core::DatasetError::InvalidName(name.clone())));
+            }
+            if ds.variable(name).is_some() || planned.iter().any(|v| v.name.eq_ignore_ascii_case(name)) {
+                return Err(EngineError::Dataset(mksigma_core::DatasetError::DuplicateName(name.clone())));
+            }
+            let var = match (string, format) {
+                (false, None) => Variable::numeric(name.clone()),
+                (false, Some(f)) if !f.kind.is_string() => {
+                    let mut v = Variable::numeric(name.clone());
+                    v.format = f;
+                    v
+                }
+                (true, Some(f)) if f.kind == FormatKind::A && f.width <= 255 => Variable::string(name.clone(), f.width),
+                (true, _) => return Err(EngineError::Invalid(format!("STRING {name} needs a width from A1 to A255"))),
+                (false, Some(f)) => return Err(EngineError::Invalid(format!("NUMERIC {name} can't have the string format {f}"))),
+            };
+            planned.push(var);
+        }
+    }
+    let mut edits = Vec::with_capacity(planned.len());
+    for var in planned {
+        let column = vec![Dataset::blank(&var); ds.n_cases()];
+        let index = ds.variables().len();
+        ds.insert_variable(index, var.clone(), column.clone())?;
+        edits.push(Edit::InsertVariable { index, var, column });
+    }
+    Ok(edits)
+}
+
+/// `DELETE VARIABLES`: removed from the last to the first, so undo puts them back in place.
+pub(crate) fn delete_variables(ds: &mut Dataset, names: &[String]) -> Result<Vec<Edit>, EngineError> {
+    let mut targets = indexes(ds, names)?;
+    targets.sort_unstable();
+    targets.dedup();
+    let mut edits = Vec::with_capacity(targets.len());
+    for index in targets.into_iter().rev() {
+        let (var, column) = ds.remove_variable(index)?;
+        edits.push(Edit::RemoveVariable { index, var, column });
+    }
+    Ok(edits)
 }

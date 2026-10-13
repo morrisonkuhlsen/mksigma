@@ -9,6 +9,9 @@ use thiserror::Error;
 
 mod dictionary;
 mod edit;
+mod history;
+
+use history::{Edit, History, Step};
 
 pub use mksigma_core as core;
 pub use mksigma_output as output;
@@ -39,6 +42,7 @@ pub struct Session {
     pub journal: Vec<String>,
     /// Whether the data or dictionary changed since the file was opened or saved.
     pub modified: bool,
+    history: History,
 }
 
 impl Session {
@@ -73,6 +77,7 @@ impl Session {
         let file = mksigma_sav::read(bytes)?;
         self.dataset = file.dataset;
         self.modified = false;
+        self.history.clear();
         Ok(file.warnings)
     }
 
@@ -86,23 +91,80 @@ impl Session {
     }
 
     /// Runs a syntax program. Commands before a failing one keep their effect and output, and
-    /// go into the journal.
+    /// go into the journal. Each command that changes the data is one undo step.
     pub fn run_syntax(&mut self, src: &str) -> Result<(), EngineError> {
         for (command, source) in mksigma_syntax::parse_with_source(src)? {
-            self.execute(&command)?;
-            self.journal.push(source);
+            let edits = self.apply(&command)?;
+            self.journal.push(source.clone());
+            if !edits.is_empty() {
+                self.record(source.clone(), edits, Some(source));
+            }
         }
         Ok(())
     }
 
-    /// Edits one cell from typed text (Data View). Not a syntax command, so not journaled.
-    pub fn set_cell(&mut self, case: usize, variable: usize, input: &str) -> Result<(), EngineError> {
-        edit::set_cell(&mut self.dataset, case, variable, input)?;
-        self.modified = true;
+    /// Runs one parsed command (not journaled: it has no source text).
+    pub fn execute(&mut self, command: &Command) -> Result<(), EngineError> {
+        let edits = self.apply(command)?;
+        self.record("command".to_string(), edits, None);
         Ok(())
     }
 
-    pub fn execute(&mut self, command: &Command) -> Result<(), EngineError> {
+    fn record(&mut self, label: String, edits: Vec<Edit>, journal: Option<String>) {
+        if !edits.is_empty() {
+            self.modified = true;
+            self.history.push(Step { label, edits, journal });
+        }
+    }
+
+    /// Edits one cell from typed text (Data View); the row after the last case adds a case. Not
+    /// a syntax command, so not journaled, but undoable.
+    pub fn set_cell(&mut self, case: usize, variable: usize, input: &str) -> Result<(), EngineError> {
+        let edits = edit::set_cell(&mut self.dataset, case, variable, input)?;
+        self.record("cell edit".to_string(), edits, None);
+        Ok(())
+    }
+
+    /// Inserts a blank case at `index` (Data View).
+    pub fn insert_case(&mut self, index: usize) -> Result<(), EngineError> {
+        let values = self.dataset.blank_case();
+        self.dataset.insert_case(index, values.clone())?;
+        self.record("insert case".to_string(), vec![Edit::InsertCase { index, values }], None);
+        Ok(())
+    }
+
+    /// Deletes the case at `index` (Data View).
+    pub fn delete_case(&mut self, index: usize) -> Result<(), EngineError> {
+        let values = self.dataset.remove_case(index)?;
+        self.record("delete case".to_string(), vec![Edit::RemoveCase { index, values }], None);
+        Ok(())
+    }
+
+    /// What Undo would reverse (a command as written, or "cell edit", "delete case"...).
+    pub fn undo_label(&self) -> Option<&str> {
+        self.history.undo_label()
+    }
+
+    pub fn redo_label(&self) -> Option<&str> {
+        self.history.redo_label()
+    }
+
+    /// Reverses the last change; `false` when there is nothing to undo.
+    pub fn undo(&mut self) -> Result<bool, EngineError> {
+        let done = self.history.undo(&mut self.dataset, &mut self.journal)?;
+        self.modified |= done;
+        Ok(done)
+    }
+
+    /// Applies the last undone change again; `false` when there is nothing to redo.
+    pub fn redo(&mut self) -> Result<bool, EngineError> {
+        let done = self.history.redo(&mut self.dataset, &mut self.journal)?;
+        self.modified |= done;
+        Ok(done)
+    }
+
+    /// Runs a command and returns the edits it made to the data (none for analyses).
+    fn apply(&mut self, command: &Command) -> Result<Vec<Edit>, EngineError> {
         match command {
             Command::VariableLabels(_)
             | Command::ValueLabels(_)
@@ -110,9 +172,12 @@ impl Session {
             | Command::VariableLevel(_)
             | Command::Formats(_)
             | Command::RenameVariables(_) => {
+                let before = self.dataset.variables().to_vec();
                 edit::apply(&mut self.dataset, command)?;
-                self.modified = true;
+                return Ok(vec![Edit::Dictionary { before, after: self.dataset.variables().to_vec() }]);
             }
+            Command::Numeric(_) | Command::String(_) => return edit::new_variables(&mut self.dataset, command),
+            Command::DeleteVariables(names) => return edit::delete_variables(&mut self.dataset, names),
             Command::Descriptives { variables } => {
                 let table = mksigma_stats::descriptives(&self.dataset, variables)?;
                 self.output.push(Item::Table(table));
@@ -154,7 +219,7 @@ impl Session {
                 }
             }
         }
-        Ok(())
+        Ok(Vec::new())
     }
 }
 
@@ -233,6 +298,66 @@ mod tests {
         assert_eq!(t.dataset.column(1), s.dataset.column(1));
         s.run_syntax("DESCRIPTIVES age.").unwrap();
         assert!(!s.modified, "analysis doesn't modify the data");
+    }
+
+    #[test]
+    fn undo_and_redo_every_kind_of_change() {
+        let mut s = Session::with_sample().unwrap();
+        let original_vars = s.dataset.variables().to_vec();
+        let original_data: Vec<Vec<Value>> = (0..3).map(|i| s.dataset.column(i).unwrap().to_vec()).collect();
+        s.run_syntax("VARIABLE LABELS age 'Idade'.\nNUMERIC peso (F3.0).\nSTRING nome (A10).\nDELETE VARIABLES income.").unwrap();
+        s.set_cell(0, 2, "2").unwrap();
+        s.set_cell(8, 3, "Ana").unwrap();
+        s.insert_case(0).unwrap();
+        s.delete_case(3).unwrap();
+        s.run_syntax("DESCRIPTIVES age.").unwrap();
+        assert_eq!(s.dataset.n_cases(), 9);
+        assert_eq!(s.dataset.variables().iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["age", "score", "peso", "nome"]);
+        assert_eq!(s.undo_label(), Some("delete case"), "the analysis is not an undo step");
+
+        let mut undone = 0;
+        while s.undo().unwrap() {
+            undone += 1;
+        }
+        assert_eq!(undone, 8);
+        assert_eq!(s.dataset.variables(), original_vars.as_slice());
+        for (i, column) in original_data.iter().enumerate() {
+            assert_eq!(s.dataset.column(i).unwrap(), column.as_slice());
+        }
+        assert_eq!(s.journal, ["DESCRIPTIVES age."], "undone commands leave the journal");
+
+        while s.redo().unwrap() {}
+        assert_eq!(s.dataset.n_cases(), 9);
+        assert_eq!(s.dataset.column(3).unwrap()[8], Value::Str("Ana".into()));
+        assert_eq!(s.dataset.variables()[0].label.as_deref(), Some("Idade"));
+        assert_eq!(s.journal.len(), 5);
+    }
+
+    #[test]
+    fn a_new_change_clears_redo_and_opening_clears_history() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("NUMERIC a.").unwrap();
+        s.undo().unwrap();
+        assert_eq!(s.redo_label(), Some("NUMERIC a."));
+        s.run_syntax("NUMERIC b.").unwrap();
+        assert_eq!(s.redo_label(), None);
+        let (bytes, _) = s.save_sav(mksigma_sav::timestamp(0)).unwrap();
+        s.open_sav(&bytes).unwrap();
+        assert_eq!(s.undo_label(), None);
+    }
+
+    #[test]
+    fn new_variables_are_checked_before_any_is_added() {
+        let mut s = Session::with_sample().unwrap();
+        assert!(s.run_syntax("NUMERIC x y x.").is_err(), "a name twice");
+        assert!(s.run_syntax("NUMERIC z AGE.").is_err(), "an existing name");
+        assert!(s.run_syntax("STRING t (F8.2).").is_err());
+        assert!(s.run_syntax("NUMERIC n (A8).").is_err());
+        assert_eq!(s.dataset.variables().len(), 3);
+        s.run_syntax("STRING t (A3).").unwrap();
+        assert_eq!(s.dataset.column(3).unwrap()[0], Value::Str(String::new()));
+        assert!(s.run_syntax("DELETE VARIABLES age nope.").is_err());
+        assert_eq!(s.dataset.variables().len(), 4);
     }
 
     #[test]

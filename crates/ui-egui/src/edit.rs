@@ -27,11 +27,20 @@ pub struct Editing {
     focused: bool,
 }
 
+impl Editing {
+    /// An edit of `target` that starts with `text` (as if the cell had been clicked and typed in).
+    pub fn new(target: Target, text: &str) -> Self {
+        Self { target, text: text.to_string(), focused: false }
+    }
+}
+
 /// A finished edit, applied after the frame's layout (when the dataset is no longer borrowed).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Commit {
     Syntax(String),
     OpenValueLabels(usize),
+    InsertCase(usize),
+    DeleteCase(usize),
 }
 
 /// Shows `display` (left-aligned, or right-aligned for numbers when `right`), or a text box

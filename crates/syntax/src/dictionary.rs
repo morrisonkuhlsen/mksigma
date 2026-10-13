@@ -226,6 +226,53 @@ fn rename_variables(rest: &[Token]) -> Result<Command, SyntaxError> {
     Ok(Command::RenameVariables(pairs))
 }
 
+/// New variables' names and the format written after them, if any.
+pub type NewVariables = Vec<(Vec<String>, Option<String>)>;
+
+/// `NUMERIC` and `STRING`: variable lists, each followed by an optional `(format)`.
+fn new_variables(command: &'static str, rest: &[Token]) -> Result<NewVariables, SyntaxError> {
+    let mut out = Vec::new();
+    for group in rest.split(|t| *t == Token::Slash).filter(|g| !g.is_empty()) {
+        let mut tokens = group;
+        while !tokens.is_empty() {
+            let (vars, after) = var_list(tokens);
+            if vars.is_empty() {
+                return Err(SyntaxError::Expected { command, expected: "new variable names" });
+            }
+            match after {
+                [Token::LParen, Token::Word(format), Token::RParen, more @ ..] => {
+                    out.push((vars, Some(format.clone())));
+                    tokens = more;
+                }
+                [] => {
+                    out.push((vars, None));
+                    tokens = &[];
+                }
+                _ => return Err(SyntaxError::Expected { command, expected: "a format in parentheses, such as (F8.2)" }),
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(SyntaxError::Expected { command, expected: "new variable names" });
+    }
+    Ok(out)
+}
+
+fn string_variables(rest: &[Token]) -> Result<Command, SyntaxError> {
+    let groups = new_variables("STRING", rest)?
+        .into_iter()
+        .map(|(vars, format)| format.map(|f| (vars, f)).ok_or(SyntaxError::Expected { command: "STRING", expected: "a width such as (A20)" }))
+        .collect::<Result<_, _>>()?;
+    Ok(Command::String(groups))
+}
+
+fn delete_variables(rest: &[Token]) -> Result<Command, SyntaxError> {
+    match var_list(rest) {
+        (vars, []) if !vars.is_empty() => Ok(Command::DeleteVariables(vars)),
+        _ => Err(SyntaxError::Expected { command: "DELETE VARIABLES", expected: "a variable list" }),
+    }
+}
+
 /// Parses a two-word dictionary command, if `name second` is one.
 pub(crate) fn parse(name: &str, rest: &[Token]) -> Option<Result<Command, SyntaxError>> {
     let (second, after) = match rest.split_first() {
@@ -243,8 +290,14 @@ pub(crate) fn parse(name: &str, rest: &[Token]) -> Option<Result<Command, Syntax
         missing_values(after)
     } else if is("RENAME", "VARIABLES") {
         rename_variables(after)
+    } else if is("DELETE", "VARIABLES") {
+        delete_variables(after)
     } else if is_keyword(name, "FORMATS") {
         formats(rest)
+    } else if is_keyword(name, "NUMERIC") {
+        new_variables("NUMERIC", rest).map(Command::Numeric)
+    } else if is_keyword(name, "STRING") {
+        string_variables(rest)
     } else {
         return None;
     })
@@ -304,6 +357,19 @@ mod tests {
         assert!(parse("MISSING VALUES x (1, 2, 3, 4).").is_err());
         assert!(parse("MISSING VALUES x (1 THRU 2, 3 THRU 4).").is_err());
         assert!(parse("MISSING VALUES x 9.").is_err());
+    }
+
+    #[test]
+    fn new_and_deleted_variables() {
+        assert_eq!(
+            one("NUMERIC a b (F3.0) c /d."),
+            Command::Numeric(vec![(names(&["a", "b"]), Some("F3.0".into())), (names(&["c"]), None), (names(&["d"]), None)])
+        );
+        assert_eq!(one("STRING nome (A20) /uf (A2)."), Command::String(vec![(names(&["nome"]), "A20".into()), (names(&["uf"]), "A2".into())]));
+        assert!(parse("STRING nome.").is_err(), "a string needs a width");
+        assert!(parse("NUMERIC (F8.2).").is_err());
+        assert_eq!(one("DELETE VARIABLES a b."), Command::DeleteVariables(names(&["a", "b"])));
+        assert!(parse("DELETE VARIABLES.").is_err());
     }
 
     #[test]

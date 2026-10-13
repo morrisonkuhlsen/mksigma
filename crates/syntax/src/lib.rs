@@ -7,7 +7,7 @@ use thiserror::Error;
 mod dictionary;
 mod lexer;
 
-pub use dictionary::{Level, Literal, MissingSpec, ValueLabelList};
+pub use dictionary::{Level, Literal, MissingSpec, NewVariables, ValueLabelList};
 use lexer::Token;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,6 +30,13 @@ pub enum Command {
     Formats(Vec<(Vec<String>, String)>),
     /// `RENAME VARIABLES (old = new)...`
     RenameVariables(Vec<(String, String)>),
+    /// `NUMERIC varlist [(format)] [/varlist [(format)]]...`: new numeric variables (F8.2 when no
+    /// format is given), system-missing in every case
+    Numeric(NewVariables),
+    /// `STRING varlist (A<width>) [/...]`: new string variables, blank in every case
+    String(Vec<(Vec<String>, String)>),
+    /// `DELETE VARIABLES varlist`
+    DeleteVariables(Vec<String>),
 }
 
 /// Row order of a frequency table (`/FORMAT`).

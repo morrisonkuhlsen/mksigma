@@ -30,7 +30,16 @@ fn column_width(ui: &egui::Ui, text: &str) -> f32 {
     (galley.size().x + 16.0).clamp(56.0, 220.0)
 }
 
-pub(crate) fn data_view(ui: &mut egui::Ui, ds: &Dataset, labels: bool, editing: &mut Option<Editing>, edits: &mut Vec<(Target, String)>) {
+/// Data View. The row after the last case is blank: typing in it adds a case. Right-click a case
+/// number to insert or delete a case.
+pub(crate) fn data_view(
+    ui: &mut egui::Ui,
+    ds: &Dataset,
+    labels: bool,
+    editing: &mut Option<Editing>,
+    edits: &mut Vec<(Target, String)>,
+    commits: &mut Vec<Commit>,
+) {
     let vars = ds.variables();
     let n = ds.n_cases();
     let case_width = column_width(ui, &n.to_string()).max(48.0);
@@ -44,13 +53,33 @@ pub(crate) fn data_view(ui: &mut egui::Ui, ds: &Dataset, labels: bool, editing: 
         });
         ui.separator();
         // Only the visible rows are laid out, so large files stay fast.
-        egui::ScrollArea::vertical().id_salt("data-v").auto_shrink([false, false]).show_rows(ui, ROW_HEIGHT, n, |ui, rows| {
+        let rows_shown = if vars.is_empty() { 0 } else { n + 1 };
+        egui::ScrollArea::vertical().id_salt("data-v").auto_shrink([false, false]).show_rows(ui, ROW_HEIGHT, rows_shown, |ui, rows| {
             for case in rows {
                 ui.horizontal(|ui| {
-                    ui.add_sized([case_width, ROW_HEIGHT], egui::Label::new(egui::RichText::new((case + 1).to_string()).weak()));
+                    if case == n {
+                        ui.add_sized([case_width, ROW_HEIGHT], egui::Label::new(egui::RichText::new("+").weak()))
+                            .on_hover_text("Type here to add a case");
+                    } else {
+                        let number = egui::Label::new(egui::RichText::new((case + 1).to_string()).weak()).sense(egui::Sense::click());
+                        ui.add_sized([case_width, ROW_HEIGHT], number).context_menu(|ui| {
+                            if ui.button("Insert case above").clicked() {
+                                commits.push(Commit::InsertCase(case));
+                                ui.close();
+                            }
+                            if ui.button("Delete case").clicked() {
+                                commits.push(Commit::DeleteCase(case));
+                                ui.close();
+                            }
+                        });
+                    }
                     for (i, (var, w)) in vars.iter().zip(&widths).enumerate() {
                         let value = ds.column(i).and_then(|c| c.get(case));
-                        let text = value.map_or_else(|| ".".to_string(), |v| cell_text(var, v, labels));
+                        // The blank row after the last case shows nothing.
+                        let text = match value {
+                            Some(v) => cell_text(var, v, labels),
+                            None => String::new(),
+                        };
                         let mut rich = egui::RichText::new(text);
                         if value.is_some_and(|v| var.is_missing(v)) {
                             rich = rich.weak();
@@ -92,7 +121,13 @@ pub(crate) fn variable_view(
             }
             ui.end_row();
             for (i, var) in ds.variables().iter().enumerate() {
-                ui.label(egui::RichText::new((i + 1).to_string()).weak());
+                let number = ui.add(egui::Label::new(egui::RichText::new((i + 1).to_string()).weak()).sense(egui::Sense::click()));
+                number.context_menu(|ui| {
+                    if ui.button(format!("Delete {}", var.name)).clicked() {
+                        commits.push(Commit::Syntax(format!("DELETE VARIABLES {}.", var.name)));
+                        ui.close();
+                    }
+                });
                 let name = egui::RichText::new(&var.name);
                 editable(ui, editing, edits, Target::Variable(i, Field::Name), name, || var.name.clone(), 110.0, H, false);
                 ui.label(match var.var_type {
@@ -132,6 +167,11 @@ pub(crate) fn variable_view(
                 }
                 ui.end_row();
             }
+            // Typing a name in the blank last row adds a numeric variable.
+            let next = ds.variables().len();
+            ui.label(egui::RichText::new("+").weak()).on_hover_text("Type a name to add a variable");
+            editable(ui, editing, edits, Target::Variable(next, Field::Name), egui::RichText::new(""), String::new, 110.0, H, false);
+            ui.end_row();
         });
     });
 }

@@ -318,3 +318,75 @@ fn a_failed_save_keeps_the_changes_marked_unsaved() {
     assert!(app.session.modified);
     assert_eq!(app.file_path, None);
 }
+
+#[test]
+fn ctrl_z_undoes_and_ctrl_shift_z_redoes() {
+    let mut h = harness(SigmaApp::default());
+    h.state_mut().run_edit("VARIABLE LABELS age 'Idade'.");
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(3);
+    assert_eq!(h.state().session.dataset.variables()[0].label.as_deref(), Some("Age (years)"));
+    assert_eq!(h.state().status, Some(Status::Info("Undid VARIABLE LABELS age 'Idade'.".into())));
+    assert!(h.state().session.journal.is_empty());
+    h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
+    h.run_steps(3);
+    assert_eq!(h.state().session.dataset.variables()[0].label.as_deref(), Some("Idade"));
+}
+
+#[test]
+fn edit_menu_names_what_it_undoes() {
+    let mut h = harness(SigmaApp::default());
+    h.state_mut().session.set_cell(0, 0, "30").unwrap();
+    h.run_steps(2);
+    h.get_by_label("Edit").click();
+    h.run_steps(3);
+    h.get_by_label("Undo cell edit").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.dataset.column(0).unwrap()[0], mksigma_engine::core::Value::Num(23.0));
+}
+
+#[test]
+fn typing_in_the_blank_rows_adds_a_case_and_a_variable() {
+    use mksigma_engine::core::Value;
+    let mut h = sized(SigmaApp::default(), 1800.0);
+    // Data View: the row after case 8 is blank; type into its first cell.
+    assert!(shows(&h, "+"), "the blank row is marked");
+    let target = mksigma_ui_egui::Target::Cell { case: 8, var: 0 };
+    h.state_mut().editing = Some(mksigma_ui_egui::Editing::new(target, "40"));
+    h.run_steps(3);
+    press(&mut h, egui::Key::Enter);
+    assert_eq!(h.state().session.dataset.n_cases(), 9);
+    assert_eq!(h.state().session.dataset.column(0).unwrap()[8], Value::Num(40.0));
+    assert_eq!(h.state().session.dataset.column(1).unwrap()[8], Value::SysMis);
+
+    // Variable View: a name in the blank last row runs NUMERIC.
+    h.state_mut().view = View::Variables;
+    h.run_steps(3);
+    let target = mksigma_ui_egui::Target::Variable(3, mksigma_ui_egui::Field::Name);
+    h.state_mut().editing = Some(mksigma_ui_egui::Editing::new(target, "renda_extra"));
+    h.run_steps(3);
+    press(&mut h, egui::Key::Enter);
+    assert_eq!(h.state().session.dataset.variables()[3].name, "renda_extra");
+    assert_eq!(h.state().session.journal, ["NUMERIC renda_extra."]);
+}
+
+#[test]
+fn right_click_deletes_cases_and_variables() {
+    let mut h = sized(SigmaApp::default(), 1800.0);
+    h.get_by_label("2").click_secondary();
+    h.run_steps(3);
+    h.get_by_label("Delete case").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.dataset.n_cases(), 7);
+    assert_eq!(h.state().session.dataset.column(0).unwrap()[1], mksigma_engine::core::Value::Num(41.0));
+
+    h.state_mut().view = View::Variables;
+    h.run_steps(3);
+    h.get_all_by_label("1").next().unwrap().click_secondary();
+    h.run_steps(3);
+    h.get_by_label("Delete age").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.dataset.variables()[0].name, "income");
+    assert_eq!(h.state().session.journal, ["DELETE VARIABLES age."]);
+}
