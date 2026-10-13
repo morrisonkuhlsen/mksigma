@@ -72,8 +72,14 @@ Done too: `CORRELATIONS` (pairwise or listwise, one- or two-tailed, `*`/`**` fla
 confidence intervals; collinearity detected; runs the syntax SPSS pastes). Checked against
 statsmodels and scipy.
 
-Next: `LOGISTIC REGRESSION`, post hoc tests for `ONEWAY`, `NPAR TESTS`, more `REGRESSION`
-(stepwise, blocks, residuals and collinearity diagnostics). Earlier list, for reference: `CROSSTABS` (χ², Fisher), `T-TEST` (one-sample, independent, paired),
+Done too: `ONEWAY /POSTHOC` (Tukey HSD/Tukey–Kramer with an own studentized range
+distribution, Bonferroni), `NPAR TESTS` (Mann-Whitney, Wilcoxon, Kruskal-Wallis, tie
+corrections), `LOGISTIC REGRESSION /METHOD=ENTER` (Newton–Raphson; omnibus test, −2LL, Cox & Snell
+and Nagelkerke R², classification table, Wald, Exp(B) with CI). Checked against statsmodels and
+scipy. **M2 is complete.**
+
+Later in this area: stepwise and blocks in `REGRESSION`/`LOGISTIC REGRESSION`, residuals and
+collinearity diagnostics, categorical covariates, exact tests, more post hoc tests. Earlier list, for reference: `CROSSTABS` (χ², Fisher), `T-TEST` (one-sample, independent, paired),
 `ONEWAY`, `CORRELATIONS`, `REGRESSION` (linear), `LOGISTIC REGRESSION`.
 
 ## M3 — Output Viewer
