@@ -66,6 +66,7 @@ fn changes_data(command: &Command) -> bool {
             | Command::Regression { .. }
             | Command::NparTests(_)
             | Command::Logistic { .. }
+            | Command::Graph { .. }
     )
 }
 
@@ -336,7 +337,7 @@ impl Session {
                 let table = mksigma_stats::descriptives(&self.dataset, variables)?;
                 self.output.push(Item::Table(table));
             }
-            Command::Frequencies { variables, table, order, statistics } => {
+            Command::Frequencies { variables, table, order, statistics, histogram, barchart } => {
                 use mksigma_stats::{FrequenciesOrder as O, FrequenciesStatistic as S};
                 use mksigma_syntax::{FreqOrder, FreqStatistic};
                 let options = mksigma_stats::FrequenciesOptions {
@@ -366,6 +367,35 @@ impl Session {
                 for item in mksigma_stats::frequencies(&self.dataset, &options)? {
                     self.output.push(item);
                 }
+                for variable in variables {
+                    if *barchart {
+                        self.output.push(mksigma_stats::bar(&self.dataset, &mksigma_stats::BarValue::Count, variable)?);
+                    }
+                    if let Some(normal) = histogram {
+                        self.output.push(mksigma_stats::histogram(&self.dataset, variable, *normal)?);
+                    }
+                }
+            }
+            Command::Graph { chart, title } => {
+                use mksigma_syntax::{BarStat, GraphSpec};
+                let mut item = match chart {
+                    GraphSpec::Histogram { variable, normal } => mksigma_stats::histogram(&self.dataset, variable, *normal)?,
+                    GraphSpec::Bar { value, by } => {
+                        let value = match value {
+                            BarStat::Count => mksigma_stats::BarValue::Count,
+                            BarStat::Mean(y) => mksigma_stats::BarValue::Mean(y.clone()),
+                        };
+                        mksigma_stats::bar(&self.dataset, &value, by)?
+                    }
+                    GraphSpec::Scatter { x, y } => mksigma_stats::scatter(&self.dataset, x, y)?,
+                };
+                if let (Some(title), Item::Chart(chart)) = (title, &mut item) {
+                    use mksigma_output::Chart;
+                    match chart {
+                        Chart::Histogram { title: t, .. } | Chart::Bar { title: t, .. } | Chart::Scatter { title: t, .. } => t.clone_from(title),
+                    }
+                }
+                self.output.push(item);
             }
             Command::DisplayDictionary => {
                 for table in dictionary::tables(&self.dataset) {
@@ -755,6 +785,20 @@ mod tests {
         assert!(s.move_step(0, true).is_err());
         assert!(s.move_step(2, false).is_err());
         assert!(s.remove_step(9).is_err());
+    }
+
+    #[test]
+    fn charts_go_to_the_output() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax(
+            "GRAPH /HISTOGRAM(NORMAL)=income /TITLE='Renda'.\nGRAPH /BAR(SIMPLE)=MEAN(income) BY score.\n\
+             GRAPH /SCATTERPLOT(BIVAR)=age WITH income.\nFREQUENCIES age /FORMAT=NOTABLE /HISTOGRAM /BARCHART.",
+        )
+        .unwrap();
+        let charts: Vec<&str> = s.output.items.iter().filter_map(|i| if let Item::Chart(c) = i { Some(c.title()) } else { None }).collect();
+        assert_eq!(charts, ["Renda", "Mean Monthly income by Test score", "Monthly income by Age (years)", "Age (years)", "Age (years)"]);
+        assert!(s.steps().is_empty(), "charts are not steps");
+        assert!(s.output.to_html("Output").contains("<svg"));
     }
 
     #[test]

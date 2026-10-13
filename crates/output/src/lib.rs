@@ -2,6 +2,11 @@
 //! data here; rendering (egui, text, later HTML/PDF/.spv-like export) lives in the frontends.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod chart;
+mod html;
+
+pub use chart::Chart;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cell {
     Num { value: f64, decimals: u8 },
@@ -29,11 +34,26 @@ pub struct Table {
     pub rows: Vec<(String, Vec<Cell>)>,
 }
 
+impl Table {
+    /// The pivot of rows and columns: row labels become column headers and the other way round.
+    pub fn transposed(&self) -> Table {
+        let columns = self.rows.iter().map(|(label, _)| label.clone()).collect();
+        let rows = self
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(c, name)| (name.clone(), self.rows.iter().map(|(_, cells)| cells.get(c).cloned().unwrap_or(Cell::Empty)).collect()))
+            .collect();
+        Table { title: self.title.clone(), columns, rows }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     Table(Table),
     Text(String),
     Warning(String),
+    Chart(Chart),
 }
 
 /// Everything a session has produced, in order.
@@ -57,6 +77,11 @@ impl Output {
                 Item::Warning(s) => {
                     out.push_str("Warning: ");
                     out.push_str(s);
+                }
+                Item::Chart(c) => {
+                    out.push_str("[Chart: ");
+                    out.push_str(c.title());
+                    out.push(']');
                 }
             }
             out.push_str("\n\n");

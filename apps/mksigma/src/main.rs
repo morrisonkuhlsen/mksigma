@@ -28,6 +28,9 @@ fn main() -> eframe::Result {
             rfd::FileDialog::new().add_filter("SPSS Statistics data (.sav)", &["sav"]).set_file_name(suggested).save_file()
         })),
         now: Some(Box::new(now)),
+        pick_export: Some(Box::new(|suggested: &str| {
+            rfd::FileDialog::new().add_filter("Web page (.html)", &["html", "htm"]).set_file_name(suggested).save_file()
+        })),
     };
     let mut app = SigmaApp::new(services);
     if let Some(path) = std::env::args_os().nth(1) {

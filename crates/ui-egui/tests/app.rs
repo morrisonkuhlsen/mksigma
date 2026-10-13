@@ -444,3 +444,25 @@ fn right_click_deletes_cases_and_variables() {
     assert_eq!(h.state().session.dataset.variables()[0].name, "income");
     assert_eq!(h.state().session.journal, ["DELETE VARIABLES age."]);
 }
+
+#[test]
+fn charts_pivot_and_html_export() {
+    let path = temp_path("output.html");
+    let picked = path.clone();
+    let services = Services { pick_export: Some(Box::new(move |_: &str| Some(picked.clone()))), ..Services::default() };
+    let mut app = SigmaApp::new(services);
+    app.session.run_syntax("DESCRIPTIVES age income.\nGRAPH /HISTOGRAM(NORMAL)=income.").unwrap();
+    let mut h = harness(app);
+    assert!(shows(&h, "Descriptive Statistics"));
+    // Pivot the table: the variables become columns.
+    h.get_by_label("pivot").click();
+    h.run_steps(3);
+    assert!(h.state().output_state.transposed.contains(&0));
+    assert!(shows(&h, "Std. Deviation"), "statistics are now row labels");
+    h.get_by_label("Export HTML").click();
+    h.run_steps(3);
+    let html = std::fs::read_to_string(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(html.contains("Descriptive Statistics") && html.contains("<svg"));
+    assert!(matches!(&h.state().status, Some(Status::Info(s)) if s.starts_with("Exported the Output")));
+}

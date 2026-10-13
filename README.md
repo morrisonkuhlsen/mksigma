@@ -30,6 +30,7 @@ cargo run -p mksigma-cli -- run 'DESCRIPTIVES VARIABLES=age income score.'   # s
 cargo run -p mksigma-cli -- run --in data.sav 'DISPLAY DICTIONARY.'
 cargo run -p mksigma-cli -- run --in data.sav --out fixed.sav "VARIABLE LABELS q1 'Satisfaction'." 
 cargo test
+cargo run -p mksigma-cli -- run --in data.sav --html report.html "GRAPH /HISTOGRAM(NORMAL)=x."
 cargo run -p mksigma-ui-egui --example snapshot -- --in data.sav out.png   # offscreen UI render
 ```
 

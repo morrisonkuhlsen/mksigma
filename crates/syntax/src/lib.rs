@@ -13,7 +13,7 @@ mod transform;
 pub use dictionary::{Level, Literal, MissingSpec, NewVariables, ValueLabelList};
 pub use expr::{BinOp, Expr};
 use lexer::Token;
-pub use procedures::{CrosstabCells, NparSpec, PostHocTest, TTestSpec};
+pub use procedures::{BarStat, CrosstabCells, GraphSpec, NparSpec, PostHocTest, TTestSpec};
 pub use transform::{RecodeFrom, RecodeGroup, RecodeSpec, RecodeTo};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,7 +23,19 @@ pub enum Command {
     /// `DISPLAY DICTIONARY`
     DisplayDictionary,
     /// `FREQUENCIES [VARIABLES=] var... [/FORMAT=...] [/STATISTICS=...]`
-    Frequencies { variables: Vec<String>, table: bool, order: FreqOrder, statistics: Vec<FreqStatistic> },
+    Frequencies {
+        variables: Vec<String>,
+        table: bool,
+        order: FreqOrder,
+        statistics: Vec<FreqStatistic>,
+        /// `/HISTOGRAM [NORMAL]`: a histogram per variable, with the normal curve if `true`.
+        histogram: Option<bool>,
+        /// `/BARCHART`: a bar chart of the frequencies per variable.
+        barchart: bool,
+    },
+    /// `GRAPH /HISTOGRAM[(NORMAL)]=x`, `/BAR(SIMPLE)=COUNT BY x`, `/BAR(SIMPLE)=MEAN(y) BY x`,
+    /// `/SCATTERPLOT(BIVAR)=x WITH y`, with an optional `/TITLE='...'`.
+    Graph { chart: GraphSpec, title: Option<String> },
     /// `VARIABLE LABELS var 'label' [/var 'label']...`
     VariableLabels(Vec<(String, String)>),
     /// `VALUE LABELS varlist value 'label'... [/varlist ...]` (replaces existing labels)
@@ -136,7 +148,7 @@ fn parts<'a>(command: &'static str, rest: &'a [Token]) -> Result<Parts<'a>, Synt
                 variables = Some(words(list)?.into_iter().map(str::to_string).collect());
             }
             [Token::Word(w), Token::Equals, values @ ..] => subcommands.push((w.as_str(), words(values)?)),
-            [Token::Word(w)] if i > 0 => subcommands.push((w.as_str(), Vec::new())),
+            [Token::Word(w), values @ ..] if i > 0 => subcommands.push((w.as_str(), words(values)?)),
             list if i == 0 => variables = Some(words(list)?.into_iter().map(str::to_string).collect()),
             _ => return Err(SyntaxError::Expected { command, expected: "a subcommand" }),
         }
@@ -211,6 +223,9 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     if is_keyword(name, "ONEWAY") {
         return procedures::oneway(rest);
     }
+    if is_keyword(name, "GRAPH") {
+        return procedures::graph(rest);
+    }
     if is_keyword(name, "CORRELATIONS") {
         return procedures::correlations(rest);
     }
@@ -250,7 +265,7 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
 fn frequencies(rest: &[Token]) -> Result<Command, SyntaxError> {
     const CMD: &str = "FREQUENCIES";
     let Parts { variables, subcommands } = parts(CMD, rest)?;
-    let (mut table, mut order, mut statistics) = (true, FreqOrder::default(), Vec::new());
+    let (mut table, mut order, mut statistics, mut histogram, mut barchart) = (true, FreqOrder::default(), Vec::new(), None, false);
     for (sub, values) in subcommands {
         if is_keyword(sub, "FORMAT") {
             for v in values {
@@ -291,6 +306,18 @@ fn frequencies(rest: &[Token]) -> Result<Command, SyntaxError> {
                 };
                 statistics.push(stat);
             }
+        } else if is_keyword(sub, "HISTOGRAM") {
+            histogram = Some(match values.as_slice() {
+                [] => false,
+                [v] if is_keyword(v, "NORMAL") => true,
+                [v] if is_keyword(v, "NONORMAL") => false,
+                _ => return Err(unsupported(CMD, "/HISTOGRAM options other than NORMAL")),
+            });
+        } else if is_keyword(sub, "BARCHART") {
+            if !values.iter().all(|v| is_keyword(v, "FREQ")) {
+                return Err(unsupported(CMD, "/BARCHART options other than FREQ"));
+            }
+            barchart = true;
         } else {
             return Err(unsupported(CMD, &format!("/{sub}")));
         }
@@ -308,7 +335,7 @@ fn frequencies(rest: &[Token]) -> Result<Command, SyntaxError> {
         FreqStatistic::Sum,
     ];
     let statistics = all.into_iter().filter(|s| statistics.contains(s)).collect();
-    Ok(Command::Frequencies { variables, table, order, statistics })
+    Ok(Command::Frequencies { variables, table, order, statistics, histogram, barchart })
 }
 
 #[cfg(test)]
@@ -329,6 +356,8 @@ mod tests {
     #[test]
     fn frequencies() {
         let freq = |vars: &[&str], table, order, statistics: &[FreqStatistic]| Command::Frequencies {
+            histogram: None,
+            barchart: false,
             variables: vars.iter().map(|v| v.to_string()).collect(),
             table,
             order,
@@ -349,7 +378,11 @@ mod tests {
             parse("FREQUENCIES age /STATISTICS=MEDIAN."),
             Err(SyntaxError::Unsupported { command: "FREQUENCIES", what: "/STATISTICS=MEDIAN".into() })
         );
-        assert!(matches!(parse("FREQUENCIES age /BARCHART."), Err(SyntaxError::Unsupported { .. })));
+        assert!(matches!(
+            &parse("FREQUENCIES age /HISTOGRAM NORMAL /BARCHART.").unwrap()[..],
+            [Command::Frequencies { histogram: Some(true), barchart: true, .. }]
+        ));
+        assert!(matches!(parse("FREQUENCIES age /PIECHART."), Err(SyntaxError::Unsupported { .. })));
         assert!(matches!(parse("FREQUENCIES /FORMAT=NOTABLE."), Err(SyntaxError::Expected { .. })));
     }
 

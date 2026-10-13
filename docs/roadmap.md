@@ -83,6 +83,12 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
 `ONEWAY`, `CORRELATIONS`, `REGRESSION` (linear), `LOGISTIC REGRESSION`.
 
 ## M3 — Output Viewer
+- **Done (first part):** charts — histogram with optional normal curve, simple bar (count or
+  mean by category), scatterplot — via `GRAPH` and `FREQUENCIES /HISTOGRAM /BARCHART`; the
+  layout is computed once and drawn by egui on screen and as SVG in exports. Tables pivot
+  (transpose) in the viewer. File > Export Output as HTML (and `mksigma-cli --html`): one
+  self-contained page, light and dark, printable.
+- To do: boxplots, clustered bars, pie; pivot layers; chart and table editing; PDF export.
 - Pivot tables (transpose, move layers), charts (histogram, bar, scatter, boxplot)
 - **Cross-filtering:** items from one dataset share a filter; selecting a bar or a table
   category filters the other items

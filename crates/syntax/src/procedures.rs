@@ -13,6 +13,20 @@ pub struct CrosstabCells {
     pub total: bool,
 }
 
+/// What a bar chart's bars measure.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BarStat {
+    Count,
+    Mean(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GraphSpec {
+    Histogram { variable: String, normal: bool },
+    Bar { value: BarStat, by: String },
+    Scatter { x: String, y: String },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum NparSpec {
     MannWhitney { variables: Vec<String>, group: String, first: f64, second: f64 },
@@ -175,6 +189,73 @@ fn by_group(tokens: &[Token]) -> Option<(Vec<String>, String, f64, f64)> {
         [a, b] => Some((vars, group.clone(), a, b)),
         _ => None,
     }
+}
+
+pub(crate) fn graph(rest: &[Token]) -> Result<Command, SyntaxError> {
+    const CMD: &str = "GRAPH";
+    let bad = |expected| SyntaxError::Expected { command: CMD, expected };
+    let (mut chart, mut title) = (None, None);
+    for group in rest.split(|t| *t == Token::Slash).filter(|g| !g.is_empty()) {
+        let Some((Token::Word(name), rest)) = group.split_first() else { return Err(bad("a chart such as /HISTOGRAM=x")) };
+        // An optional (option) between the chart name and `=`.
+        let (option, rest) = match rest {
+            [Token::LParen, Token::Word(o), Token::RParen, rest @ ..] => (Some(o.as_str()), rest),
+            rest => (None, rest),
+        };
+        let rest = match rest {
+            [Token::Equals, rest @ ..] => rest,
+            rest => rest,
+        };
+        if is_keyword(name, "TITLE") {
+            title = match rest {
+                [Token::Str(t)] => Some(t.clone()),
+                _ => return Err(bad("/TITLE='a quoted title'")),
+            };
+            continue;
+        }
+        if chart.is_some() {
+            return Err(unsupported(CMD, "more than one chart per command"));
+        }
+        chart = Some(if is_keyword(name, "HISTOGRAM") {
+            let normal = match option {
+                None => false,
+                Some(o) if is_keyword(o, "NORMAL") => true,
+                Some(o) => return Err(unsupported(CMD, &format!("/HISTOGRAM({o})"))),
+            };
+            match rest {
+                [Token::Word(v)] => GraphSpec::Histogram { variable: v.clone(), normal },
+                _ => return Err(bad("/HISTOGRAM=variable")),
+            }
+        } else if is_keyword(name, "BAR") {
+            if option.is_some_and(|o| !is_keyword(o, "SIMPLE")) {
+                return Err(unsupported(CMD, "bar charts other than SIMPLE"));
+            }
+            match rest {
+                [Token::Word(c), Token::Word(by), Token::Word(x)] if is_keyword(c, "COUNT") && by.eq_ignore_ascii_case("BY") => {
+                    GraphSpec::Bar { value: BarStat::Count, by: x.clone() }
+                }
+                [Token::Word(f), Token::LParen, Token::Word(y), Token::RParen, Token::Word(by), Token::Word(x)]
+                    if is_keyword(f, "MEAN") && by.eq_ignore_ascii_case("BY") =>
+                {
+                    GraphSpec::Bar { value: BarStat::Mean(y.clone()), by: x.clone() }
+                }
+                _ => return Err(bad("/BAR(SIMPLE)=COUNT BY x or MEAN(y) BY x")),
+            }
+        } else if is_keyword(name, "SCATTERPLOT") {
+            if option.is_some_and(|o| !is_keyword(o, "BIVAR")) {
+                return Err(unsupported(CMD, "scatterplots other than BIVAR"));
+            }
+            match rest {
+                [Token::Word(x), Token::Word(with), Token::Word(y)] if with.eq_ignore_ascii_case("WITH") => {
+                    GraphSpec::Scatter { x: x.clone(), y: y.clone() }
+                }
+                _ => return Err(bad("/SCATTERPLOT(BIVAR)=x WITH y")),
+            }
+        } else {
+            return Err(unsupported(CMD, &format!("/{name}")));
+        });
+    }
+    Ok(Command::Graph { chart: chart.ok_or(bad("a chart such as /HISTOGRAM=x"))?, title })
 }
 
 pub(crate) fn npar_tests(rest: &[Token]) -> Result<Command, SyntaxError> {
@@ -599,6 +680,29 @@ mod tests {
         );
         assert!(parse("ONEWAY y BY a b.").is_err(), "one factor");
         assert!(parse("ONEWAY y BY g /POSTHOC=SCHEFFE.").is_err());
+    }
+
+    #[test]
+    fn graph_syntax() {
+        assert_eq!(
+            one("GRAPH /HISTOGRAM(NORMAL)=renda /TITLE='Renda mensal'."),
+            Command::Graph { chart: GraphSpec::Histogram { variable: "renda".into(), normal: true }, title: Some("Renda mensal".into()) }
+        );
+        assert_eq!(
+            one("GRAPH /BAR(SIMPLE)=COUNT BY regiao."),
+            Command::Graph { chart: GraphSpec::Bar { value: BarStat::Count, by: "regiao".into() }, title: None }
+        );
+        assert_eq!(
+            one("GRAPH /BAR(SIMPLE)=MEAN(renda) BY regiao."),
+            Command::Graph { chart: GraphSpec::Bar { value: BarStat::Mean("renda".into()), by: "regiao".into() }, title: None }
+        );
+        assert_eq!(
+            one("GRAPH /SCATTERPLOT(BIVAR)=pre WITH pos."),
+            Command::Graph { chart: GraphSpec::Scatter { x: "pre".into(), y: "pos".into() }, title: None }
+        );
+        assert!(parse("GRAPH /PIE=COUNT BY x.").is_err());
+        assert!(parse("GRAPH /BAR(STACKED)=COUNT BY x.").is_err());
+        assert!(parse("GRAPH /TITLE='x'.").is_err(), "a title needs a chart");
     }
 
     #[test]

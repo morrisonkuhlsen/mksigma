@@ -13,6 +13,7 @@ mod output;
 mod views;
 
 pub use edit::{Editing, Field, Target};
+pub use output::OutputState;
 pub use views::ValueLabelsDialog;
 
 use edit::{Commit, syntax_for, value_labels_syntax};
@@ -32,6 +33,8 @@ pub struct Services {
     pub pick_save: Option<PickSave>,
     /// Seconds since 1970, for the saved file's creation time.
     pub now: Option<Box<dyn Fn() -> i64>>,
+    /// Shows a save dialog for exporting the Output as HTML, suggesting a file name.
+    pub pick_export: Option<PickSave>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +64,8 @@ pub struct SigmaApp {
     /// The cell being edited, if any.
     pub editing: Option<Editing>,
     pub value_labels_dialog: Option<ValueLabelsDialog>,
+    /// Which Output tables are pivoted.
+    pub output_state: OutputState,
     services: Services,
     title: String,
 }
@@ -98,6 +103,7 @@ impl SigmaApp {
             file_path: None,
             editing: None,
             value_labels_dialog: None,
+            output_state: OutputState::default(),
             services,
             title: String::new(),
         }
@@ -113,6 +119,22 @@ impl SigmaApp {
                 }
             }
             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
+        }
+    }
+
+    /// Writes the Output as a self-contained HTML page.
+    pub fn export_html(&mut self, path: &Path) {
+        let title = self.file_name.as_deref().map_or_else(|| "MK Sigma Output".to_string(), |f| format!("{f} — Output"));
+        match std::fs::write(path, self.session.output.to_html(&title)) {
+            Ok(()) => self.status = Some(Status::Info(format!("Exported the Output to {}", path.display()))),
+            Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
+        }
+    }
+
+    fn export_dialog(&mut self) {
+        let stem = self.file_name.as_deref().and_then(|f| f.rsplit_once('.').map(|(s, _)| s.to_string())).unwrap_or_else(|| "output".to_string());
+        if let Some(path) = self.services.pick_export.as_ref().and_then(|pick| pick(&format!("{stem}.html"))) {
+            self.export_html(&path);
         }
     }
 
@@ -283,6 +305,11 @@ impl SigmaApp {
                     ui.close();
                     self.save_as();
                 }
+                ui.separator();
+                if ui.add_enabled(!self.session.output.items.is_empty(), egui::Button::new("Export Output as HTML…")).clicked() {
+                    ui.close();
+                    self.export_dialog();
+                }
             });
             ui.menu_button("Edit", |ui| {
                 let undo = self.session.undo_label().map(|l| format!("Undo {}", short(l)));
@@ -323,7 +350,9 @@ impl SigmaApp {
             ui.allocate_ui_with_layout(egui::vec2(right_width, body), top_down, |ui| {
                 ui.set_width(right_width);
                 ui.set_height(body);
-                output::output_view(ui, &mut self.session.output);
+                if let output::OutputAction::Export = output::output_view(ui, &mut self.session.output, &mut self.output_state) {
+                    self.export_dialog();
+                }
             });
         });
         self.status_line(ui);

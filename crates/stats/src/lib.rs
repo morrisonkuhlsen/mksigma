@@ -7,6 +7,7 @@ use mksigma_core::{Dataset, Value, Variable};
 use mksigma_output::{Cell, Table};
 use thiserror::Error;
 
+mod charts;
 mod correlations;
 mod crosstabs;
 mod dist;
@@ -19,6 +20,7 @@ mod range;
 mod regression;
 mod ttest;
 
+pub use charts::{BarValue, bar, histogram, scatter};
 pub use correlations::{Options as CorrelationsOptions, correlations};
 pub use crosstabs::{Cells as CrosstabsCells, Options as CrosstabsOptions, crosstabs};
 pub use logistic::{Options as LogisticOptions, logistic};
