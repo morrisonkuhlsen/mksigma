@@ -67,8 +67,13 @@ correction, likelihood ratio, Fisher's exact for 2×2, linear-by-linear; expecte
 `T-TEST` (one-sample, independent with Levene and pooled/Welch, paired with correlation;
 confidence level), `ONEWAY` (ANOVA, descriptives, Levene). All checked against scipy.
 
-Next: `CORRELATIONS`, `REGRESSION` (linear), `LOGISTIC REGRESSION`, post hoc tests for `ONEWAY`,
-`NPAR TESTS`. Earlier list, for reference: `CROSSTABS` (χ², Fisher), `T-TEST` (one-sample, independent, paired),
+Done too: `CORRELATIONS` (pairwise or listwise, one- or two-tailed, `*`/`**` flags, `WITH`),
+`REGRESSION /METHOD=ENTER` (Model Summary, ANOVA, Coefficients with standardized Beta and
+confidence intervals; collinearity detected; runs the syntax SPSS pastes). Checked against
+statsmodels and scipy.
+
+Next: `LOGISTIC REGRESSION`, post hoc tests for `ONEWAY`, `NPAR TESTS`, more `REGRESSION`
+(stepwise, blocks, residuals and collinearity diagnostics). Earlier list, for reference: `CROSSTABS` (χ², Fisher), `T-TEST` (one-sample, independent, paired),
 `ONEWAY`, `CORRELATIONS`, `REGRESSION` (linear), `LOGISTIC REGRESSION`.
 
 ## M3 — Output Viewer

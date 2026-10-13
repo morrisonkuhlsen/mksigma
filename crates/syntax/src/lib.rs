@@ -55,6 +55,10 @@ pub enum Command {
     Crosstabs { rows: Vec<String>, columns: Vec<String>, cells: CrosstabCells, chisq: bool },
     /// `T-TEST` one-sample, independent-samples or paired; `ci` is the confidence level.
     TTest { test: TTestSpec, ci: f64 },
+    /// `CORRELATIONS [/VARIABLES=] vars [WITH vars] [/PRINT=...] [/MISSING=...]`
+    Correlations { variables: Vec<String>, with: Vec<String>, one_tailed: bool, flag: bool, listwise: bool },
+    /// `REGRESSION /DEPENDENT=y /METHOD=ENTER predictors [/STATISTICS ... CI(95)]`
+    Regression { dependent: String, predictors: Vec<String>, ci: Option<f64> },
     /// `ONEWAY dependents BY factor [/STATISTICS=DESCRIPTIVES HOMOGENEITY]`
     Oneway { dependents: Vec<String>, factor: String, descriptives: bool, homogeneity: bool },
 }
@@ -202,6 +206,12 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     }
     if is_keyword(name, "ONEWAY") {
         return procedures::oneway(rest);
+    }
+    if is_keyword(name, "CORRELATIONS") {
+        return procedures::correlations(rest);
+    }
+    if is_keyword(name, "REGRESSION") {
+        return procedures::regression(rest);
     }
     if is_keyword(name, "DISPLAY") {
         return match rest {

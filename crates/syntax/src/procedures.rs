@@ -35,9 +35,11 @@ fn words(tokens: &[Token]) -> Option<Vec<String>> {
 
 /// Subcommands: `NAME = tokens`, `NAME tokens` or, for the first, bare tokens (`None` name).
 fn subcommands(rest: &[Token]) -> Vec<(Option<&str>, &[Token])> {
+    // Number the groups before dropping empty ones: anything after a slash is a subcommand,
+    // even the first one written (`REGRESSION /DEPENDENT y ...`).
     rest.split(|t| *t == Token::Slash)
-        .filter(|g| !g.is_empty())
         .enumerate()
+        .filter(|(_, g)| !g.is_empty())
         .map(|(i, group)| match group {
             [Token::Word(name), Token::Equals, rest @ ..] => (Some(name.as_str()), rest),
             [Token::Word(name), rest @ ..] if i > 0 => (Some(name.as_str()), rest),
@@ -207,6 +209,112 @@ pub(crate) fn oneway(rest: &[Token]) -> Result<Command, SyntaxError> {
     Ok(Command::Oneway { dependents, factor, descriptives, homogeneity })
 }
 
+pub(crate) fn correlations(rest: &[Token]) -> Result<Command, SyntaxError> {
+    const CMD: &str = "CORRELATIONS";
+    let bad = |expected| SyntaxError::Expected { command: CMD, expected };
+    let (mut lists, mut one_tailed, mut flag, mut listwise) = (None, false, true, false);
+    for (name, tokens) in subcommands(rest) {
+        match name {
+            None => lists = Some(tokens),
+            Some(n) if is_keyword(n, "VARIABLES") => lists = Some(tokens),
+            Some(n) if is_keyword(n, "PRINT") => {
+                for w in words(tokens).ok_or(bad("PRINT keywords"))? {
+                    match w.to_ascii_uppercase().as_str() {
+                        "TWOTAIL" => one_tailed = false,
+                        "ONETAIL" => one_tailed = true,
+                        // NOSIG flags significant correlations; SIG shows them without flags.
+                        "NOSIG" => flag = true,
+                        "SIG" => flag = false,
+                        _ => return Err(unsupported(CMD, &format!("/PRINT={w}"))),
+                    }
+                }
+            }
+            Some(n) if is_keyword(n, "MISSING") => {
+                for w in words(tokens).ok_or(bad("PAIRWISE or LISTWISE"))? {
+                    match w.to_ascii_uppercase().as_str() {
+                        "PAIRWISE" => listwise = false,
+                        "LISTWISE" => listwise = true,
+                        "EXCLUDE" => {}
+                        _ => return Err(unsupported(CMD, &format!("/MISSING={w}"))),
+                    }
+                }
+            }
+            Some(n) => return Err(unsupported(CMD, &format!("/{n}"))),
+        }
+    }
+    let tokens = lists.ok_or(bad("a variable list"))?;
+    let at = tokens.iter().position(|t| matches!(t, Token::Word(w) if w.eq_ignore_ascii_case("WITH")));
+    let (variables, with) = match at {
+        Some(at) => (words(tokens.get(..at).unwrap_or_default()), words(tokens.get(at + 1..).unwrap_or_default())),
+        None => (words(tokens), Some(Vec::new())),
+    };
+    let (Some(variables), Some(with)) = (variables, with) else { return Err(bad("variable names")) };
+    if variables.is_empty() || (at.is_some() && with.is_empty()) || (at.is_none() && variables.len() < 2) {
+        return Err(bad("at least two variables, or variables WITH variables"));
+    }
+    Ok(Command::Correlations { variables, with, one_tailed, flag, listwise })
+}
+
+pub(crate) fn regression(rest: &[Token]) -> Result<Command, SyntaxError> {
+    const CMD: &str = "REGRESSION";
+    let bad = |expected| SyntaxError::Expected { command: CMD, expected };
+    let (mut dependent, mut predictors, mut ci) = (None, None, None);
+    for (name, tokens) in subcommands(rest) {
+        let name = name.ok_or(bad("/DEPENDENT= and /METHOD=ENTER"))?;
+        if is_keyword(name, "DEPENDENT") {
+            dependent = Some(match words(tokens).as_deref() {
+                Some([y]) => y.clone(),
+                _ => return Err(unsupported(CMD, "more than one dependent variable")),
+            });
+        } else if is_keyword(name, "METHOD") {
+            if predictors.is_some() {
+                return Err(unsupported(CMD, "more than one /METHOD (hierarchical models)"));
+            }
+            predictors = Some(match words(tokens).as_deref() {
+                Some([method, vars @ ..]) if is_keyword(method, "ENTER") && !vars.is_empty() => vars.to_vec(),
+                Some([method, ..]) if is_keyword(method, "ENTER") => return Err(bad("the predictors after ENTER")),
+                _ => return Err(unsupported(CMD, "methods other than ENTER")),
+            });
+        } else if is_keyword(name, "STATISTICS") {
+            let mut i = 0;
+            while let Some(t) = tokens.get(i) {
+                match t {
+                    Token::Word(w) if w.eq_ignore_ascii_case("CI") => {
+                        // CI or CI(95): the level in percent.
+                        ci = Some(match (tokens.get(i + 1), tokens.get(i + 2), tokens.get(i + 3)) {
+                            (Some(Token::LParen), Some(Token::Word(level)), Some(Token::RParen)) => {
+                                i += 3;
+                                level
+                                    .parse::<f64>()
+                                    .ok()
+                                    .filter(|l| *l > 0.0 && *l < 100.0)
+                                    .ok_or(bad("CI(level) with a level in percent, such as CI(95)"))?
+                                    / 100.0
+                            }
+                            _ => 0.95,
+                        });
+                    }
+                    Token::Word(w) if ["COEFF", "OUTS", "R", "ANOVA", "DEFAULTS"].iter().any(|k| w.eq_ignore_ascii_case(k)) => {}
+                    Token::Word(w) => return Err(unsupported(CMD, &format!("/STATISTICS={w}"))),
+                    _ => return Err(bad("statistic names")),
+                }
+                i += 1;
+            }
+        } else if is_keyword(name, "MISSING") {
+            if !matches!(tokens, [Token::Word(w)] if is_keyword(w, "LISTWISE")) {
+                return Err(unsupported(CMD, "/MISSING other than LISTWISE"));
+            }
+        } else if is_keyword(name, "CRITERIA") || is_keyword(name, "NOORIGIN") {
+            // Entry criteria only matter for stepwise methods; NOORIGIN is the default.
+        } else {
+            return Err(unsupported(CMD, &format!("/{name}")));
+        }
+    }
+    let dependent = dependent.ok_or(bad("/DEPENDENT=variable"))?;
+    let predictors = predictors.ok_or(bad("/METHOD=ENTER predictors"))?;
+    Ok(Command::Regression { dependent, predictors, ci })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,6 +370,33 @@ mod tests {
         assert_eq!(pairs.len(), 3, "every pair of the list");
         assert!(parse("T-TEST /VARIABLES=x.").is_err(), "needs TESTVAL, GROUPS or PAIRS");
         assert!(parse("T-TEST PAIRS=a WITH b c (PAIRED).").is_err());
+    }
+
+    #[test]
+    fn correlations_syntax() {
+        assert_eq!(
+            one("CORRELATIONS /VARIABLES=a b c /PRINT=ONETAIL NOSIG /MISSING=LISTWISE."),
+            Command::Correlations { variables: names(&["a", "b", "c"]), with: vec![], one_tailed: true, flag: true, listwise: true }
+        );
+        assert_eq!(
+            one("CORRELATIONS a b WITH c."),
+            Command::Correlations { variables: names(&["a", "b"]), with: names(&["c"]), one_tailed: false, flag: true, listwise: false }
+        );
+        assert!(parse("CORRELATIONS a.").is_err());
+        assert!(parse("CORRELATIONS a b /STATISTICS=DESCRIPTIVES.").is_err());
+    }
+
+    #[test]
+    fn regression_syntax_as_spss_pastes_it() {
+        assert_eq!(
+            one(
+                "REGRESSION /MISSING LISTWISE /STATISTICS COEFF OUTS CI(99) R ANOVA /CRITERIA=PIN(.05) POUT(.10) /NOORIGIN /DEPENDENT renda /METHOD=ENTER idade escolaridade."
+            ),
+            Command::Regression { dependent: "renda".into(), predictors: names(&["idade", "escolaridade"]), ci: Some(0.99) }
+        );
+        assert!(parse("REGRESSION /DEPENDENT y /METHOD=STEPWISE x.").is_err());
+        assert!(parse("REGRESSION /DEPENDENT y /METHOD=ENTER a /METHOD=ENTER b.").is_err());
+        assert!(parse("REGRESSION /METHOD=ENTER a.").is_err());
     }
 
     #[test]

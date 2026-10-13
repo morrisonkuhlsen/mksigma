@@ -62,6 +62,8 @@ fn changes_data(command: &Command) -> bool {
             | Command::Crosstabs { .. }
             | Command::TTest { .. }
             | Command::Oneway { .. }
+            | Command::Correlations { .. }
+            | Command::Regression { .. }
     )
 }
 
@@ -403,6 +405,20 @@ impl Session {
                 };
                 self.output.items.extend(mksigma_stats::t_test(&self.dataset, &test, *ci)?);
             }
+            Command::Correlations { variables, with, one_tailed, flag, listwise } => {
+                let options = mksigma_stats::CorrelationsOptions {
+                    variables: variables.clone(),
+                    with: with.clone(),
+                    one_tailed: *one_tailed,
+                    flag: *flag,
+                    listwise: *listwise,
+                };
+                self.output.items.extend(mksigma_stats::correlations(&self.dataset, &options)?);
+            }
+            Command::Regression { dependent, predictors, ci } => {
+                let options = mksigma_stats::RegressionOptions { dependent: dependent.clone(), predictors: predictors.clone(), ci: *ci };
+                self.output.items.extend(mksigma_stats::regression(&self.dataset, &options)?);
+            }
             Command::Oneway { dependents, factor, descriptives, homogeneity } => {
                 let options = mksigma_stats::OnewayOptions {
                     dependents: dependents.clone(),
@@ -717,8 +733,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(s.steps().len(), 1, "only the RECODE changed the data");
+        s.run_syntax("CORRELATIONS age income score.\nREGRESSION /DEPENDENT score /METHOD=ENTER age income.").unwrap();
+        assert_eq!(s.steps().len(), 1);
         let text = s.output.to_text();
-        for title in ["Crosstabulation", "Chi-Square Tests", "Independent Samples Test", "One-Sample Test", "Paired Samples Test", "ANOVA"] {
+        for title in [
+            "Crosstabulation",
+            "Chi-Square Tests",
+            "Independent Samples Test",
+            "One-Sample Test",
+            "Paired Samples Test",
+            "ANOVA",
+            "Correlations",
+            "Model Summary",
+            "Coefficients",
+        ] {
             assert!(text.contains(title), "{title} missing from:\n{text}");
         }
     }

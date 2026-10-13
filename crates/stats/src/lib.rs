@@ -7,15 +7,19 @@ use mksigma_core::{Dataset, Value, Variable};
 use mksigma_output::{Cell, Table};
 use thiserror::Error;
 
+mod correlations;
 mod crosstabs;
 mod dist;
 mod frequencies;
 mod groups;
 mod oneway;
+mod regression;
 mod ttest;
 
+pub use correlations::{Options as CorrelationsOptions, correlations};
 pub use crosstabs::{Cells as CrosstabsCells, Options as CrosstabsOptions, crosstabs};
 pub use oneway::{Options as OnewayOptions, oneway};
+pub use regression::{Options as RegressionOptions, regression};
 pub use ttest::{TTest, t_test};
 
 pub use frequencies::{Options as FrequenciesOptions, Order as FrequenciesOrder, Statistic as FrequenciesStatistic, frequencies};
