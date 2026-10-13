@@ -24,7 +24,13 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   `RECODE`, `SELECT IF`, `SORT CASES`, `AGGREGATE`, `MERGE FILES`
 - Desktop app: File ▸ Open (native dialog, Ctrl+O), drag and drop, opening a file given on the
   command line, Data View (virtualized rows, value-labels toggle, missing values dimmed) and a
-  read-only Variable View — **done**. Next: editing in Variable View and Data View.
+  Variable View — **done**.
+- Editing — **done**: Variable View (name, label, value labels dialog, missing values,
+  measurement level, format) turns every edit into syntax (`RENAME VARIABLES`, `VARIABLE LABELS`,
+  `VALUE LABELS`, `MISSING VALUES`, `VARIABLE LEVEL`, `FORMATS`), which runs through the engine
+  and lands in the session **History** (pastable into the syntax editor): the first recorded
+  steps. Data View edits cells in place. Commands are all-or-nothing. Next: undo, adding
+  variables and cases, saving (the `.sav` writer).
 
 ## M2 — the introductory-course core
 Done: case weights (`WEIGHT BY` from the file), `DESCRIPTIVES` weighted, `FREQUENCIES` (frequency

@@ -111,6 +111,69 @@ impl Format {
     }
 }
 
+/// Format names as written in syntax, by family.
+const FORMAT_NAMES: [(FormatKind, &str); 24] = [
+    (FormatKind::F, "F"),
+    (FormatKind::Comma, "COMMA"),
+    (FormatKind::Dot, "DOT"),
+    (FormatKind::Dollar, "DOLLAR"),
+    (FormatKind::Pct, "PCT"),
+    (FormatKind::E, "E"),
+    (FormatKind::N, "N"),
+    (FormatKind::Date, "DATE"),
+    (FormatKind::ADate, "ADATE"),
+    (FormatKind::EDate, "EDATE"),
+    (FormatKind::SDate, "SDATE"),
+    (FormatKind::JDate, "JDATE"),
+    (FormatKind::QYr, "QYR"),
+    (FormatKind::MoYr, "MOYR"),
+    (FormatKind::WkYr, "WKYR"),
+    (FormatKind::DateTime, "DATETIME"),
+    (FormatKind::YmdHms, "YMDHMS"),
+    (FormatKind::Time, "TIME"),
+    (FormatKind::DTime, "DTIME"),
+    (FormatKind::MTime, "MTIME"),
+    (FormatKind::WkDay, "WKDAY"),
+    (FormatKind::Month, "MONTH"),
+    (FormatKind::A, "A"),
+    (FormatKind::AHex, "AHEX"),
+];
+
+impl FormatKind {
+    pub fn is_string(self) -> bool {
+        matches!(self, FormatKind::A | FormatKind::AHex)
+    }
+}
+
+impl std::str::FromStr for Format {
+    type Err = String;
+
+    /// Parses `F8.2`, `COMMA10.2`, `A20`, `DATE11` (case-insensitive).
+    fn from_str(s: &str) -> Result<Self, String> {
+        let bad = || format!("{s} is not a format (examples: F8.2, COMMA10.2, A20)");
+        let split = s.find(|c: char| c.is_ascii_digit()).ok_or_else(bad)?;
+        let (name, numbers) = s.split_at(split);
+        let kind = FORMAT_NAMES.iter().find(|(_, n)| n.eq_ignore_ascii_case(name)).map(|(k, _)| *k).ok_or_else(bad)?;
+        let (width, decimals) = numbers.split_once('.').unwrap_or((numbers, "0"));
+        let width: u16 = width.parse().map_err(|_| bad())?;
+        let decimals: u8 = decimals.parse().map_err(|_| bad())?;
+        if width == 0 || (decimals > 0 && u16::from(decimals) >= width) || (kind.is_string() && decimals > 0) {
+            return Err(bad());
+        }
+        Ok(Format::new(kind, width, decimals))
+    }
+}
+
+/// Whether `name` can name a variable: starts with a letter or `@#$`, continues with letters,
+/// digits or `_.@#$`, doesn't end with a period, at most 64 bytes.
+pub fn is_valid_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_alphabetic() || matches!(c, '@' | '#' | '$'))
+        && chars.all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '@' | '#' | '$'))
+        && !name.ends_with('.')
+        && name.len() <= 64
+}
+
 /// `x` with `decimals` places and digits grouped in threes (`1,234,567.89`).
 fn grouped(x: f64, decimals: usize, separator: char, point: char) -> String {
     let plain = format!("{:.decimals$}", x.abs());
@@ -255,6 +318,41 @@ pub enum DatasetError {
     NotEmpty,
     #[error("a case has {got} values but the dataset has {expected} variables")]
     CaseWidth { expected: usize, got: usize },
+    #[error("{0} is not a valid variable name")]
+    InvalidName(String),
+    #[error("there is no variable {0}")]
+    NoVariable(usize),
+    #[error("there is no case {0}")]
+    NoCase(usize),
+    #[error("{0} is a string variable and needs text")]
+    NeedsText(String),
+    #[error("{0} is a numeric variable and needs a number")]
+    NeedsNumber(String),
+}
+
+/// Mutable access to a variable's label, format, measurement level, value labels and missing
+/// values; not its name or type.
+pub struct VariableMut<'a>(&'a mut Variable);
+
+impl VariableMut<'_> {
+    pub fn get(&self) -> &Variable {
+        self.0
+    }
+    pub fn set_label(&mut self, label: Option<String>) {
+        self.0.label = label;
+    }
+    pub fn set_format(&mut self, format: Format) {
+        self.0.format = format;
+    }
+    pub fn set_measure(&mut self, measure: Measure) {
+        self.0.measure = measure;
+    }
+    pub fn set_value_labels(&mut self, labels: Vec<(Value, String)>) {
+        self.0.value_labels = labels;
+    }
+    pub fn set_missing(&mut self, missing: MissingValues) {
+        self.0.missing = missing;
+    }
 }
 
 /// Variables and their values, stored by column, plus file-level metadata.
@@ -315,6 +413,47 @@ impl Dataset {
         self.columns.get(index).map(Vec::as_slice)
     }
 
+    /// A variable to change in place. Its name and type are fixed here: rename through
+    /// `rename_variable`, which keeps names unique.
+    pub fn variable_mut(&mut self, index: usize) -> Option<VariableMut<'_>> {
+        self.variables.get_mut(index).map(VariableMut)
+    }
+
+    /// Renames a variable; the new name must be valid and not used by another variable.
+    pub fn rename_variable(&mut self, index: usize, name: &str) -> Result<(), DatasetError> {
+        if !is_valid_name(name) {
+            return Err(DatasetError::InvalidName(name.to_string()));
+        }
+        if self.variable(name).is_some_and(|(i, _)| i != index) {
+            return Err(DatasetError::DuplicateName(name.to_string()));
+        }
+        let var = self.variables.get_mut(index).ok_or(DatasetError::NoVariable(index))?;
+        var.name = name.to_string();
+        Ok(())
+    }
+
+    /// Sets one value. Numbers go in numeric variables, text in string variables (cut to the
+    /// variable's width in bytes, on a character boundary).
+    pub fn set_value(&mut self, case: usize, index: usize, value: Value) -> Result<(), DatasetError> {
+        let var = self.variables.get(index).ok_or(DatasetError::NoVariable(index))?;
+        let value = match (var.var_type, value) {
+            (VarType::Numeric, v @ (Value::Num(_) | Value::SysMis)) => v,
+            (VarType::String(width), Value::Str(mut s)) => {
+                let mut end = usize::from(width).min(s.len());
+                while !s.is_char_boundary(end) {
+                    end -= 1;
+                }
+                s.truncate(end);
+                Value::Str(s)
+            }
+            (VarType::Numeric, _) => return Err(DatasetError::NeedsNumber(var.name.clone())),
+            (VarType::String(_), _) => return Err(DatasetError::NeedsText(var.name.clone())),
+        };
+        let cell = self.columns.get_mut(index).and_then(|c| c.get_mut(case)).ok_or(DatasetError::NoCase(case))?;
+        *cell = value;
+        Ok(())
+    }
+
     /// The weight of `case` under `WEIGHT BY`: 1 when cases aren't weighted. A case whose weight
     /// is missing, zero, negative or not a number weighs 0, which leaves it out of procedures.
     pub fn case_weight(&self, case: usize) -> f64 {
@@ -364,6 +503,38 @@ mod tests {
         assert_eq!(Format::new(FormatKind::Comma, 8, 0).render(&Value::Num(999.0)), "999");
         assert_eq!(Format::new(FormatKind::F, 8, 2).render(&Value::SysMis), ".");
         assert_eq!(Format::new(FormatKind::A, 8, 0).render(&Value::Str("abc".into())), "abc");
+    }
+
+    #[test]
+    fn parses_formats() {
+        assert_eq!("F8.2".parse(), Ok(Format::new(FormatKind::F, 8, 2)));
+        assert_eq!("comma10.2".parse(), Ok(Format::new(FormatKind::Comma, 10, 2)));
+        assert_eq!("A20".parse(), Ok(Format::new(FormatKind::A, 20, 0)));
+        assert_eq!("DATE11".parse(), Ok(Format::new(FormatKind::Date, 11, 0)));
+        for bad in ["F", "X8", "F0", "F2.2", "A8.1", "F8.x", ""] {
+            assert!(bad.parse::<Format>().is_err(), "{bad}");
+        }
+        for f in ["F8.2", "A20", "DOLLAR10.2", "DATE11"] {
+            assert_eq!(f.parse::<Format>().map(|f| f.to_string()).as_deref(), Ok(f));
+        }
+    }
+
+    #[test]
+    fn rename_and_set_values() {
+        let mut ds = Dataset::new();
+        ds.add_variable(Variable::numeric("x")).unwrap();
+        ds.add_variable(Variable::string("s", 2)).unwrap();
+        ds.push_case(vec![Value::Num(1.0), Value::Str("ab".into())]).unwrap();
+        assert_eq!(ds.rename_variable(0, "S"), Err(DatasetError::DuplicateName("S".into())));
+        assert_eq!(ds.rename_variable(0, "2x"), Err(DatasetError::InvalidName("2x".into())));
+        ds.rename_variable(0, "X").unwrap();
+        assert_eq!(ds.variables()[0].name, "X");
+
+        ds.set_value(0, 0, Value::SysMis).unwrap();
+        ds.set_value(0, 1, Value::Str("São Paulo".into())).unwrap();
+        assert_eq!(ds.column(1).unwrap()[0], Value::Str("S".into()), "2 bytes would split the ã, so it stops before it");
+        assert_eq!(ds.set_value(0, 0, Value::Str("a".into())), Err(DatasetError::NeedsNumber("X".into())));
+        assert_eq!(ds.set_value(5, 0, Value::Num(1.0)), Err(DatasetError::NoCase(5)));
     }
 
     #[test]

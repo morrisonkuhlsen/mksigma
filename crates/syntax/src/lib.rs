@@ -4,6 +4,12 @@
 
 use thiserror::Error;
 
+mod dictionary;
+mod lexer;
+
+pub use dictionary::{Level, Literal, MissingSpec, ValueLabelList};
+use lexer::Token;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     /// `DESCRIPTIVES [VARIABLES=] var...`
@@ -12,6 +18,18 @@ pub enum Command {
     DisplayDictionary,
     /// `FREQUENCIES [VARIABLES=] var... [/FORMAT=...] [/STATISTICS=...]`
     Frequencies { variables: Vec<String>, table: bool, order: FreqOrder, statistics: Vec<FreqStatistic> },
+    /// `VARIABLE LABELS var 'label' [/var 'label']...`
+    VariableLabels(Vec<(String, String)>),
+    /// `VALUE LABELS varlist value 'label'... [/varlist ...]` (replaces existing labels)
+    ValueLabels(Vec<(Vec<String>, ValueLabelList)>),
+    /// `MISSING VALUES varlist (values) [varlist (values)]...`
+    MissingValues(Vec<(Vec<String>, MissingSpec)>),
+    /// `VARIABLE LEVEL varlist (NOMINAL|ORDINAL|SCALE)...`
+    VariableLevel(Vec<(Vec<String>, Level)>),
+    /// `FORMATS varlist (format)...`, the format as written (`F8.2`)
+    Formats(Vec<(Vec<String>, String)>),
+    /// `RENAME VARIABLES (old = new)...`
+    RenameVariables(Vec<(String, String)>),
 }
 
 /// Row order of a frequency table (`/FORMAT`).
@@ -43,7 +61,7 @@ impl FreqStatistic {
     pub const DEFAULT: [FreqStatistic; 4] = [FreqStatistic::Mean, FreqStatistic::StdDev, FreqStatistic::Minimum, FreqStatistic::Maximum];
 }
 
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Clone, Error, PartialEq)]
 pub enum SyntaxError {
     #[error("unknown command: {0}")]
     UnknownCommand(String),
@@ -51,6 +69,8 @@ pub enum SyntaxError {
     Expected { command: &'static str, expected: &'static str },
     #[error("unexpected character {0:?}")]
     UnexpectedChar(char),
+    #[error("a quoted string is not closed")]
+    UnterminatedString,
     #[error("{command}: {what} is not supported yet")]
     Unsupported { command: &'static str, what: String },
 }
@@ -96,61 +116,24 @@ fn unsupported(command: &'static str, what: &str) -> SyntaxError {
     SyntaxError::Unsupported { command, what: what.to_uppercase() }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum Token {
-    Word(String),
-    Equals,
-    Slash,
-}
-
 /// Whether `word` names `keyword`: the whole keyword or a prefix of at least three letters.
 fn is_keyword(word: &str, keyword: &str) -> bool {
     let n = word.len();
     n >= 3.min(keyword.len()) && n <= keyword.len() && keyword.get(..n).is_some_and(|k| k.eq_ignore_ascii_case(word))
 }
 
-/// Splits a program into commands (at a period that ends a line or the input) and lexes each one.
-fn commands(src: &str) -> Result<Vec<Vec<Token>>, SyntaxError> {
-    let mut out = Vec::new();
-    let mut tokens = Vec::new();
-    let mut chars = src.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            c if c.is_whitespace() => {}
-            '=' => tokens.push(Token::Equals),
-            '/' => tokens.push(Token::Slash),
-            '.' if chars.peek().is_none_or(|n| n.is_whitespace()) => {
-                if !tokens.is_empty() {
-                    out.push(std::mem::take(&mut tokens));
-                }
-            }
-            c if c.is_alphanumeric() || matches!(c, '@' | '#' | '$' | '_' | '.') => {
-                let mut word = String::from(c);
-                while let Some(&n) = chars.peek() {
-                    let ends_command = n == '.' && {
-                        let mut ahead = chars.clone();
-                        ahead.next();
-                        ahead.peek().is_none_or(|a| a.is_whitespace())
-                    };
-                    if ends_command || !(n.is_alphanumeric() || matches!(n, '@' | '#' | '$' | '_' | '.')) {
-                        break;
-                    }
-                    word.push(n);
-                    chars.next();
-                }
-                tokens.push(Token::Word(word));
-            }
-            c => return Err(SyntaxError::UnexpectedChar(c)),
-        }
-    }
-    if !tokens.is_empty() {
-        out.push(tokens);
-    }
-    Ok(out)
+pub fn parse(src: &str) -> Result<Vec<Command>, SyntaxError> {
+    Ok(parse_with_source(src)?.into_iter().map(|(command, _)| command).collect())
 }
 
-pub fn parse(src: &str) -> Result<Vec<Command>, SyntaxError> {
-    commands(src)?.into_iter().map(|tokens| parse_command(&tokens)).collect()
+/// Each command with its source text, as written (for the session history).
+pub fn parse_with_source(src: &str) -> Result<Vec<(Command, String)>, SyntaxError> {
+    lexer::commands(src)?.into_iter().map(|c| Ok((parse_command(&c.tokens)?, c.source))).collect()
+}
+
+/// `text` as a quoted syntax string (`it's` → `'it''s'`).
+pub fn quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
 }
 
 fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
@@ -174,6 +157,9 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     }
     if is_keyword(name, "FREQUENCIES") {
         return frequencies(rest);
+    }
+    if let Some(result) = dictionary::parse(name, rest) {
+        return result;
     }
     Err(SyntaxError::UnknownCommand(name.to_string()))
 }
