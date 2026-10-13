@@ -22,7 +22,7 @@ pub struct Options {
 /// Inverts a symmetric positive (semi)definite matrix by Gauss–Jordan elimination with partial
 /// pivoting. `None` when a pivot is negligible next to its diagonal: a predictor that is (almost)
 /// a linear combination of the others.
-fn invert(m: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
+pub(crate) fn invert(m: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
     let n = m.len();
     let mut a: Vec<Vec<f64>> = m.to_vec();
     let mut inv: Vec<Vec<f64>> = (0..n).map(|i| (0..n).map(|j| if i == j { 1.0 } else { 0.0 }).collect()).collect();

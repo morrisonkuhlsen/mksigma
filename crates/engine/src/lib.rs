@@ -64,6 +64,8 @@ fn changes_data(command: &Command) -> bool {
             | Command::Oneway { .. }
             | Command::Correlations { .. }
             | Command::Regression { .. }
+            | Command::NparTests(_)
+            | Command::Logistic { .. }
     )
 }
 
@@ -415,16 +417,51 @@ impl Session {
                 };
                 self.output.items.extend(mksigma_stats::correlations(&self.dataset, &options)?);
             }
+            Command::NparTests(specs) => {
+                use mksigma_stats::NparTest;
+                use mksigma_syntax::NparSpec;
+                let tests: Vec<NparTest> = specs
+                    .iter()
+                    .map(|s| match s {
+                        NparSpec::MannWhitney { variables, group, first, second } => {
+                            NparTest::MannWhitney { variables: variables.clone(), group: group.clone(), first: *first, second: *second }
+                        }
+                        NparSpec::Wilcoxon { pairs } => NparTest::Wilcoxon { pairs: pairs.clone() },
+                        NparSpec::KruskalWallis { variables, group, low, high } => {
+                            NparTest::KruskalWallis { variables: variables.clone(), group: group.clone(), low: *low, high: *high }
+                        }
+                    })
+                    .collect();
+                self.output.items.extend(mksigma_stats::npar_tests(&self.dataset, &tests)?);
+            }
+            Command::Logistic { dependent, covariates, ci, iterations, cut } => {
+                let options = mksigma_stats::LogisticOptions {
+                    dependent: dependent.clone(),
+                    covariates: covariates.clone(),
+                    ci: *ci,
+                    iterations: *iterations,
+                    cut: *cut,
+                };
+                self.output.items.extend(mksigma_stats::logistic(&self.dataset, &options)?);
+            }
             Command::Regression { dependent, predictors, ci } => {
                 let options = mksigma_stats::RegressionOptions { dependent: dependent.clone(), predictors: predictors.clone(), ci: *ci };
                 self.output.items.extend(mksigma_stats::regression(&self.dataset, &options)?);
             }
-            Command::Oneway { dependents, factor, descriptives, homogeneity } => {
+            Command::Oneway { dependents, factor, descriptives, homogeneity, posthoc, alpha } => {
                 let options = mksigma_stats::OnewayOptions {
                     dependents: dependents.clone(),
                     factor: factor.clone(),
                     descriptives: *descriptives,
                     homogeneity: *homogeneity,
+                    posthoc: posthoc
+                        .iter()
+                        .map(|p| match p {
+                            mksigma_syntax::PostHocTest::Tukey => mksigma_stats::PostHoc::Tukey,
+                            mksigma_syntax::PostHocTest::Bonferroni => mksigma_stats::PostHoc::Bonferroni,
+                        })
+                        .collect(),
+                    alpha: *alpha,
                 };
                 self.output.items.extend(mksigma_stats::oneway(&self.dataset, &options)?);
             }
@@ -733,8 +770,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(s.steps().len(), 1, "only the RECODE changed the data");
-        s.run_syntax("CORRELATIONS age income score.\nREGRESSION /DEPENDENT score /METHOD=ENTER age income.").unwrap();
-        assert_eq!(s.steps().len(), 1);
+        s.run_syntax(
+            "CORRELATIONS age income score.\nREGRESSION /DEPENDENT score /METHOD=ENTER age income.\n\
+             ONEWAY score BY grupo /POSTHOC=TUKEY BONFERRONI ALPHA(0.05).\n\
+             NPAR TESTS /M-W=income BY grupo(1 2) /WILCOXON=age WITH score (PAIRED) /K-W=income BY grupo(1 2).\n\
+             COMPUTE alto = score >= 70.\nLOGISTIC REGRESSION VARIABLES alto /METHOD=ENTER income.",
+        )
+        .unwrap();
+        assert_eq!(s.steps().len(), 2, "RECODE and COMPUTE");
         let text = s.output.to_text();
         for title in [
             "Crosstabulation",
@@ -746,6 +789,10 @@ mod tests {
             "Correlations",
             "Model Summary",
             "Coefficients",
+            "Multiple Comparisons",
+            "Mann-Whitney U",
+            "Kruskal-Wallis H",
+            "Variables in the Equation",
         ] {
             assert!(text.contains(title), "{title} missing from:\n{text}");
         }

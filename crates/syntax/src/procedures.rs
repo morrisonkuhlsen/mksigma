@@ -14,6 +14,20 @@ pub struct CrosstabCells {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum NparSpec {
+    MannWhitney { variables: Vec<String>, group: String, first: f64, second: f64 },
+    Wilcoxon { pairs: Vec<(String, String)> },
+    KruskalWallis { variables: Vec<String>, group: String, low: f64, high: f64 },
+}
+
+/// Post hoc tests for `ONEWAY`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostHocTest {
+    Tukey,
+    Bonferroni,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum TTestSpec {
     /// `/TESTVAL=x /VARIABLES=...`
     OneSample { variables: Vec<String>, test_value: f64 },
@@ -111,6 +125,164 @@ fn literal(token: &Token) -> Option<Literal> {
     }
 }
 
+/// `a b WITH c d (PAIRED)` pairs a–c and b–d; without (PAIRED), every left variable with every
+/// right one; `a b c` alone, every pair of the list.
+fn pair_list(tokens: &[Token]) -> Result<Vec<(String, String)>, &'static str> {
+    let paired = matches!(tokens, [.., Token::LParen, Token::Word(p), Token::RParen] if is_keyword(p, "PAIRED"));
+    let tokens = if paired { tokens.get(..tokens.len().saturating_sub(3)).unwrap_or_default() } else { tokens };
+    let with = tokens.iter().position(|t| matches!(t, Token::Word(w) if w.eq_ignore_ascii_case("WITH")));
+    let list: Vec<(String, String)> = match with {
+        Some(at) => {
+            let left = words(tokens.get(..at).unwrap_or_default()).ok_or("variables WITH variables")?;
+            let right = words(tokens.get(at + 1..).unwrap_or_default()).ok_or("variables WITH variables")?;
+            if paired {
+                if left.len() != right.len() {
+                    return Err("as many variables after WITH as before it, for (PAIRED)");
+                }
+                left.into_iter().zip(right).collect()
+            } else {
+                left.iter().flat_map(|a| right.iter().map(move |b| (a.clone(), b.clone()))).collect()
+            }
+        }
+        None => {
+            let vars = words(tokens).ok_or("a variable list")?;
+            vars.iter().enumerate().flat_map(|(i, a)| vars.iter().skip(i + 1).map(move |b| (a.clone(), b.clone()))).collect()
+        }
+    };
+    if list.is_empty() {
+        return Err("at least two variables to pair");
+    }
+    Ok(list)
+}
+
+/// `vars BY group(a b)`: the variables, the grouping variable and its two values.
+fn by_group(tokens: &[Token]) -> Option<(Vec<String>, String, f64, f64)> {
+    let at = tokens.iter().position(|t| matches!(t, Token::Word(w) if w.eq_ignore_ascii_case("BY")))?;
+    let vars = words(tokens.get(..at)?).filter(|v| !v.is_empty())?;
+    let values: Vec<f64> = match tokens.get(at + 1..)? {
+        [Token::Word(_), Token::LParen, inside @ .., Token::RParen] => inside
+            .iter()
+            .filter(|t| **t != Token::Comma)
+            .map(|t| match t {
+                Token::Word(w) => w.parse().ok(),
+                _ => None,
+            })
+            .collect::<Option<_>>()?,
+        _ => return None,
+    };
+    let Some(Token::Word(group)) = tokens.get(at + 1) else { return None };
+    match values[..] {
+        [a, b] => Some((vars, group.clone(), a, b)),
+        _ => None,
+    }
+}
+
+pub(crate) fn npar_tests(rest: &[Token]) -> Result<Command, SyntaxError> {
+    const CMD: &str = "NPAR TESTS";
+    let bad = |expected| SyntaxError::Expected { command: CMD, expected };
+    let mut tests = Vec::new();
+    for group in rest.split(|t| *t == Token::Slash).filter(|g| !g.is_empty()) {
+        // Test names with a hyphen (M-W, K-W) arrive as word, minus, word.
+        let (name, tokens) = match group {
+            [Token::Word(a), Token::Minus, Token::Word(b), Token::Equals, rest @ ..] | [Token::Word(a), Token::Minus, Token::Word(b), rest @ ..] => {
+                (format!("{a}-{b}").to_ascii_uppercase(), rest)
+            }
+            [Token::Word(a), Token::Equals, rest @ ..] | [Token::Word(a), rest @ ..] => (a.to_ascii_uppercase(), rest),
+            _ => return Err(bad("a test such as /M-W= or /WILCOXON=")),
+        };
+        match name.as_str() {
+            "M-W" => {
+                let (variables, group, first, second) = by_group(tokens).ok_or(bad("/M-W=variables BY group(value value)"))?;
+                tests.push(NparSpec::MannWhitney { variables, group, first, second });
+            }
+            "K-W" => {
+                let (variables, group, low, high) = by_group(tokens).ok_or(bad("/K-W=variables BY group(low high)"))?;
+                tests.push(NparSpec::KruskalWallis { variables, group, low: low.min(high), high: low.max(high) });
+            }
+            n if is_keyword(n, "WILCOXON") => tests.push(NparSpec::Wilcoxon { pairs: pair_list(tokens).map_err(bad)? }),
+            n if is_keyword(n, "MISSING") => {
+                if !matches!(tokens, [Token::Word(w)] if is_keyword(w, "ANALYSIS")) {
+                    return Err(unsupported(CMD, "/MISSING other than ANALYSIS"));
+                }
+            }
+            n => return Err(unsupported(CMD, &format!("/{n}"))),
+        }
+    }
+    if tests.is_empty() {
+        return Err(bad("a test such as /M-W=, /WILCOXON= or /K-W="));
+    }
+    Ok(Command::NparTests(tests))
+}
+
+pub(crate) fn logistic(rest: &[Token]) -> Result<Command, SyntaxError> {
+    const CMD: &str = "LOGISTIC REGRESSION";
+    let bad = |expected| SyntaxError::Expected { command: CMD, expected };
+    let (mut dependent, mut covariates, mut ci, mut iterations, mut cut) = (None, None, None, 20usize, 0.5);
+    for (name, tokens) in subcommands(rest) {
+        match name {
+            None => {
+                // `y` or the older `y WITH covariates`; SPSS pastes `VARIABLES y` without `=`.
+                let tokens = match tokens {
+                    [Token::Word(v), rest @ ..] if is_keyword(v, "VARIABLES") => rest,
+                    tokens => tokens,
+                };
+                let with = tokens.iter().position(|t| matches!(t, Token::Word(w) if w.eq_ignore_ascii_case("WITH")));
+                let head = with.map_or(tokens, |at| tokens.get(..at).unwrap_or_default());
+                dependent = Some(match words(head).as_deref() {
+                    Some([y]) => y.clone(),
+                    _ => return Err(bad("one dependent variable")),
+                });
+                if let Some(at) = with {
+                    covariates = Some(words(tokens.get(at + 1..).unwrap_or_default()).filter(|v| !v.is_empty()).ok_or(bad("covariates after WITH"))?);
+                }
+            }
+            Some(n) if is_keyword(n, "VARIABLES") => {
+                dependent = Some(match words(tokens).as_deref() {
+                    Some([y]) => y.clone(),
+                    _ => return Err(bad("VARIABLES=dependent")),
+                });
+            }
+            Some(n) if is_keyword(n, "METHOD") => {
+                if covariates.is_some() {
+                    return Err(unsupported(CMD, "more than one block of covariates"));
+                }
+                covariates = Some(match words(tokens).as_deref() {
+                    Some([method, vars @ ..]) if is_keyword(method, "ENTER") && !vars.is_empty() => vars.to_vec(),
+                    _ => return Err(unsupported(CMD, "methods other than ENTER with covariates")),
+                });
+            }
+            Some(n) if is_keyword(n, "PRINT") => match tokens {
+                [Token::Word(w), Token::LParen, Token::Word(level), Token::RParen] if w.eq_ignore_ascii_case("CI") => {
+                    ci = Some(level.parse::<f64>().ok().filter(|l| *l > 0.0 && *l < 100.0).ok_or(bad("CI(level) in percent"))? / 100.0);
+                }
+                _ => return Err(unsupported(CMD, "/PRINT other than CI(level)")),
+            },
+            Some(n) if is_keyword(n, "CRITERIA") => {
+                let mut i = 0;
+                while let Some(Token::Word(w)) = tokens.get(i) {
+                    let value = match (tokens.get(i + 1), tokens.get(i + 2), tokens.get(i + 3)) {
+                        (Some(Token::LParen), Some(Token::Word(v)), Some(Token::RParen)) => v.parse::<f64>().ok(),
+                        _ => None,
+                    };
+                    let value = value.ok_or(bad("CRITERIA keywords with a value, such as ITERATE(20)"))?;
+                    match w.to_ascii_uppercase().as_str() {
+                        "ITERATE" if value >= 1.0 => iterations = value as usize,
+                        "CUT" if value > 0.0 && value < 1.0 => cut = value,
+                        // Entry criteria only matter for stepwise methods.
+                        "PIN" | "POUT" | "EPS" | "LCON" | "BCON" => {}
+                        other => return Err(unsupported(CMD, &format!("/CRITERIA={other}"))),
+                    }
+                    i += 4;
+                }
+            }
+            Some(n) => return Err(unsupported(CMD, &format!("/{n}"))),
+        }
+    }
+    let dependent = dependent.ok_or(bad("the dependent variable"))?;
+    let covariates = covariates.ok_or(bad("/METHOD=ENTER covariates"))?;
+    Ok(Command::Logistic { dependent, covariates, ci, iterations, cut })
+}
+
 pub(crate) fn t_test(rest: &[Token]) -> Result<Command, SyntaxError> {
     const CMD: &str = "T-TEST";
     let bad = |expected| SyntaxError::Expected { command: CMD, expected };
@@ -133,32 +305,7 @@ pub(crate) fn t_test(rest: &[Token]) -> Result<Command, SyntaxError> {
                 _ => return Err(bad("GROUPS=variable(value value)")),
             });
         } else if is_keyword(name, "PAIRS") {
-            let paired = matches!(tokens, [.., Token::LParen, Token::Word(p), Token::RParen] if is_keyword(p, "PAIRED"));
-            let tokens = if paired { tokens.get(..tokens.len() - 3).unwrap_or_default() } else { tokens };
-            let with = tokens.iter().position(|t| matches!(t, Token::Word(w) if w.eq_ignore_ascii_case("WITH")));
-            let list = match with {
-                Some(at) => {
-                    let left = words(tokens.get(..at).unwrap_or_default()).ok_or(bad("variables WITH variables"))?;
-                    let right = words(tokens.get(at + 1..).unwrap_or_default()).ok_or(bad("variables WITH variables"))?;
-                    if paired {
-                        if left.len() != right.len() {
-                            return Err(bad("as many variables after WITH as before it, for (PAIRED)"));
-                        }
-                        left.into_iter().zip(right).collect::<Vec<_>>()
-                    } else {
-                        left.iter().flat_map(|a| right.iter().map(move |b| (a.clone(), b.clone()))).collect()
-                    }
-                }
-                // Every pair of the list.
-                None => {
-                    let vars = words(tokens).ok_or(bad("a variable list"))?;
-                    vars.iter().enumerate().flat_map(|(i, a)| vars.iter().skip(i + 1).map(move |b| (a.clone(), b.clone()))).collect()
-                }
-            };
-            if list.is_empty() {
-                return Err(bad("at least two variables to pair"));
-            }
-            pairs = Some(list);
+            pairs = Some(pair_list(tokens).map_err(bad)?);
         } else if is_keyword(name, "CRITERIA") {
             ci = match tokens {
                 [Token::Word(w), Token::LParen, Token::Word(level), Token::RParen] if is_keyword(w, "CIN") || w.eq_ignore_ascii_case("CI") => {
@@ -185,11 +332,38 @@ pub(crate) fn t_test(rest: &[Token]) -> Result<Command, SyntaxError> {
 
 pub(crate) fn oneway(rest: &[Token]) -> Result<Command, SyntaxError> {
     const CMD: &str = "ONEWAY";
-    let (mut lists, mut descriptives, mut homogeneity) = (None, false, false);
+    let (mut lists, mut descriptives, mut homogeneity, mut posthoc, mut alpha) = (None, false, false, Vec::new(), 0.05);
     for (name, tokens) in subcommands(rest) {
         match name {
             None => lists = Some(split_by(CMD, tokens)?),
             Some(n) if is_keyword(n, "VARIABLES") => lists = Some(split_by(CMD, tokens)?),
+            Some(n) if is_keyword(n, "POSTHOC") => {
+                let mut i = 0;
+                while let Some(t) = tokens.get(i) {
+                    match t {
+                        Token::Word(w) if is_keyword(w, "TUKEY") => posthoc.push(PostHocTest::Tukey),
+                        Token::Word(w) if is_keyword(w, "BONFERRONI") => posthoc.push(PostHocTest::Bonferroni),
+                        Token::Word(w) if is_keyword(w, "ALPHA") => {
+                            alpha = match (tokens.get(i + 1), tokens.get(i + 2), tokens.get(i + 3)) {
+                                (Some(Token::LParen), Some(Token::Word(a)), Some(Token::RParen)) => {
+                                    a.parse::<f64>().ok().filter(|a| *a > 0.0 && *a < 1.0)
+                                }
+                                _ => None,
+                            }
+                            .ok_or(SyntaxError::Expected { command: CMD, expected: "ALPHA(0.05)" })?;
+                            i += 3;
+                        }
+                        Token::Word(w) => return Err(unsupported(CMD, &format!("/POSTHOC={w}"))),
+                        _ => return Err(SyntaxError::Expected { command: CMD, expected: "post hoc test names" }),
+                    }
+                    i += 1;
+                }
+            }
+            Some(n) if is_keyword(n, "MISSING") => {
+                if !matches!(tokens, [Token::Word(w)] if is_keyword(w, "ANALYSIS")) {
+                    return Err(unsupported(CMD, "/MISSING other than ANALYSIS"));
+                }
+            }
             Some(n) if is_keyword(n, "STATISTICS") => {
                 for w in words(tokens).ok_or(SyntaxError::Expected { command: CMD, expected: "statistic names" })? {
                     match w.to_ascii_uppercase().as_str() {
@@ -206,7 +380,7 @@ pub(crate) fn oneway(rest: &[Token]) -> Result<Command, SyntaxError> {
     }
     let (dependents, factor) = lists.ok_or(SyntaxError::Expected { command: CMD, expected: "variables BY factor" })?;
     let [factor] = <[String; 1]>::try_from(factor).map_err(|_| SyntaxError::Expected { command: CMD, expected: "one factor after BY" })?;
-    Ok(Command::Oneway { dependents, factor, descriptives, homogeneity })
+    Ok(Command::Oneway { dependents, factor, descriptives, homogeneity, posthoc, alpha })
 }
 
 pub(crate) fn correlations(rest: &[Token]) -> Result<Command, SyntaxError> {
@@ -403,9 +577,55 @@ mod tests {
     fn oneway_syntax() {
         assert_eq!(
             one("ONEWAY renda nota BY escola /STATISTICS DESCRIPTIVES HOMOGENEITY."),
-            Command::Oneway { dependents: names(&["renda", "nota"]), factor: "escola".into(), descriptives: true, homogeneity: true }
+            Command::Oneway {
+                dependents: names(&["renda", "nota"]),
+                factor: "escola".into(),
+                descriptives: true,
+                homogeneity: true,
+                posthoc: vec![],
+                alpha: 0.05
+            }
+        );
+        assert_eq!(
+            one("ONEWAY nota BY escola /MISSING ANALYSIS /POSTHOC=TUKEY BONFERRONI ALPHA(0.01)."),
+            Command::Oneway {
+                dependents: names(&["nota"]),
+                factor: "escola".into(),
+                descriptives: false,
+                homogeneity: false,
+                posthoc: vec![PostHocTest::Tukey, PostHocTest::Bonferroni],
+                alpha: 0.01
+            }
         );
         assert!(parse("ONEWAY y BY a b.").is_err(), "one factor");
-        assert!(parse("ONEWAY y /POSTHOC=TUKEY.").is_err());
+        assert!(parse("ONEWAY y BY g /POSTHOC=SCHEFFE.").is_err());
+    }
+
+    #[test]
+    fn npar_tests_syntax() {
+        assert_eq!(
+            one("NPAR TESTS /M-W= renda nota BY sexo(1 2) /WILCOXON=pre WITH pos (PAIRED) /K-W=nota BY escola(3 1) /MISSING ANALYSIS."),
+            Command::NparTests(vec![
+                NparSpec::MannWhitney { variables: names(&["renda", "nota"]), group: "sexo".into(), first: 1.0, second: 2.0 },
+                NparSpec::Wilcoxon { pairs: vec![("pre".into(), "pos".into())] },
+                NparSpec::KruskalWallis { variables: names(&["nota"]), group: "escola".into(), low: 1.0, high: 3.0 },
+            ])
+        );
+        assert!(parse("NPAR TESTS /M-W=x BY g(1).").is_err());
+        assert!(parse("NPAR TESTS /RUNS(MEAN)=x.").is_err());
+    }
+
+    #[test]
+    fn logistic_syntax_as_spss_pastes_it() {
+        assert_eq!(
+            one("LOGISTIC REGRESSION VARIABLES aprovado /METHOD=ENTER pre sexo /PRINT=CI(95) /CRITERIA=PIN(.05) POUT(.10) ITERATE(30) CUT(.4)."),
+            Command::Logistic { dependent: "aprovado".into(), covariates: names(&["pre", "sexo"]), ci: Some(0.95), iterations: 30, cut: 0.4 }
+        );
+        assert_eq!(
+            one("LOGISTIC REGRESSION aprovado WITH pre."),
+            Command::Logistic { dependent: "aprovado".into(), covariates: names(&["pre"]), ci: None, iterations: 20, cut: 0.5 }
+        );
+        assert!(parse("LOGISTIC REGRESSION VARIABLES y /METHOD=FSTEP(LR) x.").is_err());
+        assert!(parse("LOGISTIC REGRESSION VARIABLES y /METHOD=ENTER x /CATEGORICAL=x.").is_err());
     }
 }

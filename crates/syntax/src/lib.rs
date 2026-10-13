@@ -13,7 +13,7 @@ mod transform;
 pub use dictionary::{Level, Literal, MissingSpec, NewVariables, ValueLabelList};
 pub use expr::{BinOp, Expr};
 use lexer::Token;
-pub use procedures::{CrosstabCells, TTestSpec};
+pub use procedures::{CrosstabCells, NparSpec, PostHocTest, TTestSpec};
 pub use transform::{RecodeFrom, RecodeGroup, RecodeSpec, RecodeTo};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,7 +60,11 @@ pub enum Command {
     /// `REGRESSION /DEPENDENT=y /METHOD=ENTER predictors [/STATISTICS ... CI(95)]`
     Regression { dependent: String, predictors: Vec<String>, ci: Option<f64> },
     /// `ONEWAY dependents BY factor [/STATISTICS=DESCRIPTIVES HOMOGENEITY]`
-    Oneway { dependents: Vec<String>, factor: String, descriptives: bool, homogeneity: bool },
+    Oneway { dependents: Vec<String>, factor: String, descriptives: bool, homogeneity: bool, posthoc: Vec<PostHocTest>, alpha: f64 },
+    /// `NPAR TESTS /M-W=... /WILCOXON=... /K-W=...`
+    NparTests(Vec<NparSpec>),
+    /// `LOGISTIC REGRESSION [VARIABLES=] y /METHOD=ENTER covariates [/PRINT=CI(95)] [/CRITERIA=...]`
+    Logistic { dependent: String, covariates: Vec<String>, ci: Option<f64>, iterations: usize, cut: f64 },
 }
 
 /// Row order of a frequency table (`/FORMAT`).
@@ -212,6 +216,13 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     }
     if is_keyword(name, "REGRESSION") {
         return procedures::regression(rest);
+    }
+    let second = |word: &str| matches!(rest.first(), Some(Token::Word(w)) if is_keyword(w, word));
+    if is_keyword(name, "NPAR") && second("TESTS") {
+        return procedures::npar_tests(rest.get(1..).unwrap_or_default());
+    }
+    if is_keyword(name, "LOGISTIC") && second("REGRESSION") {
+        return procedures::logistic(rest.get(1..).unwrap_or_default());
     }
     if is_keyword(name, "DISPLAY") {
         return match rest {

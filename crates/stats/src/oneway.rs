@@ -1,12 +1,19 @@
 //! `ONEWAY`: one-way analysis of variance of each dependent variable across the groups of a
-//! factor, with optional Descriptives and Test of Homogeneity of Variances (Levene, based on the
-//! mean). Missing values are excluded analysis by analysis.
+//! factor, with optional Descriptives, Test of Homogeneity of Variances (Levene, based on the
+//! mean) and post hoc Multiple Comparisons (Tukey HSD, Tukey–Kramer for unequal groups;
+//! Bonferroni). Missing values are excluded analysis by analysis.
 
 use mksigma_core::{Dataset, Value};
 use mksigma_output::{Cell, Item, Table};
 
 use crate::groups::{anova, levene, moments, numeric, std_error, valid};
-use crate::{StatsError, dist, n_cell, num, value_text};
+use crate::{Moments, StatsError, dist, n_cell, num, range, value_text};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostHoc {
+    Tukey,
+    Bonferroni,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Options {
@@ -14,11 +21,60 @@ pub struct Options {
     pub factor: String,
     pub descriptives: bool,
     pub homogeneity: bool,
+    pub posthoc: Vec<PostHoc>,
+    /// Significance level of the post hoc tests (0.05 by default).
+    pub alpha: f64,
+}
+
+/// Every ordered pair of groups (I, J), I ≠ J: the mean difference flagged at `alpha`, its
+/// standard error, significance and confidence interval.
+fn comparisons(test: PostHoc, labels: &[String], stats: &[Moments], mse: f64, df: f64, alpha: f64) -> Vec<(String, Vec<Cell>)> {
+    let k = stats.len() as f64;
+    let m = k * (k - 1.0) / 2.0;
+    let name = match test {
+        PostHoc::Tukey => "Tukey HSD",
+        PostHoc::Bonferroni => "Bonferroni",
+    };
+    // The critical value for the intervals, the same for every pair.
+    let critical = match test {
+        PostHoc::Tukey => range::quantile(1.0 - alpha, k, df).map(|q| q / std::f64::consts::SQRT_2),
+        PostHoc::Bonferroni => dist::t_quantile(1.0 - alpha / (2.0 * m), df),
+    };
+    let mut rows = Vec::new();
+    for (i, (li, mi)) in labels.iter().zip(stats).enumerate() {
+        for (j, (lj, mj)) in labels.iter().zip(stats).enumerate() {
+            if i == j {
+                continue;
+            }
+            let diff = mi.mean - mj.mean;
+            let se = (mse * (1.0 / mi.w + 1.0 / mj.w)).sqrt();
+            let sig = match test {
+                PostHoc::Tukey => range::cdf((diff / se).abs() * std::f64::consts::SQRT_2, k, df).map(|p| 1.0 - p),
+                PostHoc::Bonferroni => dist::t_sig(diff / se, df).map(|p| (p * m).min(1.0)),
+            };
+            let flagged = sig.is_some_and(|p| p < alpha);
+            let first = j == 0 || (i == 0 && j == 1);
+            rows.push((
+                if i == 0 && first { name.to_string() } else { String::new() },
+                vec![
+                    Cell::Text(if first { li.clone() } else { String::new() }),
+                    Cell::Text(lj.clone()),
+                    if flagged { Cell::Text(format!("{diff:.3}*")) } else { num(Some(diff), 3) },
+                    num(Some(se), 3),
+                    num(sig, 3),
+                    num(critical.map(|c| diff - c * se), 3),
+                    num(critical.map(|c| diff + c * se), 3),
+                ],
+            ));
+        }
+    }
+    rows
 }
 
 pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> {
     let (fi, fvar) = numeric(ds, &options.factor)?;
-    let (mut anova_rows, mut descriptive_rows, mut levene_rows) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut anova_rows, mut descriptive_rows, mut levene_rows, mut posthoc_rows) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let alpha = if options.alpha > 0.0 && options.alpha < 1.0 { options.alpha } else { 0.05 };
     for name in &options.dependents {
         let (i, var) = numeric(ds, name)?;
         // Groups by factor value, in ascending order.
@@ -44,6 +100,20 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
         let levels: Vec<f64> = order.iter().filter_map(|k| levels.get(*k).copied()).collect();
         let label = var.display_name().to_string();
 
+        if let Some((parts, _, df2)) = anova(&groups).filter(|_| !options.posthoc.is_empty()) {
+            let labels: Vec<String> = levels.iter().map(|l| value_text(fvar, &Value::Num(*l))).collect();
+            let stats: Vec<Moments> = groups.iter().map(|g| moments(g)).collect();
+            let mse = parts.within / df2;
+            for (t, test) in options.posthoc.iter().enumerate() {
+                let mut rows = comparisons(*test, &labels, &stats, mse, df2, alpha);
+                if t == 0
+                    && let Some(first) = rows.first_mut()
+                {
+                    first.0 = format!("{label}: {}", first.0);
+                }
+                posthoc_rows.extend(rows);
+            }
+        }
         match anova(&groups) {
             Some((parts, df1, df2)) => {
                 let sig = dist::f_sig(parts.f, df1, df2);
@@ -129,6 +199,13 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
     }
     let columns = ["", "Sum of Squares", "df", "Mean Square", "F", "Sig."].map(String::from).to_vec();
     items.push(Item::Table(Table { title: "ANOVA".into(), columns, rows: anova_rows }));
+    if !options.posthoc.is_empty() {
+        let level = format!("{:.0}%", (1.0 - alpha) * 100.0);
+        let mut columns = ["(I)", "(J)", "Mean Difference (I-J)", "Std. Error", "Sig."].map(String::from).to_vec();
+        columns.extend([format!("{level} CI Lower"), format!("{level} CI Upper")]);
+        items.push(Item::Table(Table { title: format!("Multiple Comparisons ({})", fvar.display_name()), columns, rows: posthoc_rows }));
+        items.push(Item::Text(format!("*. The mean difference is significant at the {alpha} level.")));
+    }
     Ok(items)
 }
 
@@ -148,7 +225,7 @@ mod tests {
                 ds.push_case(vec![Value::Num(y), Value::Num(g)]).unwrap();
             }
         }
-        let options = Options { dependents: vec!["y".into()], factor: "g".into(), descriptives: true, homogeneity: true };
+        let options = Options { dependents: vec!["y".into()], factor: "g".into(), descriptives: true, homogeneity: true, ..Options::default() };
         let items = oneway(&ds, &options).unwrap();
         let Item::Table(anova) = &items[2] else { panic!("ANOVA table last") };
         // SSB = 3·(4 + 4 + 0) = 24, SSW = 2 + 2 + 2 = 6, F = (24/2)/(6/6) = 12.
@@ -162,5 +239,39 @@ mod tests {
         let Item::Table(descriptives) = &items[0] else { panic!() };
         assert_eq!(descriptives.rows[3].1[0], Cell::Text("Total".into()));
         assert_eq!(descriptives.rows[3].1[1], Cell::Int(9));
+    }
+
+    #[test]
+    fn tukey_and_bonferroni_by_hand() {
+        let mut ds = Dataset::new();
+        ds.add_variable(Variable::numeric("y")).unwrap();
+        ds.add_variable(Variable::numeric("g")).unwrap();
+        for (g, ys) in [(1.0, [2.0, 3.0, 4.0]), (2.0, [6.0, 7.0, 8.0]), (3.0, [4.0, 5.0, 6.0])] {
+            for y in ys {
+                ds.push_case(vec![Value::Num(y), Value::Num(g)]).unwrap();
+            }
+        }
+        let options = Options {
+            dependents: vec!["y".into()],
+            factor: "g".into(),
+            posthoc: vec![PostHoc::Tukey, PostHoc::Bonferroni],
+            alpha: 0.05,
+            ..Options::default()
+        };
+        let items = oneway(&ds, &options).unwrap();
+        let Item::Table(t) = &items[1] else { panic!("multiple comparisons after ANOVA") };
+        // MSE = 1, n = 3 each: SE = √(2/3). 1 vs 2: difference −4.
+        let se = (2.0f64 / 3.0).sqrt();
+        assert_eq!(t.rows[0].1[2], Cell::Text("-4.000*".into()));
+        assert_eq!(t.rows[0].1[3], Cell::Num { value: se, decimals: 3 });
+        // Tukey: p = 1 − P(Q ≤ 4/√(1/3) ; k = 3, df = 6).
+        let Cell::Num { value: tukey, .. } = t.rows[0].1[4] else { panic!() };
+        let expected = 1.0 - range::cdf(4.0 / (1.0f64 / 3.0).sqrt(), 3.0, 6.0).unwrap();
+        assert!((tukey - expected).abs() < 1e-12);
+        // Bonferroni: three comparisons times the t test's p.
+        let Cell::Num { value: bonferroni, .. } = t.rows[6].1[4] else { panic!() };
+        let expected = 3.0 * dist::t_sig(-4.0 / se, 6.0).unwrap();
+        assert!((bonferroni - expected).abs() < 1e-12);
+        assert_eq!(t.rows.len(), 12, "six ordered pairs per test");
     }
 }

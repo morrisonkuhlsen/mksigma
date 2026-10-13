@@ -12,13 +12,18 @@ mod crosstabs;
 mod dist;
 mod frequencies;
 mod groups;
+mod logistic;
+mod npar;
 mod oneway;
+mod range;
 mod regression;
 mod ttest;
 
 pub use correlations::{Options as CorrelationsOptions, correlations};
 pub use crosstabs::{Cells as CrosstabsCells, Options as CrosstabsOptions, crosstabs};
-pub use oneway::{Options as OnewayOptions, oneway};
+pub use logistic::{Options as LogisticOptions, logistic};
+pub use npar::{NparTest, npar_tests};
+pub use oneway::{Options as OnewayOptions, PostHoc, oneway};
 pub use regression::{Options as RegressionOptions, regression};
 pub use ttest::{TTest, t_test};
 
