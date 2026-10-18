@@ -60,12 +60,14 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   and Open list recent files (kept between runs in the user's configuration folder); Info shows
   the file, cases, variables, weight, steps and whether it is saved; Export has every export.
   Replacing data with unsaved changes asks first. Esc or Back returns.
-- Procedure dialogs — **done (first five)**: Descriptives, Frequencies, Crosstabs,
-  Independent-Samples T-Test and One-Way ANOVA open a dialog: the file's variables (with their
+- Procedure dialogs — **done**: every Analyze and Graphs button (Descriptives, Frequencies,
+  Explore, Crosstabs, T-Test, One-Way ANOVA, Correlate, Regression, Logistic, Nonparametric with
+  Mann-Whitney or Kruskal-Wallis; Histogram, Bar, Scatter, Boxplot with an optional title) opens a
+  dialog: the file's variables (with their
   measurement level) on the left, the procedure's slots on the right (`>`/`<` or a double-click
   move a variable; numeric-only slots refuse strings), options below; a t-test's groups start
   as the grouping variable's first two values. OK runs the command, Paste puts it in the syntax
-  editor. To do: Correlate, Regression, Logistic, Nonparametric, Explore and the charts.
+  editor. Optional slots (Explore's factor, a bar chart's "mean of") may stay empty.
 - Editing — **done**: Variable View (name, label, value labels dialog, missing values,
   measurement level, format) turns every edit into syntax (`RENAME VARIABLES`, `VARIABLE LABELS`,
   `VALUE LABELS`, `MISSING VALUES`, `VARIABLE LEVEL`, `FORMATS`), which runs through the engine

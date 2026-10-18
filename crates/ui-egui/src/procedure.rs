@@ -18,6 +18,16 @@ pub enum Kind {
     Crosstabs,
     TTest,
     Oneway,
+    Correlations,
+    Regression,
+    Logistic,
+    /// Mann-Whitney U or, switched in the dialog, Kruskal-Wallis H.
+    Nonparametric,
+    Explore,
+    Histogram,
+    Bar,
+    Scatter,
+    Boxplot,
 }
 
 impl Kind {
@@ -28,7 +38,20 @@ impl Kind {
             Kind::Crosstabs => "Crosstabs",
             Kind::TTest => "Independent-Samples T-Test",
             Kind::Oneway => "One-Way ANOVA",
+            Kind::Correlations => "Bivariate Correlations",
+            Kind::Regression => "Linear Regression",
+            Kind::Logistic => "Binary Logistic Regression",
+            Kind::Nonparametric => "Nonparametric Tests",
+            Kind::Explore => "Explore",
+            Kind::Histogram => "Histogram",
+            Kind::Bar => "Bar Chart",
+            Kind::Scatter => "Scatterplot",
+            Kind::Boxplot => "Boxplot",
         }
+    }
+
+    fn is_chart(self) -> bool {
+        matches!(self, Kind::Histogram | Kind::Bar | Kind::Scatter | Kind::Boxplot)
     }
 }
 
@@ -41,11 +64,17 @@ pub struct Slot {
     pub single: bool,
     /// Takes numeric variables only.
     pub numeric: bool,
+    /// May stay empty.
+    pub optional: bool,
 }
 
 impl Slot {
     fn new(name: &'static str, single: bool, numeric: bool) -> Self {
-        Self { name, vars: Vec::new(), single, numeric }
+        Self { name, vars: Vec::new(), single, numeric, optional: false }
+    }
+
+    fn optional(name: &'static str, single: bool, numeric: bool) -> Self {
+        Self { optional: true, ..Slot::new(name, single, numeric) }
     }
 }
 
@@ -60,6 +89,10 @@ pub struct Dialog {
     pub groups: (String, String),
     /// Confidence level in percent, where the procedure has one.
     pub confidence: f64,
+    /// Kruskal-Wallis instead of Mann-Whitney (`groups` are then the lowest and highest).
+    pub kruskal: bool,
+    /// A chart's title; empty for the usual one.
+    pub title: String,
     /// The variable picked in the file's list, then in a slot.
     picked: Option<String>,
     picked_in: Option<(usize, String)>,
@@ -108,8 +141,34 @@ impl Dialog {
                 vec![Slot::new("Dependent list", false, true), Slot::new("Factor", true, true)],
                 vec![("Descriptives", true), ("Homogeneity of variances", false), ("Tukey", false), ("Bonferroni", false)],
             ),
+            Kind::Correlations => {
+                (vec![Slot::new("Variables", false, true)], vec![("One-tailed", false), ("Flag significant", true), ("Listwise", false)])
+            }
+            Kind::Regression => {
+                (vec![Slot::new("Dependent", true, true), Slot::new("Independents", false, true)], vec![("Confidence intervals", false)])
+            }
+            Kind::Logistic => (vec![Slot::new("Dependent", true, true), Slot::new("Covariates", false, true)], vec![("CI for Exp(B)", false)]),
+            Kind::Nonparametric => (vec![Slot::new("Test variables", false, true), Slot::new("Grouping variable", true, true)], vec![]),
+            Kind::Explore => (
+                vec![Slot::new("Dependent list", false, true), Slot::optional("Factor", true, false)],
+                vec![("Descriptives", true), ("Boxplots", true)],
+            ),
+            Kind::Histogram => (vec![Slot::new("Variable", true, true)], vec![("Normal curve", true)]),
+            Kind::Bar => (vec![Slot::new("Category axis", true, false), Slot::optional("Mean of (empty: counts)", true, true)], vec![]),
+            Kind::Scatter => (vec![Slot::new("X axis", true, true), Slot::new("Y axis", true, true)], vec![]),
+            Kind::Boxplot => (vec![Slot::new("Variable", true, true), Slot::optional("Category axis", true, false)], vec![]),
         };
-        Self { kind, slots, checks, groups: (String::new(), String::new()), confidence: 95.0, picked: None, picked_in: None }
+        Self {
+            kind,
+            slots,
+            checks,
+            groups: (String::new(), String::new()),
+            confidence: 95.0,
+            kruskal: false,
+            title: String::new(),
+            picked: None,
+            picked_in: None,
+        }
     }
 
     fn check(&self, name: &str) -> bool {
@@ -135,6 +194,9 @@ impl Dialog {
         if !target.vars.iter().any(|x| x == var) {
             target.vars.push(var.to_string());
         }
+        if self.kind == Kind::Nonparametric && slot == 1 {
+            self.fill_groups(session);
+        }
         if self.kind == Kind::TTest && slot == 1 {
             let values = session.values_of(var, 2);
             let text = |v: Option<&(Value, String, f64)>| match v.map(|(v, _, _)| v) {
@@ -145,6 +207,18 @@ impl Dialog {
             self.groups = (text(values.first()), text(values.get(1)));
         }
         true
+    }
+
+    /// The nonparametric test's groups from its grouping variable: its first two values, or for
+    /// Kruskal-Wallis its lowest and highest.
+    pub fn fill_groups(&mut self, session: &Session) {
+        let Some(var) = self.slots.get(1).and_then(|s| s.vars.first()).cloned() else { return };
+        self.groups = if self.kruskal {
+            session.range_of(&var).map_or_else(Default::default, |(lo, hi)| (lo.to_string(), hi.to_string()))
+        } else {
+            let values: Vec<String> = session.values_of(&var, 2).iter().filter_map(|(v, _, _)| v.as_num()).map(|x| x.to_string()).collect();
+            (values.first().cloned().unwrap_or_default(), values.get(1).cloned().unwrap_or_default())
+        };
     }
 
     pub fn remove(&mut self, slot: usize, var: &str) {
@@ -158,8 +232,14 @@ impl Dialog {
         let list = |k: usize| self.slots.get(k).map(|s| s.vars.join(" ")).unwrap_or_default();
         let need = |k: usize| {
             let s = self.slots.get(k);
-            if s.is_some_and(|s| s.vars.is_empty()) { Err(format!("Put a variable in {}.", s.map_or("", |s| s.name))) } else { Ok(list(k)) }
+            if s.is_some_and(|s| s.vars.is_empty() && !s.optional) {
+                Err(format!("Put a variable in {}.", s.map_or("", |s| s.name)))
+            } else {
+                Ok(list(k))
+            }
         };
+        let title = if self.title.trim().is_empty() { String::new() } else { format!(" /TITLE={}", quote(self.title.trim())) };
+        let number = |x: &str, what: &str| x.trim().parse::<f64>().map(|n| n.to_string()).map_err(|_| format!("{what} must be a number."));
         let ci = if (self.confidence - 95.0).abs() < 1e-9 { String::new() } else { format!(" /CRITERIA=CI({})", self.confidence / 100.0) };
         Ok(match self.kind {
             Kind::Descriptives => format!("DESCRIPTIVES VARIABLES={}.", need(0)?),
@@ -241,6 +321,56 @@ impl Dialog {
                 }
                 s + "."
             }
+            Kind::Correlations => {
+                let vars = need(0)?;
+                if self.slots.first().is_some_and(|s| s.vars.len() < 2) {
+                    return Err("Put two variables or more in Variables.".into());
+                }
+                let tails = if self.check("One-tailed") { "ONETAIL" } else { "TWOTAIL" };
+                let flag = if self.check("Flag significant") { " NOSIG" } else { "" };
+                let missing = if self.check("Listwise") { " /MISSING=LISTWISE" } else { "" };
+                format!("CORRELATIONS /VARIABLES={vars} /PRINT={tails}{flag}{missing}.")
+            }
+            Kind::Regression => {
+                let (dependent, predictors) = (need(0)?, need(1)?);
+                let ci = if self.check("Confidence intervals") { " /STATISTICS COEFF OUTS R ANOVA CI(95)" } else { "" };
+                format!("REGRESSION{ci} /DEPENDENT {dependent} /METHOD=ENTER {predictors}.")
+            }
+            Kind::Logistic => {
+                let (dependent, covariates) = (need(0)?, need(1)?);
+                let ci = if self.check("CI for Exp(B)") { " /PRINT=CI(95)" } else { "" };
+                format!("LOGISTIC REGRESSION VARIABLES {dependent} /METHOD=ENTER {covariates}{ci}.")
+            }
+            Kind::Nonparametric => {
+                let (tests, group) = (need(0)?, need(1)?);
+                let names = if self.kruskal { ("The minimum", "The maximum") } else { ("Group 1", "Group 2") };
+                let (a, b) = (number(&self.groups.0, names.0)?, number(&self.groups.1, names.1)?);
+                let test = if self.kruskal { "K-W" } else { "M-W" };
+                format!("NPAR TESTS /{test}={tests} BY {group}({a} {b}).")
+            }
+            Kind::Explore | Kind::Boxplot => {
+                let deps = need(0)?;
+                let by = need(1)?;
+                let by = if by.is_empty() { String::new() } else { format!(" BY {by}") };
+                let (descriptives, boxplots) =
+                    if self.kind == Kind::Boxplot { (false, true) } else { (self.check("Descriptives"), self.check("Boxplots")) };
+                if !descriptives && !boxplots {
+                    return Err("Show descriptives, boxplots or both.".into());
+                }
+                let plot = if boxplots { "BOXPLOT" } else { "NONE" };
+                let stats = if descriptives { "DESCRIPTIVES" } else { "NONE" };
+                format!("EXAMINE VARIABLES={deps}{by} /PLOT={plot} /STATISTICS={stats}.")
+            }
+            Kind::Histogram => {
+                let normal = if self.check("Normal curve") { "(NORMAL)" } else { "" };
+                format!("GRAPH /HISTOGRAM{normal}={}{title}.", need(0)?)
+            }
+            Kind::Bar => {
+                let (by, mean) = (need(0)?, need(1)?);
+                let value = if mean.is_empty() { "COUNT".to_string() } else { format!("MEAN({mean})") };
+                format!("GRAPH /BAR(SIMPLE)={value} BY {by}{title}.")
+            }
+            Kind::Scatter => format!("GRAPH /SCATTERPLOT(BIVAR)={} WITH {}{title}.", need(0)?, need(1)?),
         })
     }
 }
@@ -376,12 +506,30 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                         });
                         ui.add_space(4.0);
                     }
-                    if dialog.kind == Kind::TTest {
+                    if dialog.kind == Kind::Nonparametric {
                         ui.horizontal(|ui| {
-                            ui.label("Group 1");
+                            let before = dialog.kruskal;
+                            ui.radio_value(&mut dialog.kruskal, false, "Mann-Whitney U (two groups)");
+                            ui.radio_value(&mut dialog.kruskal, true, "Kruskal-Wallis H (a range)");
+                            if dialog.kruskal != before {
+                                dialog.fill_groups(session);
+                            }
+                        });
+                    }
+                    if matches!(dialog.kind, Kind::TTest | Kind::Nonparametric) {
+                        let names =
+                            if dialog.kruskal && dialog.kind == Kind::Nonparametric { ("Minimum", "Maximum") } else { ("Group 1", "Group 2") };
+                        ui.horizontal(|ui| {
+                            ui.label(names.0);
                             ui.add(egui::TextEdit::singleline(&mut dialog.groups.0).desired_width(60.0));
-                            ui.label("Group 2");
+                            ui.label(names.1);
                             ui.add(egui::TextEdit::singleline(&mut dialog.groups.1).desired_width(60.0));
+                        });
+                    }
+                    if dialog.kind.is_chart() {
+                        ui.horizontal(|ui| {
+                            ui.label("Title");
+                            ui.add(egui::TextEdit::singleline(&mut dialog.title).hint_text("the usual one").desired_width(180.0));
                         });
                     }
                 });
@@ -488,19 +636,59 @@ mod tests {
         assert_eq!(d.syntax(&s).unwrap(), "FREQUENCIES VARIABLES=grupo /FORMAT=NOTABLE /STATISTICS=MEAN /BARCHART.");
 
         // Every command a dialog builds runs.
-        for kind in [Kind::Descriptives, Kind::Frequencies, Kind::Crosstabs, Kind::TTest, Kind::Oneway] {
+        let all = [
+            Kind::Descriptives,
+            Kind::Frequencies,
+            Kind::Crosstabs,
+            Kind::TTest,
+            Kind::Oneway,
+            Kind::Correlations,
+            Kind::Regression,
+            Kind::Logistic,
+            Kind::Nonparametric,
+            Kind::Explore,
+            Kind::Histogram,
+            Kind::Bar,
+            Kind::Scatter,
+            Kind::Boxplot,
+        ];
+        s.run_syntax("COMPUTE alto = score >= 70.").unwrap();
+        for kind in all {
             let mut d = Dialog::new(kind);
-            let (first, second) = match kind {
-                Kind::Crosstabs => ("grupo", "x"),
-                Kind::Frequencies | Kind::Descriptives => ("score", ""),
-                _ => ("score", "grupo"),
+            let vars: &[&str] = match kind {
+                Kind::Crosstabs => &["grupo", "x"],
+                Kind::Frequencies | Kind::Descriptives | Kind::Histogram => &["score"],
+                Kind::Correlations => &["score", "income"],
+                Kind::Regression => &["score", "income"],
+                Kind::Logistic => &["alto", "income"],
+                Kind::Scatter => &["age", "income"],
+                Kind::Bar => &["grupo", "income"],
+                _ => &["score", "grupo"],
             };
-            d.add(&s, 0, first);
-            if !second.is_empty() {
-                d.add(&s, 1, second);
+            for (slot, var) in vars.iter().enumerate() {
+                if kind == Kind::Correlations {
+                    d.add(&s, 0, var);
+                } else {
+                    d.add(&s, slot, var);
+                }
             }
-            let syntax = d.syntax(&s).unwrap();
+            for check in &mut d.checks {
+                check.1 = true;
+            }
+            d.title = "Título".into();
+            let syntax = d.syntax(&s).unwrap_or_else(|e| panic!("{kind:?}: {e}"));
             s.run_syntax(&syntax).unwrap_or_else(|e| panic!("{syntax}: {e}"));
         }
+        let mut d = Dialog::new(Kind::Nonparametric);
+        d.kruskal = true;
+        d.add(&s, 0, "score");
+        d.add(&s, 1, "grupo");
+        assert_eq!(d.syntax(&s).unwrap(), "NPAR TESTS /K-W=score BY grupo(1 2).", "the grouping variable's range");
+        let mut d = Dialog::new(Kind::Explore);
+        d.add(&s, 0, "score");
+        assert_eq!(d.syntax(&s).unwrap(), "EXAMINE VARIABLES=score /PLOT=BOXPLOT /STATISTICS=DESCRIPTIVES.", "Factor may stay empty");
+        let mut d = Dialog::new(Kind::Bar);
+        d.add(&s, 0, "grupo");
+        assert_eq!(d.syntax(&s).unwrap(), "GRAPH /BAR(SIMPLE)=COUNT BY grupo.", "without Mean of, counts");
     }
 }

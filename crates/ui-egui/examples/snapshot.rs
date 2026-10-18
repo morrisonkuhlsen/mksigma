@@ -61,6 +61,15 @@ fn main() -> Result<(), String> {
                     Some("crosstabs") => K::Crosstabs,
                     Some("ttest") => K::TTest,
                     Some("oneway") => K::Oneway,
+                    Some("correlations") => K::Correlations,
+                    Some("regression") => K::Regression,
+                    Some("logistic") => K::Logistic,
+                    Some("nonparametric") => K::Nonparametric,
+                    Some("explore") => K::Explore,
+                    Some("histogram") => K::Histogram,
+                    Some("bar") => K::Bar,
+                    Some("scatter") => K::Scatter,
+                    Some("boxplot") => K::Boxplot,
                     _ => K::Descriptives,
                 });
             }

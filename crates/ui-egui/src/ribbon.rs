@@ -279,7 +279,6 @@ fn buttons(ui: &mut egui::Ui, tab: Tab, state: &State) -> Option<Action> {
         }
     };
     let suggest = |p| Action::Suggest(p);
-    let analyze = "Runs it on suggested variables and adds its syntax to the editor";
     match tab {
         Tab::Home => {
             go(ui, Icon::Open, "Open", "Open a data file (Ctrl+O)", true, false, Action::Open);
@@ -313,23 +312,24 @@ fn buttons(ui: &mut egui::Ui, tab: Tab, state: &State) -> Option<Action> {
             let dialog = "Opens its dialog: pick the variables and options";
             go(ui, Icon::Table, "Descriptives", dialog, true, false, Action::Dialog(Kind::Descriptives));
             go(ui, Icon::Frequencies, "Frequencies", dialog, true, false, Action::Dialog(Kind::Frequencies));
-            go(ui, Icon::Boxplot, "Explore", analyze, true, false, suggest(Procedure::Explore));
+            go(ui, Icon::Boxplot, "Explore", dialog, true, false, Action::Dialog(Kind::Explore));
             divider(ui);
             go(ui, Icon::Crosstabs, "Crosstabs", dialog, true, false, Action::Dialog(Kind::Crosstabs));
             go(ui, Icon::TTest, "T-Test", dialog, true, false, Action::Dialog(Kind::TTest));
             go(ui, Icon::Anova, "One-Way ANOVA", dialog, true, false, Action::Dialog(Kind::Oneway));
             divider(ui);
-            go(ui, Icon::Correlations, "Correlate", analyze, true, false, suggest(Procedure::Correlations));
-            go(ui, Icon::Regression, "Regression", analyze, true, false, suggest(Procedure::Regression));
-            go(ui, Icon::Logistic, "Logistic", analyze, true, false, suggest(Procedure::Logistic));
+            go(ui, Icon::Correlations, "Correlate", dialog, true, false, Action::Dialog(Kind::Correlations));
+            go(ui, Icon::Regression, "Regression", dialog, true, false, Action::Dialog(Kind::Regression));
+            go(ui, Icon::Logistic, "Logistic", dialog, true, false, Action::Dialog(Kind::Logistic));
             divider(ui);
-            go(ui, Icon::Ranks, "Nonparametric", analyze, true, false, suggest(Procedure::Nonparametric));
+            go(ui, Icon::Ranks, "Nonparametric", dialog, true, false, Action::Dialog(Kind::Nonparametric));
         }
         Tab::Graphs => {
-            go(ui, Icon::Histogram, "Histogram", analyze, true, false, suggest(Procedure::Histogram));
-            go(ui, Icon::Bars, "Bar", analyze, true, false, suggest(Procedure::Bar));
-            go(ui, Icon::Scatter, "Scatter", analyze, true, false, suggest(Procedure::Scatter));
-            go(ui, Icon::Boxplot, "Boxplot", analyze, true, false, suggest(Procedure::Boxplot));
+            let dialog = "Opens its dialog: pick the variables";
+            go(ui, Icon::Histogram, "Histogram", dialog, true, false, Action::Dialog(Kind::Histogram));
+            go(ui, Icon::Bars, "Bar", dialog, true, false, Action::Dialog(Kind::Bar));
+            go(ui, Icon::Scatter, "Scatter", dialog, true, false, Action::Dialog(Kind::Scatter));
+            go(ui, Icon::Boxplot, "Boxplot", dialog, true, false, Action::Dialog(Kind::Boxplot));
         }
         Tab::View => {
             go(ui, Icon::Grid, "Data View", "Cases and their values", true, state.view == View::Data, Action::View(View::Data));
@@ -443,18 +443,18 @@ pub(crate) fn commands() -> Vec<(&'static str, Action)> {
         ("Select Cases", Action::Suggest(P::SelectCases)),
         ("Descriptives", Action::Dialog(Kind::Descriptives)),
         ("Frequencies", Action::Dialog(Kind::Frequencies)),
-        ("Explore", Action::Suggest(P::Explore)),
+        ("Explore", Action::Dialog(Kind::Explore)),
         ("Crosstabs", Action::Dialog(Kind::Crosstabs)),
         ("Independent-Samples T-Test", Action::Dialog(Kind::TTest)),
         ("One-Way ANOVA", Action::Dialog(Kind::Oneway)),
-        ("Bivariate Correlations", Action::Suggest(P::Correlations)),
-        ("Linear Regression", Action::Suggest(P::Regression)),
-        ("Binary Logistic Regression", Action::Suggest(P::Logistic)),
-        ("Nonparametric Tests (Mann-Whitney)", Action::Suggest(P::Nonparametric)),
-        ("Histogram", Action::Suggest(P::Histogram)),
-        ("Bar Chart", Action::Suggest(P::Bar)),
-        ("Scatterplot", Action::Suggest(P::Scatter)),
-        ("Boxplot", Action::Suggest(P::Boxplot)),
+        ("Bivariate Correlations", Action::Dialog(Kind::Correlations)),
+        ("Linear Regression", Action::Dialog(Kind::Regression)),
+        ("Binary Logistic Regression", Action::Dialog(Kind::Logistic)),
+        ("Nonparametric Tests (Mann-Whitney)", Action::Dialog(Kind::Nonparametric)),
+        ("Histogram", Action::Dialog(Kind::Histogram)),
+        ("Bar Chart", Action::Dialog(Kind::Bar)),
+        ("Scatterplot", Action::Dialog(Kind::Scatter)),
+        ("Boxplot", Action::Dialog(Kind::Boxplot)),
         ("AutoSave", Action::ToggleAutoSave),
         ("Light Theme", Action::Theme(egui::ThemePreference::Light)),
         ("Dark Theme", Action::Theme(egui::ThemePreference::Dark)),

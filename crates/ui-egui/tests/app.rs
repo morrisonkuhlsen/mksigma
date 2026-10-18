@@ -525,15 +525,27 @@ fn the_analyze_tab_runs_a_procedure_and_pastes_its_syntax() {
     let mut h = harness(SigmaApp::default());
     h.get_by_label("Analyze").click();
     h.run_steps(3);
-    // Procedures without a dialog yet run on suggested variables.
-    h.get_by_label("Correlate").click();
+    // Every procedure has its dialog now.
+    for (button, title) in [("Correlate", "Bivariate Correlations"), ("Nonparametric", "Nonparametric Tests"), ("Explore", "Explore")] {
+        h.get_by_label(button).click();
+        h.run_steps(3);
+        assert!(shows(&h, title), "{button} opens {title}");
+        h.get_by_label("Cancel").click();
+        h.run_steps(3);
+    }
+    h.get_by_label("Graphs").click();
     h.run_steps(3);
-    assert!(shows(&h, "Correlations"));
-    assert!(h.state().syntax.ends_with("\nCORRELATIONS /VARIABLES=age income score /PRINT=TWOTAIL NOSIG."));
-    // The sample has no 0/1 variable: Logistic is a template to complete, not run.
-    h.get_by_label("Logistic").click();
+    h.get_by_label("Scatter").click();
     h.run_steps(3);
-    assert!(h.state().syntax.ends_with("LOGISTIC REGRESSION VARIABLES outcome /METHOD=ENTER covariate1 covariate2."));
+    assert!(shows(&h, "Scatterplot") && shows(&h, "X axis"));
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
+    // Transformations still paste a command to complete.
+    h.get_by_label("Transform").click();
+    h.run_steps(3);
+    h.get_by_label("Compute").click();
+    h.run_steps(3);
+    assert!(h.state().syntax.ends_with("COMPUTE new_variable = age."));
     assert!(matches!(&h.state().status, Some(Status::Info(s)) if s.contains("placeholder")));
     h.get_by_label("Variable View").click();
     h.run_steps(3);
