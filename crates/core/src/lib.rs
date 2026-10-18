@@ -164,9 +164,16 @@ impl std::str::FromStr for Format {
     }
 }
 
+/// Keywords that can't name a variable, since variable lists and expressions use them.
+pub const RESERVED: [&str; 13] = ["ALL", "AND", "BY", "EQ", "GE", "GT", "LE", "LT", "NE", "NOT", "OR", "TO", "WITH"];
+
 /// Whether `name` can name a variable: starts with a letter or `@#$`, continues with letters,
-/// digits or `_.@#$`, doesn't end with a period, at most 64 bytes.
+/// digits or `_.@#$`, doesn't end with a period, at most 64 bytes, and isn't a reserved
+/// keyword (`ALL`, `TO`, `BY`...).
 pub fn is_valid_name(name: &str) -> bool {
+    if RESERVED.iter().any(|r| r.eq_ignore_ascii_case(name)) {
+        return false;
+    }
     let mut chars = name.chars();
     chars.next().is_some_and(|c| c.is_alphabetic() || matches!(c, '@' | '#' | '$'))
         && chars.all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '@' | '#' | '$'))

@@ -73,7 +73,8 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
 Done: case weights (`WEIGHT BY` from the file), `DESCRIPTIVES` weighted, `FREQUENCIES` (frequency
 tables with labels and missing sections, `/FORMAT` order and `NOTABLE`, `/STATISTICS` mean,
 SE mean, mode, std. deviation, variance, range, minimum, maximum, sum). To do in `FREQUENCIES`:
-median, percentiles, skewness, kurtosis, charts, `TO` and `ALL` in variable lists.
+median, percentiles, skewness, kurtosis. `ALL` and `first TO last` work in every procedure's and
+dictionary command's variable lists (expanded by file order each time an analysis runs).
 
 Done: `CROSSTABS` (counts, expected, row/column/total percentages; Pearson, continuity
 correction, likelihood ratio, Fisher's exact for 2×2, linear-by-linear; expected-count note),

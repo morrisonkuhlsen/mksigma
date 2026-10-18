@@ -12,6 +12,7 @@ mod edit;
 mod expr;
 mod filter;
 mod history;
+mod lists;
 mod steps;
 mod transform;
 
@@ -469,7 +470,9 @@ impl Session {
     }
 
     /// Runs a command and returns the edits it made to the data (none for analyses).
-    fn apply(&mut self, command: &Command) -> Result<Vec<Edit>, EngineError> {
+    fn apply(&mut self, written: &Command) -> Result<Vec<Edit>, EngineError> {
+        let expanded = lists::expand(&self.dataset, written)?;
+        let command = &expanded;
         match command {
             Command::VariableLabels(_)
             | Command::ValueLabels(_)
@@ -488,8 +491,9 @@ impl Session {
             Command::Recode(groups) => return transform::recode(&mut self.dataset, groups),
             Command::SelectIf(cond) => return transform::select_if(&mut self.dataset, cond),
             _ => {
-                let items = analyse(&self.dataset, command)?;
-                self.add_run(command.clone(), items);
+                // The run keeps the command as written, so `ALL` means the variables of the day.
+                let items = analyse(&self.dataset, written)?;
+                self.add_run(written.clone(), items);
             }
         }
         Ok(Vec::new())
@@ -498,6 +502,7 @@ impl Session {
 
 /// The output of an analysis command on `ds`; nothing for commands that change the data.
 fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
+    let command = &lists::expand(ds, command)?;
     let mut items = Vec::new();
     match command {
         Command::Descriptives { variables } => {
@@ -1136,6 +1141,28 @@ mod tests {
 
         assert!(matches!(s.run_syntax("GET DATA /TYPE=TXT /FILE='/nonexistent/x.csv'."), Err(EngineError::File(_))));
         assert_eq!(s.dataset.n_cases(), 4, "a file that can't be read changes nothing");
+    }
+
+    #[test]
+    fn all_and_to_in_variable_lists() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("DESCRIPTIVES ALL.\nFORMATS age TO score (F6.1).").unwrap();
+        assert!(s.output.to_text().contains("Test score"), "ALL takes every variable");
+        assert!(s.dataset.variables().iter().all(|v| v.format.to_string() == "F6.1"));
+        // ALL is expanded each time: a new variable joins a filtered rerun.
+        s.run_syntax("RECODE age (LO THRU 30 = 1) (ELSE = 2) INTO grupo.\nFREQUENCIES grupo /BARCHART.").unwrap();
+        let before = s.output.to_text().matches("Descriptive Statistics").count();
+        assert_eq!(before, 1);
+        let bar = s.output.items.iter().position(|i| matches!(i, Item::Chart(_))).unwrap();
+        let Item::Chart(chart) = &s.output.items[bar] else { panic!() };
+        s.select_category(bar, chart.category(0).unwrap().clone()).unwrap();
+        let rows = s
+            .output
+            .items
+            .iter()
+            .find_map(|i| if let Item::Table(t) = i { (t.title == "Descriptive Statistics").then_some(t.rows.len()) } else { None });
+        assert_eq!(rows, Some(5), "age, income, score, grupo and Valid N");
+        assert!(s.run_syntax("DESCRIPTIVES score TO age.").is_err());
     }
 
     #[test]

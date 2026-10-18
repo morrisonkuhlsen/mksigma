@@ -204,6 +204,9 @@ fn name_from(header: &str, column: usize, used: &mut Vec<String>) -> (String, Op
     while name.len() > 60 {
         name.pop();
     }
+    if mksigma_core::RESERVED.iter().any(|r| r.eq_ignore_ascii_case(&name)) {
+        name.push('_');
+    }
     if !is_valid_name(&name) {
         name = format!("VAR{:05}", column + 1);
     }
@@ -405,9 +408,9 @@ mod tests {
 
     #[test]
     fn awkward_headers_become_valid_unique_names() {
-        let file = read(b"1st,a b,A_B,,x.\n1,2,3,4,5\n", &Options::default()).unwrap();
+        let file = read(b"1st,a b,A_B,,x.,to\n1,2,3,4,5,6\n", &Options::default()).unwrap();
         let names: Vec<&str> = file.dataset.variables().iter().map(|v| v.name.as_str()).collect();
-        assert_eq!(names, ["v1st", "a_b", "A_B_2", "VAR00004", "x"]);
+        assert_eq!(names, ["v1st", "a_b", "A_B_2", "VAR00004", "x", "to_"], "TO is a keyword");
     }
 
     #[test]
