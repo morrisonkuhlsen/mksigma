@@ -2,6 +2,7 @@
 //! styled for screen (light and dark) and print, with nothing loaded from elsewhere.
 
 use crate::chart::svg;
+use crate::style::{Family, Style};
 use crate::{Cell, Item, Output, Table};
 
 const STYLE: &str = r#"
@@ -47,7 +48,7 @@ pub(crate) fn escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-fn table(t: &Table) -> String {
+fn table(t: &Table, style: &Style) -> String {
     let mut s = format!("<div class=\"wrap\"><table><caption>{}</caption><thead><tr><th></th>", escape(&t.title));
     for c in &t.columns {
         s.push_str(&format!("<th>{}</th>", escape(c)));
@@ -57,7 +58,7 @@ fn table(t: &Table) -> String {
         s.push_str(&format!("<tr><th>{}</th>", escape(label)));
         for cell in cells {
             let class = if matches!(cell, Cell::Text(_) | Cell::Empty) { "" } else { " class=\"num\"" };
-            s.push_str(&format!("<td{class}>{}</td>", escape(&cell.render())));
+            s.push_str(&format!("<td{class}>{}</td>", escape(&style.cell(cell))));
         }
         s.push_str("</tr>");
     }
@@ -65,28 +66,52 @@ fn table(t: &Table) -> String {
     s
 }
 
-fn item(item: &Item) -> String {
+fn item(item: &Item, style: &Style) -> String {
     match item {
-        Item::Table(t) => table(t),
+        Item::Table(t) => table(t, style),
         Item::Text(s) => format!("<p class=\"note\">{}</p>", escape(s)),
         Item::Warning(s) => format!("<p class=\"warning\">Warning: {}</p>", escape(s)),
         Item::Chart(c) => svg(c, 640.0, 400.0),
     }
 }
 
-fn page(title: &str, class: &str, body: &str) -> String {
+/// CSS for what the style changes; nothing for the default style.
+fn style_css(style: &Style) -> String {
+    let mut css = String::new();
+    let family = match style.family {
+        Family::Default => None,
+        Family::Sans => Some("\"Helvetica Neue\", Arial, sans-serif"),
+        Family::Serif => Some("Georgia, \"Times New Roman\", serif"),
+        Family::Mono => Some("ui-monospace, Menlo, Consolas, monospace"),
+    };
+    if let Some(f) = family {
+        css.push_str(&format!("body {{ font-family: {f}; }}\n"));
+    }
+    if style.size != Style::SIZE {
+        css.push_str(&format!("body {{ font-size: {:.1}px; }}\n", f64::from(style.size) * 1.4));
+    }
+    if let Some(([r, g, b], [cr, cg, cb])) = style.palette.colors() {
+        // In both colour schemes: a palette is chosen for the figures, not the page.
+        let vars = format!("--bar: rgb({r},{g},{b}); --curve: rgb({cr},{cg},{cb});");
+        css.push_str(&format!(":root {{ {vars} }}\n@media (prefers-color-scheme: dark) {{ :root {{ {vars} }} }}\n"));
+    }
+    css
+}
+
+fn page(title: &str, class: &str, body: &str, style: &Style) -> String {
     format!(
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-         <title>{t}</title><style>{STYLE}</style></head><body class=\"{class}\"><h1>{t}</h1>\n{body}</body></html>\n",
-        t = escape(title)
+         <title>{t}</title><style>{STYLE}{css}</style></head><body class=\"{class}\"><h1>{t}</h1>\n{body}</body></html>\n",
+        t = escape(title),
+        css = style_css(style)
     )
 }
 
 impl Output {
     /// The whole Output as a standalone HTML page with `title` as its heading.
     pub fn to_html(&self, title: &str) -> String {
-        let body: String = self.items.iter().map(|i| format!("<section>{}</section>\n", item(i))).collect();
-        page(title, "output", &body)
+        let body: String = self.items.iter().map(|i| format!("<section>{}</section>\n", item(i, &self.style))).collect();
+        page(title, "output", &body, &self.style)
     }
 
     /// The items as a dashboard: a card each, in a grid as many columns wide as the page
@@ -97,10 +122,10 @@ impl Output {
         body.push_str("<div class=\"tiles\">\n");
         for (k, i) in self.items.iter().enumerate() {
             let class = if wide.get(k).copied().unwrap_or(false) { "tile wide" } else { "tile" };
-            body.push_str(&format!("<div class=\"{class}\">{}</div>\n", item(i)));
+            body.push_str(&format!("<div class=\"{class}\">{}</div>\n", item(i, &self.style)));
         }
         body.push_str("</div>\n");
-        page(title, "dashboard", &body)
+        page(title, "dashboard", &body, &self.style)
     }
 }
 

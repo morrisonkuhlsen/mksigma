@@ -725,6 +725,20 @@ fn the_output_exports_as_latex() {
     app.export(&path, mksigma_ui_egui::ExportFormat::Latex);
     let tex = std::fs::read_to_string(&path).unwrap();
     std::fs::remove_file(&path).unwrap();
-    assert!(tex.contains("\\documentclass{article}") && tex.contains("\\toprule") && tex.contains("\\begin{axis}"));
+    assert!(tex.contains("\\documentclass[10pt]{article}") && tex.contains("\\toprule") && tex.contains("\\begin{axis}"));
     assert!(matches!(&app.status, Some(Status::Info(s)) if s.starts_with("Exported the Output")));
+}
+
+#[test]
+fn the_output_style_shows_on_screen() {
+    let mut app = SigmaApp::default();
+    app.session.run_syntax("DESCRIPTIVES age.").unwrap();
+    let mut h = harness(app);
+    assert!(shows(&h, "35.50"));
+    h.state_mut().run_edit("OUTPUT STYLE /DECIMALS=3.");
+    h.run_steps(3);
+    assert!(shows(&h, "35.500") && !shows(&h, "35.50"), "every statistic with three decimals");
+    h.get_by_label("View").click();
+    h.run_steps(3);
+    assert!(shows(&h, "Output Style"), "the controls are on the View tab");
 }

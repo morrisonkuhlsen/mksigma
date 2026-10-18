@@ -10,6 +10,7 @@ mod expr;
 mod lexer;
 mod procedures;
 mod slice;
+mod style;
 mod transform;
 
 pub use data::GetData;
@@ -18,12 +19,15 @@ pub use expr::{BinOp, Expr};
 use lexer::Token;
 pub use procedures::{BarStat, CrosstabCells, GraphSpec, NparSpec, PostHocTest, TTestSpec};
 pub use slice::SliceSpec;
+pub use style::StyleSpec;
 pub use transform::{RecodeFrom, RecodeGroup, RecodeSpec, RecodeTo};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     /// `GET DATA /TYPE=TXT /FILE='...'`: a new active dataset from delimited text.
     GetData(GetData),
+    /// `OUTPUT STYLE [/FONT=...] [/SIZE=n] [/PALETTE=...] [/DECIMALS=AUTO|n]`
+    OutputStyle(StyleSpec),
     /// `GET FILE='...'`: a new active dataset from a system file.
     GetFile(String),
     /// `DASHBOARD /TILES=(analysis item [WIDE])...`: the dashboard's tiles, counted from 1, and
@@ -256,6 +260,9 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     }
     if is_keyword(name, "LOGISTIC") && second("REGRESSION") {
         return procedures::logistic(rest.get(1..).unwrap_or_default());
+    }
+    if is_keyword(name, "OUTPUT") && second("STYLE") {
+        return style::output_style(rest.get(1..).unwrap_or_default());
     }
     if name.eq_ignore_ascii_case("SLICE") {
         return slice::slice(rest);

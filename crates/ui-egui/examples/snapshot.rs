@@ -2,7 +2,7 @@
 //! touching the screen.
 //!
 //! `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav] [--variables] [--labels]
-//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon]
+//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--tab NAME]
 //!  [--size 1280x800] out.png` (`--disable` switches off applied step N, counting from 1, after
 //!  `--run`; `--select` cross-filters by category PART of Output item ITEM, both counting from 1:
 //!  a bar, bin or box, or a table row; `--pin` pins Output item ITEM to the dashboard and
@@ -50,6 +50,18 @@ fn main() -> Result<(), String> {
             }
             "--dashboard" => app.output_state.dashboard = true,
             "--no-ribbon" => app.ribbon_collapsed = true,
+            "--tab" => {
+                i += 1;
+                use mksigma_ui_egui::Tab;
+                app.tab = match args.get(i).map(|t| t.to_ascii_lowercase()).as_deref() {
+                    Some("data") => Tab::Data,
+                    Some("transform") => Tab::Transform,
+                    Some("analyze") => Tab::Analyze,
+                    Some("graphs") => Tab::Graphs,
+                    Some("view") => Tab::View,
+                    _ => Tab::Home,
+                };
+            }
             "--size" => {
                 i += 1;
                 if let Some((w, h)) = args.get(i).and_then(|s| s.split_once('x')) {

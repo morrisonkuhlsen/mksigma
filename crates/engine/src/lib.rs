@@ -104,6 +104,7 @@ fn changes_data(command: &Command) -> bool {
             | Command::Examine { .. }
             | Command::Slice(_)
             | Command::Dashboard(_)
+            | Command::OutputStyle(_)
             | Command::GetFile(_)
             | Command::GetData(_)
     )
@@ -265,6 +266,10 @@ impl Session {
             out.push_str(&slicer.syntax());
             out.push('\n');
         }
+        if let Some(style) = self.output.style.syntax() {
+            out.push_str(&style);
+            out.push('\n');
+        }
         let tiles: Vec<String> = self
             .tiles
             .iter()
@@ -393,6 +398,24 @@ impl Session {
             None => Some((x, x)),
             Some((lo, hi)) => Some((f64::min(lo, x), f64::max(hi, x))),
         })
+    }
+
+    /// `OUTPUT STYLE`: changes what is written, keeps the rest.
+    fn set_style(&mut self, spec: &mksigma_syntax::StyleSpec) {
+        use mksigma_output::style::{Family, Palette};
+        let style = &mut self.output.style;
+        if let Some(font) = &spec.font {
+            style.family = Family::ALL.into_iter().find(|f| f.name() == font).unwrap_or_default();
+        }
+        if let Some(palette) = &spec.palette {
+            style.palette = Palette::ALL.into_iter().find(|p| p.name() == palette).unwrap_or_default();
+        }
+        if let Some(size) = spec.size {
+            style.size = size;
+        }
+        if let Some(decimals) = spec.decimals {
+            style.decimals = decimals;
+        }
     }
 
     /// `SLICE`: sets, replaces or removes a variable's slicer, or removes them all.
@@ -551,7 +574,7 @@ impl Session {
     pub fn dashboard_output(&self) -> (Output, Vec<bool>) {
         let items = self.dashboard();
         let wide = items.iter().map(|i| self.is_wide(*i)).collect();
-        (Output { items: items.into_iter().filter_map(|i| self.output.items.get(i).cloned()).collect() }, wide)
+        (Output { items: items.into_iter().filter_map(|i| self.output.items.get(i).cloned()).collect(), style: self.output.style }, wide)
     }
 
     fn add_run(&mut self, command: Command, items: Vec<Item>) {
@@ -799,6 +822,7 @@ impl Session {
             Command::Recode(groups) => return transform::recode(&mut self.dataset, groups),
             Command::SelectIf(cond) => return transform::select_if(&mut self.dataset, cond),
             Command::Slice(spec) => self.set_slicer(spec.as_ref())?,
+            Command::OutputStyle(spec) => self.set_style(spec),
             _ => {
                 // The run keeps the command as written, so `ALL` means the variables of the day.
                 let items = analyse(&self.dataset, written)?;
@@ -1607,6 +1631,22 @@ mod tests {
         assert!(syntax.contains("GET FILE='/dados/com_x.sav'.\nCOMPUTE y = x * 2.\n") && !syntax.contains("COMPUTE x"), "{syntax}");
         t.set_step_enabled(0, false).unwrap();
         assert_eq!(t.dashboard_syntax(), None, "the saved file has the step that is now off");
+    }
+
+    #[test]
+    fn output_style_changes_every_rendering_and_is_saved() {
+        use mksigma_output::style::{Family, Palette};
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("DESCRIPTIVES age.\nOUTPUT STYLE /FONT=SERIF /PALETTE=GRAY /DECIMALS=4.").unwrap();
+        let style = s.output.style;
+        assert_eq!((style.family, style.palette, style.decimals, style.size), (Family::Serif, Palette::Gray, Some(4), 10));
+        assert!(s.output.to_html("x").contains("35.5000"), "four decimals everywhere");
+        assert!(s.output.to_latex("x").contains("35.5000") && s.output.to_latex("x").contains("rmdefault"));
+        s.run_syntax("OUTPUT STYLE /SIZE=12.").unwrap();
+        assert_eq!(s.output.style.family, Family::Serif, "what isn't written stays");
+        assert!(s.steps().is_empty() && s.journal.iter().any(|j| j.starts_with("OUTPUT STYLE")));
+        s.clear_output();
+        assert_eq!(s.output.style.size, 12, "clearing the Output keeps its style");
     }
 
     #[test]

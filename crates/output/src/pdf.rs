@@ -7,6 +7,7 @@
 //! take the width of the letter they're built on.
 
 use crate::chart::{self, Anchor, Shape, Stroke, TextSize};
+use crate::style::{Family, Style};
 use crate::{Cell, Item, Output, Table};
 
 const PAGE: (f64, f64) = (595.28, 841.89);
@@ -49,8 +50,14 @@ fn base(c: char) -> char {
     }
 }
 
-/// Width of `text` in points at `size`; bold is about 6% wider.
-fn width(text: &str, size: f64, bold: bool) -> f64 {
+/// Width of `text` in points at `size` in `family`'s standard font. Helvetica's metrics are
+/// exact (bold about 6% wider); Courier is 600 units a letter; Times runs about 9% narrower
+/// than Helvetica, close enough to set columns.
+fn width(text: &str, size: f64, bold: bool, family: Family) -> f64 {
+    if family == Family::Mono {
+        return text.chars().count() as f64 * 0.6 * size;
+    }
+    let narrower = if family == Family::Serif { 0.91 } else { 1.0 };
     let units: u32 = text
         .chars()
         .map(|c| {
@@ -58,7 +65,16 @@ fn width(text: &str, size: f64, bold: bool) -> f64 {
             u32::from(c).checked_sub(32).and_then(|i| HELVETICA.get(i as usize)).map_or(556, |w| u32::from(*w))
         })
         .sum();
-    f64::from(units) / 1000.0 * size * if bold { 1.06 } else { 1.0 }
+    f64::from(units) / 1000.0 * size * if bold { 1.06 } else { 1.0 } * narrower
+}
+
+/// The standard fonts of a family, regular and bold: built into every PDF reader.
+fn fonts(family: Family) -> (&'static str, &'static str) {
+    match family {
+        Family::Serif => ("Times-Roman", "Times-Bold"),
+        Family::Mono => ("Courier", "Courier-Bold"),
+        Family::Default | Family::Sans => ("Helvetica", "Helvetica-Bold"),
+    }
 }
 
 /// Windows-1252 bytes of `c`, `?` when it has none.
@@ -127,6 +143,10 @@ const WARN: Rgb = Rgb(0.6, 0.4, 0.0);
 
 /// Pages under construction: one content stream each, and where the next item goes.
 struct Pages {
+    style: Style,
+    /// Bars and curves: the palette's, or the PDF's own blue and orange.
+    bar: Rgb,
+    curve: Rgb,
     done: Vec<Vec<u8>>,
     current: Vec<u8>,
     /// Top of the free space, in PDF coordinates (from the bottom of the page).
@@ -134,8 +154,15 @@ struct Pages {
 }
 
 impl Pages {
-    fn new() -> Self {
-        Pages { done: Vec::new(), current: Vec::new(), y: PAGE.1 - MARGIN }
+    fn new(style: Style) -> Self {
+        let rgb = |[r, g, b]: [u8; 3]| Rgb(f64::from(r) / 255.0, f64::from(g) / 255.0, f64::from(b) / 255.0);
+        let (bar, curve) = style.palette.colors().map_or((BAR, CURVE), |(bar, curve)| (rgb(bar), rgb(curve)));
+        Pages { style, bar, curve, done: Vec::new(), current: Vec::new(), y: PAGE.1 - MARGIN }
+    }
+
+    /// `points` at the style's size (sizes here are for 10-point body text).
+    fn pt(&self, points: f64) -> f64 {
+        points * self.style.scale()
     }
 
     fn op(&mut self, s: &str) {
@@ -176,7 +203,7 @@ impl Pages {
     /// Text with its baseline at `y`; `x` is its left, centre or right per `anchor`.
     fn text(&mut self, x: f64, y: f64, text: &str, font: Font, anchor: Anchor, vertical: bool) {
         let Font { size, bold, color: c } = font;
-        let w = width(text, size, bold);
+        let w = width(text, size, bold, self.style.family);
         let shift = match anchor {
             Anchor::Start => 0.0,
             Anchor::Middle => w / 2.0,
@@ -196,7 +223,7 @@ impl Pages {
         let mut lines = Vec::new();
         for word in text.split_whitespace() {
             let candidate = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
-            if width(&candidate, size, false) > max && !line.is_empty() {
+            if width(&candidate, size, false, self.style.family) > max && !line.is_empty() {
                 lines.push(std::mem::replace(&mut line, word.to_string()));
             } else {
                 line = candidate;
@@ -215,7 +242,8 @@ impl Pages {
         let content = PAGE.0 - 2.0 * MARGIN;
         let header: Vec<String> = std::iter::once(String::new()).chain(t.columns.iter().cloned()).collect();
         let body: Vec<Vec<String>> =
-            t.rows.iter().map(|(label, cells)| std::iter::once(label.clone()).chain(cells.iter().map(Cell::render)).collect()).collect();
+            t.rows.iter().map(|(label, cells)| std::iter::once(label.clone()).chain(cells.iter().map(|c| self.style.cell(c))).collect()).collect();
+        let family = self.style.family;
         let numeric: Vec<bool> = std::iter::once(false)
             .chain(
                 (0..t.columns.len())
@@ -227,15 +255,16 @@ impl Pages {
         let widths_at = |size: f64| -> Vec<f64> {
             (0..header.len())
                 .map(|c| {
-                    let longest_word = header.get(c).map_or(0.0, |h| h.split_whitespace().map(|w| width(w, size, true)).fold(0.0, f64::max));
-                    let cells = body.iter().filter_map(|r| r.get(c)).map(|s| width(s, size, c == 0));
+                    let longest_word = header.get(c).map_or(0.0, |h| h.split_whitespace().map(|w| width(w, size, true, family)).fold(0.0, f64::max));
+                    let cells = body.iter().filter_map(|r| r.get(c)).map(|s| width(s, size, c == 0, family));
                     cells.fold(longest_word, f64::max) + 10.0
                 })
                 .collect()
         };
-        let mut size = 8.5;
+        let mut size = self.pt(8.5);
         let mut widths = widths_at(size);
-        while widths.iter().sum::<f64>() > content && size > 6.0 {
+        let smallest = self.pt(6.0).min(size);
+        while widths.iter().sum::<f64>() > content && size > smallest {
             size -= 0.5;
             widths = widths_at(size);
         }
@@ -248,7 +277,7 @@ impl Pages {
                 let mut lines: Vec<String> = Vec::new();
                 for word in h.split_whitespace() {
                     match lines.last_mut() {
-                        Some(line) if width(&format!("{line} {word}"), size, true) <= w - 10.0 => {
+                        Some(line) if width(&format!("{line} {word}"), size, true, family) <= w - 10.0 => {
                             line.push(' ');
                             line.push_str(word);
                         }
@@ -303,7 +332,8 @@ impl Pages {
         let caption = |pages: &mut Pages, more: bool| {
             pages.y -= 12.0;
             let title = if more { format!("{} (continued)", t.title) } else { t.title.clone() };
-            pages.text(MARGIN, pages.y, &title, Font { size: 10.0, bold: true, color: INK }, Anchor::Start, false);
+            let size = pages.pt(10.0);
+            pages.text(MARGIN, pages.y, &title, Font { size, bold: true, color: INK }, Anchor::Start, false);
             pages.y -= 4.0;
         };
         let head = |pages: &mut Pages| {
@@ -336,20 +366,20 @@ impl Pages {
                     let (color, width) = match stroke {
                         Stroke::Axis => (INK, 0.8),
                         Stroke::Grid => (LINE, 0.5),
-                        Stroke::Curve => (CURVE, 1.5),
+                        Stroke::Curve => (self.curve, 1.5),
                         Stroke::Median => (INK, 2.0),
                     };
                     self.line(at(from.0, from.1), at(to.0, to.1), color, width);
                 }
                 Shape::Rect { x, y, width, height, .. } => {
                     let (px, py) = at(x, y + height);
-                    self.rect(px, py, width, height, BAR);
+                    self.rect(px, py, width, height, self.bar);
                 }
                 Shape::Circle { x, y, radius } => {
                     // Four Bézier arcs; k is the usual 0.5523 control-point factor.
                     let (cx, cy) = at(x, y);
                     let (r, k) = (radius, radius * 0.5523);
-                    self.fill(BAR);
+                    self.fill(self.bar);
                     self.op(&format!(
                         "{:.2} {cy:.2} m {:.2} {:.2} {:.2} {:.2} {cx:.2} {:.2} c {:.2} {:.2} {:.2} {:.2} {:.2} {cy:.2} c {:.2} {:.2} {:.2} {:.2} {cx:.2} {:.2} c {:.2} {:.2} {:.2} {:.2} {:.2} {cy:.2} c f",
                         cx + r,
@@ -376,7 +406,7 @@ impl Pages {
                     ));
                 }
                 Shape::Path { points } => {
-                    self.stroke(CURVE, 1.5);
+                    self.stroke(self.curve, 1.5);
                     let ops: Vec<String> = points
                         .iter()
                         .enumerate()
@@ -403,7 +433,8 @@ impl Pages {
 }
 
 /// Assembles objects into a PDF file with a cross-reference table.
-fn assemble(pages: Vec<Vec<u8>>, title: &str) -> Vec<u8> {
+fn assemble(pages: Vec<Vec<u8>>, title: &str, family: Family) -> Vec<u8> {
+    let (regular, bold) = fonts(family);
     let mut objects: Vec<Vec<u8>> = Vec::new();
     let n = pages.len();
     // 1 catalog, 2 page tree, 3 and 4 fonts, 5 info, then a page and its contents per page.
@@ -411,8 +442,8 @@ fn assemble(pages: Vec<Vec<u8>>, title: &str) -> Vec<u8> {
     objects.push(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
     let kids: Vec<String> = page_ids.iter().map(|id| format!("{id} 0 R")).collect();
     objects.push(format!("<< /Type /Pages /Kids [{}] /Count {n} >>", kids.join(" ")).into_bytes());
-    objects.push(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec());
-    objects.push(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>".to_vec());
+    objects.push(format!("<< /Type /Font /Subtype /Type1 /BaseFont /{regular} /Encoding /WinAnsiEncoding >>").into_bytes());
+    objects.push(format!("<< /Type /Font /Subtype /Type1 /BaseFont /{bold} /Encoding /WinAnsiEncoding >>").into_bytes());
     objects.push(format!("<< /Producer (MK Sigma) /Title {} >>", info_string(title)).into_bytes());
     for (i, content) in pages.into_iter().enumerate() {
         let contents_id = page_ids.get(i).map_or(0, |id| id + 1);
@@ -448,16 +479,23 @@ fn assemble(pages: Vec<Vec<u8>>, title: &str) -> Vec<u8> {
 impl Output {
     /// The whole Output as a PDF document with `title` as its heading.
     pub fn to_pdf(&self, title: &str) -> Vec<u8> {
-        let mut pages = Pages::new();
+        let mut pages = Pages::new(self.style);
         let content = PAGE.0 - 2.0 * MARGIN;
         pages.y -= 14.0;
-        pages.text(MARGIN, pages.y, title, Font { size: 14.0, bold: true, color: INK }, Anchor::Start, false);
+        let size = pages.pt(14.0);
+        pages.text(MARGIN, pages.y, title, Font { size, bold: true, color: INK }, Anchor::Start, false);
         pages.y -= 18.0;
         for item in &self.items {
             match item {
                 Item::Table(t) => pages.table(t),
-                Item::Text(s) => pages.paragraph(s, 8.0, MUTED, content),
-                Item::Warning(s) => pages.paragraph(&format!("Warning: {s}"), 8.5, WARN, content),
+                Item::Text(s) => {
+                    let size = pages.pt(8.0);
+                    pages.paragraph(s, size, MUTED, content);
+                }
+                Item::Warning(s) => {
+                    let size = pages.pt(8.5);
+                    pages.paragraph(&format!("Warning: {s}"), size, WARN, content);
+                }
                 Item::Chart(c) => pages.chart(c),
             }
         }
@@ -466,7 +504,7 @@ impl Output {
         let total = pages.done.len();
         let mut done = std::mem::take(&mut pages.done);
         for (i, content) in done.iter_mut().enumerate() {
-            let mut footer = Pages { done: Vec::new(), current: Vec::new(), y: 0.0 };
+            let mut footer = Pages::new(self.style);
             footer.text(
                 PAGE.0 - MARGIN,
                 30.0,
@@ -477,7 +515,7 @@ impl Output {
             );
             content.extend(footer.current);
         }
-        assemble(done, title)
+        assemble(done, title, self.style.family)
     }
 }
 
@@ -547,8 +585,9 @@ mod tests {
 
     #[test]
     fn widths_follow_helvetica() {
-        assert!((width("0123456789", 10.0, false) - 55.6).abs() < 1e-9, "every digit is 556 units");
-        assert_eq!(width("ção", 10.0, false), width("cao", 10.0, false));
+        assert!((width("0123456789", 10.0, false, Family::Sans) - 55.6).abs() < 1e-9, "every digit is 556 units");
+        assert_eq!(width("ção", 10.0, false, Family::Default), width("cao", 10.0, false, Family::Default));
+        assert!((width("abc", 10.0, true, Family::Mono) - 18.0).abs() < 1e-9, "Courier: 600 units a letter");
         assert_eq!(win_ansi('ç'), 0xe7);
         assert_eq!(win_ansi('–'), 0x96);
         assert_eq!(win_ansi('中'), b'?');

@@ -462,6 +462,7 @@ impl SigmaApp {
             value_labels: self.value_labels,
             view: self.view,
             autosave: self.autosave,
+            style: self.session.output.style,
         };
         let mut actions = Vec::new();
         actions.extend(ribbon::title_bar(ui, &state));
@@ -654,6 +655,7 @@ impl SigmaApp {
             Action::Suggest(procedure) => self.paste(procedure),
             Action::Theme(preference) => ctx.set_theme(preference),
             Action::SaveDashboard => self.save_dashboard_dialog(),
+            Action::Syntax(syntax) => self.run_edit(&syntax),
             Action::Search => self.search = if self.search.is_some() { None } else { Some(String::new()) },
             Action::ToggleAutoSave => {
                 if self.autosave {

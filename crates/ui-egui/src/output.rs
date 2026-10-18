@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use mksigma_engine::core::{Measure, Value, VarType};
 use mksigma_engine::output::chart::{self, Anchor, Shape, Stroke, TextSize};
+use mksigma_engine::output::style::{Family, Style};
 use mksigma_engine::output::{Category, Cell, Chart, Item, Table};
 use mksigma_engine::{Selection, Session, Slicer};
 
@@ -51,10 +52,10 @@ pub enum ExportFormat {
 }
 
 /// Right-click on an item: copy it as LaTeX, ready to paste into a document.
-fn copy_as_latex(response: &egui::Response, item: &Item) {
+fn copy_as_latex(response: &egui::Response, item: &Item, style: &Style) {
     response.context_menu(|ui| {
         if ui.button("Copy as LaTeX").on_hover_text("booktabs tables, pgfplots charts").clicked() {
-            ui.ctx().copy_text(mksigma_engine::output::latex::item_to_latex(item));
+            ui.ctx().copy_text(mksigma_engine::output::latex::item_to_latex(item, style));
             ui.close();
         }
     });
@@ -141,7 +142,8 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
         if tiles.is_empty() {
             empty(ui, "The dashboard is empty", "Pin tables and charts from the Output with the pin beside each one.");
         }
-        egui::ScrollArea::vertical().id_salt("dashboard").auto_shrink([false, false]).show(ui, |ui| {
+        apply_style(ui, &session.output.style);
+        egui::ScrollArea::both().id_salt("dashboard").auto_shrink([false, false]).show(ui, |ui| {
             if let Some(a) = dashboard(ui, session, state, &tiles) {
                 action = a;
             }
@@ -151,7 +153,8 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
     if output.items.is_empty() {
         empty(ui, "No output yet", "Pick a procedure on the Analyze or Graphs tab, or run syntax.");
     }
-    egui::ScrollArea::vertical().id_salt("output").stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
+    apply_style(ui, &session.output.style);
+    egui::ScrollArea::both().id_salt("output").stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
         for (i, item) in output.items.iter().enumerate() {
             if let Some(a) = show_item(ui, session, state, i, item, Some(session.is_pinned(i))) {
                 action = a;
@@ -247,7 +250,7 @@ fn show_item(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, i: u
     match item {
         Item::Table(t) => {
             let flipped = state.transposed.contains(&i);
-            let clicked = table(ui, i, t, flipped, shown, pin);
+            let clicked = table(ui, i, t, flipped, shown, pin, &session.output.style);
             if clicked.pivot {
                 if flipped {
                     state.transposed.remove(&i);
@@ -276,12 +279,28 @@ fn show_item(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, i: u
                     }
                 });
             }
-            if let Some(category) = draw_chart(ui, c, shown) {
+            if let Some(category) = draw_chart(ui, c, shown, &session.output.style) {
                 action = Some(OutputAction::Select(i, category));
             }
         }
     }
     action
+}
+
+/// The Output's text in the style's size and family. Serif has no font on screen (only the
+/// interface's own are loaded): it shows in the usual one, and in serif in every export.
+fn apply_style(ui: &mut egui::Ui, style: &Style) {
+    let (k, family) = text_of(style);
+    let text = &mut ui.style_mut().text_styles;
+    for (name, size) in [(egui::TextStyle::Body, 13.0), (egui::TextStyle::Button, 13.0), (egui::TextStyle::Small, 11.0)] {
+        text.insert(name, egui::FontId::new(size * k, family.clone()));
+    }
+}
+
+/// The style's scale and font family on screen.
+fn text_of(style: &Style) -> (f32, egui::FontFamily) {
+    let family = if style.family == Family::Mono { egui::FontFamily::Monospace } else { egui::FontFamily::Proportional };
+    (style.scale() as f32, family)
 }
 
 /// The slicer strip: a chip per slicer (click it to pick values or a range) and a button to
@@ -396,11 +415,12 @@ struct TableClick {
 
 /// Shows a table, transposed when `flipped`. A row that stands for a category can be selected
 /// at its first text cell (the value of a frequency table's row), or at its label if it has none.
-fn table(ui: &mut egui::Ui, index: usize, t: &Table, flipped: bool, selected: Option<&Category>, pin: Option<bool>) -> TableClick {
+#[allow(clippy::too_many_arguments)]
+fn table(ui: &mut egui::Ui, index: usize, t: &Table, flipped: bool, selected: Option<&Category>, pin: Option<bool>, style: &Style) -> TableClick {
     let mut click = TableClick { pivot: false, pin: false, select: None };
     ui.horizontal(|ui| {
         let title = ui.add(egui::Label::new(egui::RichText::new(&t.title).strong()).sense(egui::Sense::click()));
-        copy_as_latex(&title, &Item::Table(t.clone()));
+        copy_as_latex(&title, &Item::Table(t.clone()), style);
         click.pivot = ui.small_button("pivot").on_hover_text("Swap rows and columns").clicked();
         if let Some(pinned) = pin {
             click.pin = pin_button(ui, pinned);
@@ -449,9 +469,9 @@ fn table(ui: &mut egui::Ui, index: usize, t: &Table, flipped: bool, selected: Op
                 };
                 ui.with_layout(layout, |ui| {
                     if key(row) == Some(col) {
-                        select(ui, row, &cell.render(), false);
+                        select(ui, row, &style.cell(cell), false);
                     } else {
-                        ui.label(cell.render());
+                        ui.label(style.cell(cell));
                     }
                 });
             }
@@ -463,15 +483,19 @@ fn table(ui: &mut egui::Ui, index: usize, t: &Table, flipped: bool, selected: Op
 
 /// Draws a chart; returns the category of the bin, bar or box clicked, if it has one. With
 /// `selected` among its categories, the others are dimmed.
-fn draw_chart(ui: &mut egui::Ui, c: &Chart, selected: Option<&Category>) -> Option<Category> {
-    // As wide as the pane allows, within limits; 5:8 proportions.
-    let width = ui.available_width().clamp(320.0, 640.0);
+fn draw_chart(ui: &mut egui::Ui, c: &Chart, selected: Option<&Category>, style: &Style) -> Option<Category> {
+    // As wide as the pane allows, within limits; 5:8 proportions. A larger style draws the same
+    // chart scaled up, text and all, so nothing crowds.
+    let (k, family) = text_of(style);
+    // In a pane that scrolls sideways the room is what shows, not what could scroll.
+    let room = ui.available_width().min(ui.clip_rect().right() - ui.cursor().left() - 4.0);
+    let width = room.min(640.0 * k).max(320.0);
     let size = (width, (width * 0.625).round());
-    let shapes = chart::layout(c, f64::from(size.0), f64::from(size.1));
+    let shapes = chart::layout(c, f64::from(size.0 / k), f64::from(size.1 / k));
     let (rect, response) = ui.allocate_exact_size(egui::vec2(size.0, size.1), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, c.title()));
-    copy_as_latex(&response, &Item::Chart(c.clone()));
-    let part_at = |pos: egui::Pos2| chart::part_at(&shapes, f64::from(pos.x - rect.min.x)).filter(|p| c.category(*p).is_some());
+    copy_as_latex(&response, &Item::Chart(c.clone()), style);
+    let part_at = |pos: egui::Pos2| chart::part_at(&shapes, f64::from((pos.x - rect.min.x) / k)).filter(|p| c.category(*p).is_some());
     let hovered = response.hover_pos().and_then(part_at);
     let clicked = if response.clicked() { response.interact_pointer_pos().and_then(part_at) } else { None };
     if let Some(category) = hovered.and_then(|p| c.category(p)) {
@@ -485,9 +509,12 @@ fn draw_chart(ui: &mut egui::Ui, c: &Chart, selected: Option<&Category>) -> Opti
     let text_color = visuals.text_color();
     let weak = visuals.weak_text_color();
     let grid = visuals.widgets.noninteractive.bg_stroke.color;
-    let bar = crate::theme::Tokens::get(ui.ctx()).accent;
-    let curve = egui::Color32::from_rgb(234, 112, 40);
-    let at = |x: f64, y: f64| rect.min + egui::vec2(x as f32, y as f32);
+    let rgb = |[r, g, b]: [u8; 3]| egui::Color32::from_rgb(r, g, b);
+    let (bar, curve) = style
+        .palette
+        .colors()
+        .map_or((crate::theme::Tokens::get(ui.ctx()).accent, egui::Color32::from_rgb(234, 112, 40)), |(bar, curve)| (rgb(bar), rgb(curve)));
+    let at = |x: f64, y: f64| rect.min + egui::vec2(x as f32, y as f32) * k;
     for shape in shapes.iter().cloned() {
         match shape {
             Shape::Line { from, to, stroke } => {
@@ -500,7 +527,7 @@ fn draw_chart(ui: &mut egui::Ui, c: &Chart, selected: Option<&Category>) -> Opti
                 painter.line_segment([at(from.0, from.1), at(to.0, to.1)], egui::Stroke::new(width, color));
             }
             Shape::Rect { x, y, width, height, part } => {
-                let r = egui::Rect::from_min_size(at(x, y), egui::vec2(width as f32, height as f32));
+                let r = egui::Rect::from_min_size(at(x, y), egui::vec2(width as f32, height as f32) * k);
                 let category = part.and_then(|p| c.category(p));
                 let fill = match dim {
                     Some(selected) if category != Some(selected) => bar.gamma_multiply(0.25),
@@ -513,16 +540,16 @@ fn draw_chart(ui: &mut egui::Ui, c: &Chart, selected: Option<&Category>) -> Opti
                 painter.rect_stroke(r, 0.0, edge, egui::StrokeKind::Inside);
             }
             Shape::Circle { x, y, radius } => {
-                painter.circle_filled(at(x, y), radius as f32, bar);
+                painter.circle_filled(at(x, y), radius as f32 * k, bar);
             }
             Shape::Path { points } => {
                 painter.add(egui::Shape::line(points.iter().map(|(x, y)| at(*x, *y)).collect(), egui::Stroke::new(2.0, curve)));
             }
             Shape::Text { x, y, text, anchor, size, vertical } => {
                 let (font, color) = match size {
-                    TextSize::Small => (egui::FontId::proportional(11.0), weak),
-                    TextSize::Normal => (egui::FontId::proportional(12.5), text_color),
-                    TextSize::Title => (egui::FontId::proportional(14.0), text_color),
+                    TextSize::Small => (egui::FontId::new(11.0 * k, family.clone()), weak),
+                    TextSize::Normal => (egui::FontId::new(12.5 * k, family.clone()), text_color),
+                    TextSize::Title => (egui::FontId::new(14.0 * k, family.clone()), text_color),
                 };
                 let galley = painter.layout_no_wrap(text, font, color);
                 let size = galley.size();

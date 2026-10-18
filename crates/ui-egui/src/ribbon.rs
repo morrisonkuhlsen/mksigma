@@ -48,6 +48,8 @@ pub(crate) enum Action {
     ToggleAutoSave,
     Search,
     SaveDashboard,
+    /// Run this syntax (a control that writes a command, such as the Output style's).
+    Syntax(String),
 }
 
 /// What the buttons show: what can be undone, whether there is Output, the current view.
@@ -59,6 +61,7 @@ pub(crate) struct State<'a> {
     pub value_labels: bool,
     pub view: View,
     pub autosave: bool,
+    pub style: mksigma_engine::output::Style,
 }
 
 pub(crate) const TITLE_HEIGHT: f32 = 36.0;
@@ -352,9 +355,77 @@ fn buttons(ui: &mut egui::Ui, tab: Tab, state: &State) -> Option<Action> {
             );
             divider(ui);
             go(ui, Icon::Labels, "Value Labels", "Show value labels instead of values", true, state.value_labels, Action::ToggleLabels);
+            divider(ui);
+            if let Some(syntax) = output_style(ui, &state.style) {
+                action = Some(Action::Syntax(syntax));
+            }
         }
     }
     action
+}
+
+/// The Output style's controls: font, size, palette, decimals. A change is the `OUTPUT STYLE`
+/// command that makes it.
+fn output_style(ui: &mut egui::Ui, style: &mksigma_engine::output::Style) -> Option<String> {
+    use mksigma_engine::output::style::{Family, Palette};
+    let t = Tokens::get(ui.ctx());
+    let mut syntax = None;
+    let title = |f: &str| {
+        let mut chars = f.chars();
+        chars.next().map_or(String::new(), |c| c.to_string() + &chars.as_str().to_lowercase())
+    };
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.label(egui::RichText::new("Output Style").size(11.0).color(t.text_dim))
+            .on_hover_text("How tables and charts look on screen and in every export");
+        egui::Grid::new("output-style").num_columns(4).spacing([6.0, 4.0]).show(ui, |ui| {
+            ui.label("Font");
+            egui::ComboBox::from_id_salt("style-font").selected_text(title(style.family.name())).width(80.0).show_ui(ui, |ui| {
+                for f in Family::ALL {
+                    if ui.selectable_label(style.family == f, title(f.name())).clicked() && style.family != f {
+                        syntax = Some(format!("OUTPUT STYLE /FONT={}.", f.name()));
+                    }
+                }
+            });
+            ui.label("Size");
+            egui::ComboBox::from_id_salt("style-size").selected_text(format!("{} pt", style.size)).width(64.0).show_ui(ui, |ui| {
+                for size in [8u8, 9, 10, 11, 12, 14, 16, 18] {
+                    if ui.selectable_label(style.size == size, format!("{size} pt")).clicked() && style.size != size {
+                        syntax = Some(format!("OUTPUT STYLE /SIZE={size}."));
+                    }
+                }
+            });
+            ui.end_row();
+            ui.label("Palette");
+            egui::ComboBox::from_id_salt("style-palette").selected_text(title(style.palette.name())).width(80.0).show_ui(ui, |ui| {
+                for p in Palette::ALL {
+                    let label = ui
+                        .horizontal(|ui| {
+                            let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                            let [r, g, b] = p.colors().map_or([t.accent.r(), t.accent.g(), t.accent.b()], |(bar, _)| bar);
+                            ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb(r, g, b));
+                            ui.selectable_label(style.palette == p, title(p.name()))
+                        })
+                        .inner;
+                    if label.clicked() && style.palette != p {
+                        syntax = Some(format!("OUTPUT STYLE /PALETTE={}.", p.name()));
+                    }
+                }
+            });
+            ui.label("Decimals");
+            let shown = style.decimals.map_or("Auto".to_string(), |d| d.to_string());
+            egui::ComboBox::from_id_salt("style-decimals").selected_text(shown).width(64.0).show_ui(ui, |ui| {
+                for d in std::iter::once(None).chain((0..=6).map(Some)) {
+                    let name = d.map_or("Auto".to_string(), |d: u8| d.to_string());
+                    if ui.selectable_label(style.decimals == d, &name).clicked() && style.decimals != d {
+                        syntax = Some(format!("OUTPUT STYLE /DECIMALS={}.", d.map_or("AUTO".to_string(), |d| d.to_string())));
+                    }
+                }
+            });
+            ui.end_row();
+        });
+    });
+    syntax
 }
 
 /// Every button the ribbon and the File menu have, by name, for the search box.

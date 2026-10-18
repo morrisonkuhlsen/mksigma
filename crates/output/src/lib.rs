@@ -6,6 +6,9 @@ pub mod chart;
 mod html;
 pub mod latex;
 mod pdf;
+pub mod style;
+
+pub use style::Style;
 
 pub use chart::Chart;
 
@@ -104,6 +107,8 @@ pub enum Item {
 #[derive(Debug, Clone, Default)]
 pub struct Output {
     pub items: Vec<Item>,
+    /// How every rendering of it looks.
+    pub style: Style,
 }
 
 impl Output {

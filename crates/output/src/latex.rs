@@ -3,7 +3,25 @@
 //! Output is a document that compiles as it is (`pdflatex`); one item is a fragment to paste.
 
 use crate::chart::BoxStats;
+use crate::style::{Family, Style};
 use crate::{Cell, Chart, Item, Output, Table};
+
+/// The charts' colours as `xcolor` specifications, written inline so a pasted fragment needs no
+/// colour definitions: bars, their outline, the curve. Grey and black by default, for print.
+struct Ink {
+    fill: String,
+    curve: String,
+}
+
+impl Ink {
+    fn of(style: &Style) -> Ink {
+        let spec = |[r, g, b]: [u8; 3]| format!("{{rgb,255:red,{r};green,{g};blue,{b}}}");
+        match style.palette.colors() {
+            Some((bar, curve)) => Ink { fill: spec(bar), curve: spec(curve) },
+            None => Ink { fill: "black!20".into(), curve: "black".into() },
+        }
+    }
+}
 
 /// Text with LaTeX's special characters escaped.
 pub fn escape(s: &str) -> String {
@@ -75,18 +93,18 @@ fn notes(notes: &[&Item]) -> String {
 }
 
 /// Roughly how many characters wide a table's rows are.
-fn width(t: &Table) -> usize {
+fn width(t: &Table, style: &Style) -> usize {
     let stub = t.rows.iter().map(|(l, _)| l.chars().count()).max().unwrap_or(0);
     let columns: usize = (0..t.columns.len())
         .map(|c| {
-            let cells = t.rows.iter().filter_map(|(_, cells)| cells.get(c)).map(|cell| cell.render().chars().count()).max().unwrap_or(0);
+            let cells = t.rows.iter().filter_map(|(_, cells)| cells.get(c)).map(|cell| style.cell(cell).chars().count()).max().unwrap_or(0);
             t.columns.get(c).map_or(0, |h| h.chars().count()).max(cells) + 3
         })
         .sum();
     stub + columns
 }
 
-fn table(t: &Table, labels: &mut Labels, after: &[&Item]) -> String {
+fn table(t: &Table, labels: &mut Labels, after: &[&Item], style: &Style) -> String {
     let columns = t.columns.len();
     // Numbers line up on the right, text on the left; the stub column holds labels.
     let align: String = std::iter::once('l')
@@ -97,7 +115,7 @@ fn table(t: &Table, labels: &mut Labels, after: &[&Item]) -> String {
         .collect();
     let mut s = format!("\\begin{{table}}[htbp]\n\\centering\n\\caption{{{}}}\n\\label{{{}}}\n", escape(&t.title), labels.next("tab", &t.title));
     // Wide tables shrink to the line rather than run off the page (about 85 characters fit).
-    let wide = width(t) > 85;
+    let wide = width(t, style) * usize::from(style.size) > 85 * usize::from(Style::SIZE);
     if wide {
         s.push_str("\\resizebox{\\linewidth}{!}{%\n");
     }
@@ -106,8 +124,9 @@ fn table(t: &Table, labels: &mut Labels, after: &[&Item]) -> String {
     s.push_str(&header.join(" & "));
     s.push_str(" \\\\\n\\midrule\n");
     for (label, cells) in &t.rows {
-        let row: Vec<String> =
-            std::iter::once(escape(label)).chain((0..columns).map(|c| cells.get(c).map(|cell| escape(&cell.render())).unwrap_or_default())).collect();
+        let row: Vec<String> = std::iter::once(escape(label))
+            .chain((0..columns).map(|c| cells.get(c).map(|cell| escape(&style.cell(cell))).unwrap_or_default()))
+            .collect();
         s.push_str(&row.join(" & "));
         s.push_str(" \\\\\n");
     }
@@ -133,21 +152,23 @@ fn coordinates(points: impl Iterator<Item = (f64, f64)>) -> String {
     points.filter(|(x, y)| x.is_finite() && y.is_finite()).map(|(x, y)| format!("({}, {})", number(x), number(y))).collect::<Vec<_>>().join(" ")
 }
 
-fn boxplot(i: usize, b: &BoxStats) -> String {
+fn boxplot(i: usize, b: &BoxStats, ink: &Ink) -> String {
     let outliers: Vec<String> = b.outliers.iter().chain(&b.extremes).map(|y| format!("(0, {})", number(*y))).collect();
     format!(
-        "\\addplot+[boxplot prepared={{draw position={}, lower whisker={}, lower quartile={}, median={}, upper quartile={}, upper whisker={}}}, black, fill=black!15, mark=*, mark size=1.2pt] coordinates {{{}}};\n",
+        "\\addplot+[boxplot prepared={{draw position={}, lower whisker={}, lower quartile={}, median={}, upper quartile={}, upper whisker={}}}, black, fill={}, mark=*, mark size=1.2pt] coordinates {{{}}};\n",
         i + 1,
         number(b.low),
         number(b.q1),
         number(b.median),
         number(b.q3),
         number(b.high),
+        ink.fill,
         outliers.join(" ")
     )
 }
 
-fn chart(c: &Chart, labels: &mut Labels, after: &[&Item]) -> String {
+fn chart(c: &Chart, labels: &mut Labels, after: &[&Item], style: &Style) -> String {
+    let ink = Ink::of(style);
     let mut s = String::from("\\begin{figure}[htbp]\n\\centering\n\\begin{tikzpicture}\n");
     match c {
         Chart::Histogram { x_label, bins, normal, n, .. } => {
@@ -157,15 +178,16 @@ fn chart(c: &Chart, labels: &mut Labels, after: &[&Item]) -> String {
             if let Some((_, b, _)) = bins.last() {
                 points.push((*b, 0.0));
             }
-            s.push_str(&format!("\\addplot+[ybar interval, fill=black!20, draw=black] coordinates {{{}}};\n", coordinates(points.into_iter())));
+            s.push_str(&format!("\\addplot+[ybar interval, fill={}, draw=black] coordinates {{{}}};\n", ink.fill, coordinates(points.into_iter())));
             if let (Some((mean, sd)), Some((a, b, _)), Some((_, end, _))) = (normal, bins.first(), bins.last())
                 && *sd > 0.0
             {
                 let scale = n * (b - a);
                 s.push_str(&format!(
-                    "\\addplot[domain={}:{}, samples=120, smooth, thick] {{{} * exp(-((x - {})^2) / (2 * {}^2)) / ({} * sqrt(2 * pi))}};\n",
+                    "\\addplot[domain={}:{}, samples=120, smooth, thick, draw={}] {{{} * exp(-((x - {})^2) / (2 * {}^2)) / ({} * sqrt(2 * pi))}};\n",
                     number(*a),
                     number(*end),
+                    ink.curve,
                     number(scale),
                     number(*mean),
                     number(*sd),
@@ -180,13 +202,18 @@ fn chart(c: &Chart, labels: &mut Labels, after: &[&Item]) -> String {
                 format!(", ybar, ymin=0, bar width=0.6, enlarge x limits=0.15, xtick={{{}}}, xticklabels={{{}}}", ticks.join(","), names.join(","));
             s.push_str(&axis(x_label, y_label, &extra));
             s.push_str(&format!(
-                "\\addplot[fill=black!25, draw=black] coordinates {{{}}};\n",
+                "\\addplot[fill={}, draw=black] coordinates {{{}}};\n",
+                ink.fill,
                 coordinates(bars.iter().enumerate().map(|(i, (_, v))| ((i + 1) as f64, *v)))
             ));
         }
         Chart::Scatter { x_label, y_label, points, .. } => {
             s.push_str(&axis(x_label, y_label, ""));
-            s.push_str(&format!("\\addplot[only marks, mark=*, mark size=1.4pt] coordinates {{{}}};\n", coordinates(points.iter().copied())));
+            s.push_str(&format!(
+                "\\addplot[only marks, mark=*, mark size=1.4pt, color={}] coordinates {{{}}};\n",
+                if style.palette.colors().is_some() { &ink.fill } else { "black" },
+                coordinates(points.iter().copied())
+            ));
         }
         Chart::Boxplot { x_label, y_label, boxes, .. } => {
             let ticks: Vec<String> = (1..=boxes.len()).map(|i| i.to_string()).collect();
@@ -194,7 +221,7 @@ fn chart(c: &Chart, labels: &mut Labels, after: &[&Item]) -> String {
             let extra = format!(", boxplot/draw direction=y, xtick={{{}}}, xticklabels={{{}}}", ticks.join(","), names.join(","));
             s.push_str(&axis(x_label, y_label, &extra));
             for (i, b) in boxes.iter().enumerate() {
-                s.push_str(&boxplot(i, b));
+                s.push_str(&boxplot(i, b, &ink));
             }
         }
     }
@@ -204,10 +231,10 @@ fn chart(c: &Chart, labels: &mut Labels, after: &[&Item]) -> String {
     s
 }
 
-fn item(i: &Item, labels: &mut Labels, after: &[&Item]) -> String {
+fn item(i: &Item, labels: &mut Labels, after: &[&Item], style: &Style) -> String {
     match i {
-        Item::Table(t) => table(t, labels, after),
-        Item::Chart(c) => chart(c, labels, after),
+        Item::Table(t) => table(t, labels, after, style),
+        Item::Chart(c) => chart(c, labels, after, style),
         Item::Text(s) => format!("\\begin{{flushleft}}\\footnotesize {}\\end{{flushleft}}\n", escape(s)),
         Item::Warning(s) => format!("\\begin{{flushleft}}\\footnotesize\\textit{{Warning: {}}}\\end{{flushleft}}\n", escape(s)),
     }
@@ -215,7 +242,7 @@ fn item(i: &Item, labels: &mut Labels, after: &[&Item]) -> String {
 
 /// The items, with the notes and warnings that follow a table or chart inside its float, so
 /// they stay with it wherever LaTeX places it.
-fn items(list: &[Item]) -> String {
+fn items(list: &[Item], style: &Style) -> String {
     let mut labels = Labels::default();
     let mut out = String::new();
     let mut k = 0;
@@ -225,7 +252,7 @@ fn items(list: &[Item]) -> String {
         } else {
             Vec::new()
         };
-        out.push_str(&item(first, &mut labels, &notes));
+        out.push_str(&item(first, &mut labels, &notes, style));
         out.push('\n');
         k += 1 + notes.len();
     }
@@ -237,16 +264,28 @@ pub const PREAMBLE: &str =
     "\\usepackage{booktabs}\n\\usepackage{graphicx}\n\\usepackage{pgfplots}\n\\usepgfplotslibrary{statistics}\n\\pgfplotsset{compat=1.17}\n";
 
 /// One item as a fragment to paste into a document that loads `PREAMBLE`'s packages.
-pub fn item_to_latex(i: &Item) -> String {
-    item(i, &mut Labels::default(), &[])
+pub fn item_to_latex(i: &Item, style: &Style) -> String {
+    item(i, &mut Labels::default(), &[], style)
 }
 
 impl Output {
     /// The whole Output as a LaTeX document with `title` as its heading.
     pub fn to_latex(&self, title: &str) -> String {
-        let body = items(&self.items);
+        let body = items(&self.items, &self.style);
+        // The article class has 10, 11 and 12 point text: the nearest one.
+        let size = match self.style.size {
+            0..=10 => "10pt",
+            11 => "11pt",
+            _ => "12pt",
+        };
+        let family = match self.style.family {
+            Family::Default => "",
+            Family::Sans => "\\renewcommand{\\familydefault}{\\sfdefault}\n",
+            Family::Serif => "\\renewcommand{\\familydefault}{\\rmdefault}\n",
+            Family::Mono => "\\renewcommand{\\familydefault}{\\ttdefault}\n",
+        };
         format!(
-            "% Written by MK Sigma. Compile with pdflatex, lualatex or xelatex.\n\\documentclass{{article}}\n\\usepackage[T1]{{fontenc}}\n\\usepackage[margin=2.5cm]{{geometry}}\n{PREAMBLE}\\begin{{document}}\n\\section*{{{}}}\n\n{body}\\end{{document}}\n",
+            "% Written by MK Sigma. Compile with pdflatex, lualatex or xelatex.\n\\documentclass[{size}]{{article}}\n\\usepackage[T1]{{fontenc}}\n\\usepackage[margin=2.5cm]{{geometry}}\n\\usepackage{{xcolor}}\n{PREAMBLE}{family}\\begin{{document}}\n\\section*{{{}}}\n\n{body}\\end{{document}}\n",
             escape(title)
         )
     }
@@ -281,7 +320,7 @@ mod tests {
             ],
             categories: Vec::new(),
         };
-        let tex = item_to_latex(&Item::Table(t));
+        let tex = item_to_latex(&Item::Table(t), &Style::default());
         assert!(
             tex.contains(
                 "\\begin{tabular}{lrr}\n\\toprule\n & N & Mean \\\\\n\\midrule\nMonthly income & 8 & 3725.00 \\\\\nValid N & 8 &  \\\\\n\\bottomrule"
@@ -300,7 +339,7 @@ mod tests {
             bars: vec![("Jovem".into(), 3.0), ("A&B".into(), 5.0)],
             categories: Vec::new(),
         };
-        let tex = item_to_latex(&Item::Chart(bar));
+        let tex = item_to_latex(&Item::Chart(bar), &Style::default());
         assert!(tex.contains("xtick={1,2}, xticklabels={{Jovem},{A\\&B}}"), "{tex}");
         assert!(tex.contains("coordinates {(1, 3) (2, 5)}"));
         let hist = Chart::Histogram {
@@ -311,7 +350,7 @@ mod tests {
             n: 10.0,
             categories: Vec::new(),
         };
-        let tex = item_to_latex(&Item::Chart(hist));
+        let tex = item_to_latex(&Item::Chart(hist), &Style::default());
         assert!(tex.contains("coordinates {(0, 3) (10, 7) (20, 0)}"), "the last edge closes the last bin: {tex}");
         assert!(tex.contains("domain=0:20") && tex.contains("100 * exp"), "the curve is scaled by n times the bin width");
         let boxes = Chart::Boxplot {
@@ -321,7 +360,7 @@ mod tests {
             boxes: vec![BoxStats { label: "A".into(), low: 1.0, q1: 2.0, median: 3.0, q3: 4.0, high: 5.0, outliers: vec![9.0], extremes: vec![] }],
             categories: Vec::new(),
         };
-        assert!(item_to_latex(&Item::Chart(boxes)).contains("lower whisker=1, lower quartile=2, median=3, upper quartile=4, upper whisker=5}, black, fill=black!15, mark=*, mark size=1.2pt] coordinates {(0, 9)}"));
+        assert!(item_to_latex(&Item::Chart(boxes), &Style::default()).contains("lower whisker=1, lower quartile=2, median=3, upper quartile=4, upper whisker=5}, black, fill=black!20, mark=*, mark size=1.2pt] coordinates {(0, 9)}"));
     }
 
     #[test]
@@ -349,6 +388,10 @@ mod tests {
         let tex = out.to_latex("Output & more");
         assert!(tex.starts_with("% Written by MK Sigma"));
         assert!(tex.contains("\\usepackage{booktabs}") && tex.contains("\\section*{Output \\& more}") && tex.ends_with("\\end{document}\n"));
+        assert!(tex.contains("\\documentclass[10pt]{article}") && !tex.contains("familydefault"), "the default style changes nothing");
+        out.style = Style { family: Family::Serif, size: 12, palette: crate::style::Palette::Blue, decimals: Some(1) };
+        let tex = out.to_latex("x");
+        assert!(tex.contains("\\documentclass[12pt]{article}") && tex.contains("\\renewcommand{\\familydefault}{\\rmdefault}"));
         assert!(tex.contains("a. 50\\% note"));
     }
 }

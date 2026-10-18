@@ -124,7 +124,13 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   histograms with the normal curve, scatterplots, boxplots), captions and unique labels.
   Right-click a table title or a chart: Copy as LaTeX. The button shows the LaTeX name as LaTeX
   typesets it, not the LaTeX Project's logo artwork, which its terms keep off program icons.
-- Output style (fonts, sizes, palette, decimals) shared by screen, HTML, PDF and LaTeX: to do.
+- **Output style — done:** `OUTPUT STYLE /FONT=DEFAULT|SANS|SERIF|MONO /SIZE=n
+  /PALETTE=DEFAULT|INDIGO|GRAY|BLUE|GREEN|WARM /DECIMALS=AUTO|n` (an MK Sigma command; the
+  controls are on the View tab) applies the same look on screen, in HTML (CSS), PDF (Helvetica,
+  Times or Courier, the standard fonts every reader has) and LaTeX (class size, `\familydefault`,
+  inline `xcolor` colours). Larger sizes scale charts whole. Default keeps each medium's usual
+  look. Saved dashboards keep the style. Serif shows in exports only: the screen has the
+  interface's fonts.
 
 ## M4 — dashboards
 - **Slicers — done:** `SLICE var (values)`, `SLICE var (low THRU high)`, `SLICE var OFF`,
