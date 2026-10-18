@@ -44,6 +44,7 @@ pub enum Icon {
     Share,
     Minus,
     Plus,
+    Pin,
 }
 
 /// Draws `icon` in `rect` (square) in one colour, the theme's accent; tints of it fill shapes.
@@ -273,6 +274,12 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, t: &Tokens) {
             line((8.0, 1.5), (8.0, 10.0), ink);
             poly(&[(5.0, 4.5), (8.0, 1.5), (11.0, 4.5)], ink);
         }
+        Icon::Pin => {
+            // A pushpin, tilted: head, collar and needle.
+            fill(&[(9.0, 1.5), (14.5, 7.0), (12.0, 8.0), (8.0, 4.0)], ink.color);
+            fill(&[(5.0, 6.0), (10.0, 11.0), (11.0, 9.5), (6.5, 5.0)], ink.color);
+            line((7.5, 8.5), (2.0, 14.0), Stroke::new(w * 1.2, ink.color));
+        }
         Icon::Minus => line((3.0, 8.0), (13.0, 8.0), Stroke::new(w * 1.2, ink.color)),
         Icon::Plus => {
             line((3.0, 8.0), (13.0, 8.0), Stroke::new(w * 1.2, ink.color));
@@ -296,7 +303,7 @@ pub fn show(ui: &mut egui::Ui, icon: Icon, size: f32) -> egui::Response {
 
 /// For tests: every icon stays inside its square.
 #[cfg(test)]
-pub(crate) const ALL: [Icon; 36] = [
+pub(crate) const ALL: [Icon; 37] = [
     Icon::Sigma,
     Icon::Open,
     Icon::Save,
@@ -333,6 +340,7 @@ pub(crate) const ALL: [Icon; 36] = [
     Icon::Share,
     Icon::Minus,
     Icon::Plus,
+    Icon::Pin,
 ];
 
 #[cfg(test)]

@@ -126,8 +126,12 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   one; its chip opens the values with their counts (checkboxes) or, for a Scale variable with
   many values, a range. Slicers are syntax in the History, not applied steps; they follow data
   changes and exports name them.
-- A dashboard is a layout of output items with shared filters (slicers), saved with the
-  syntax that produced it
+- **Dashboard — first part done:** a pin beside each Output table and chart puts it on the
+  Dashboard tab: cards in a grid (two columns when there is room; the dashboard takes the whole
+  window body), the same slicers and cross-filtering, tiles moved earlier or later or unpinned,
+  and Export Dashboard writes a self-contained web page of the cards as filtered. Tiles follow
+  their items when filters run the analyses again. To do: saved with the syntax that produced
+  it, sizes and free placement of tiles, interactive export (below).
 - **Publish as a self-contained interactive page** (HTML + WASM): no server, no account
 - MCP server, so agents can run analyses and build dashboards
 

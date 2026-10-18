@@ -72,6 +72,9 @@ pub struct Session {
     cross_filter: Option<CrossFilter>,
     /// One per variable at most, in the order they were set.
     slicers: Vec<Slicer>,
+    /// The dashboard's tiles, in order: a run and the place of the item among the run's items,
+    /// so a tile follows its item when filters run the analyses again.
+    tiles: Vec<(usize, usize)>,
     /// What loading data had to say (sizes, reader warnings), until `take_notes`.
     notes: Vec<String>,
     loaded_file: Option<String>,
@@ -351,11 +354,72 @@ impl Session {
         }
     }
 
-    /// Empties the Output, and with it the filter.
+    /// Empties the Output, and with it the filter and the dashboard.
     pub fn clear_output(&mut self) {
         self.runs.clear();
+        self.tiles.clear();
         self.cross_filter = None;
         self.show_runs();
+    }
+
+    /// The run of Output item `item` and the item's place among the run's items.
+    fn locate(&self, item: usize) -> Option<(usize, usize)> {
+        let run = *self.run_of.get(item)?;
+        let first = self.run_of.iter().position(|r| *r == run)?;
+        Some((run, item - first))
+    }
+
+    /// Pins Output item `item` (a table or a chart) to the dashboard, or unpins it. Returns
+    /// whether it is pinned now.
+    pub fn toggle_pin(&mut self, item: usize) -> Result<bool, EngineError> {
+        if !matches!(self.output.items.get(item), Some(Item::Table(_) | Item::Chart(_))) {
+            return Err(EngineError::Invalid(format!("output item {} is not a table or a chart", item + 1)));
+        }
+        let tile = self.locate(item).ok_or_else(|| EngineError::Invalid(format!("there is no output item {}", item + 1)))?;
+        match self.tiles.iter().position(|t| *t == tile) {
+            Some(at) => {
+                self.tiles.remove(at);
+                Ok(false)
+            }
+            None => {
+                self.tiles.push(tile);
+                Ok(true)
+            }
+        }
+    }
+
+    pub fn is_pinned(&self, item: usize) -> bool {
+        self.locate(item).is_some_and(|tile| self.tiles.contains(&tile))
+    }
+
+    /// The Output items on the dashboard, in its order. A tile whose run has fewer items now
+    /// (a filter left it a warning) shows nothing.
+    pub fn dashboard(&self) -> Vec<usize> {
+        self.tiles
+            .iter()
+            .filter_map(|(run, offset)| {
+                let first = self.run_of.iter().position(|r| r == run)?;
+                let item = first + offset;
+                (self.run_of.get(item) == Some(run)).then_some(item)
+            })
+            .collect()
+    }
+
+    /// Moves tile `tile` one place earlier or later.
+    pub fn move_tile(&mut self, tile: usize, earlier: bool) -> Result<(), EngineError> {
+        let other = if earlier { tile.checked_sub(1) } else { tile.checked_add(1).filter(|t| *t < self.tiles.len()) };
+        match other.filter(|_| tile < self.tiles.len()) {
+            Some(other) => {
+                self.tiles.swap(tile, other);
+                Ok(())
+            }
+            None => Err(EngineError::Invalid(format!("tile {} can't move {}", tile + 1, if earlier { "earlier" } else { "later" }))),
+        }
+    }
+
+    /// The dashboard as an Output of its own, for export.
+    pub fn dashboard_output(&self) -> Output {
+        Output { items: self.dashboard().into_iter().filter_map(|i| self.output.items.get(i).cloned()).collect() }
     }
 
     fn add_run(&mut self, command: Command, items: Vec<Item>) {
@@ -1324,6 +1388,35 @@ mod tests {
         // grupo 2 within the slice: cases 6 and 7, scores 72 and 88.
         assert_eq!(score_n_and_mean(&s), (2, 80.0));
         assert_eq!(s.filter_description().as_deref(), Some("income up to 4000.00; grupo = 2.00"));
+    }
+
+    #[test]
+    fn pinned_items_make_a_dashboard_that_follows_the_filters() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("RECODE age (LO THRU 30 = 1) (ELSE = 2) INTO grupo.\nFREQUENCIES grupo /FORMAT=NOTABLE /BARCHART.\nDESCRIPTIVES score.")
+            .unwrap();
+        // FREQUENCIES gave a Statistics table and a chart; DESCRIPTIVES a table.
+        let chart = s.output.items.iter().position(|i| matches!(i, Item::Chart(_))).unwrap();
+        let descriptives = s.output.items.len() - 1;
+        assert!(s.toggle_pin(descriptives).unwrap());
+        assert!(s.toggle_pin(chart).unwrap());
+        assert_eq!(s.dashboard(), [descriptives, chart], "in the order pinned");
+        s.move_tile(1, true).unwrap();
+        assert_eq!(s.dashboard(), [chart, descriptives]);
+        assert!(s.move_tile(0, true).is_err());
+
+        // Tiles follow their items when filters run the analyses again.
+        s.run_syntax("SLICE grupo (1).").unwrap();
+        assert_eq!(score_n_and_mean(&s).0, 3);
+        let board = s.dashboard_output();
+        assert_eq!(board.items.len(), 2);
+        assert!(board.to_text().contains("Descriptive Statistics"));
+        assert!(s.is_pinned(descriptives) && !s.is_pinned(0));
+
+        assert!(!s.toggle_pin(chart).unwrap(), "pinning again unpins");
+        assert_eq!(s.dashboard(), [descriptives]);
+        s.clear_output();
+        assert!(s.dashboard().is_empty());
     }
 
     #[test]

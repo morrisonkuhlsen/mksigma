@@ -169,6 +169,16 @@ impl SigmaApp {
         }
     }
 
+    /// Writes the dashboard as a self-contained web page: its tiles in a grid, as filtered now.
+    pub fn export_dashboard(&mut self, path: &Path) {
+        let title = self.file_name.as_deref().map_or_else(|| "MK Sigma Dashboard".to_string(), |f| format!("{f} — Dashboard"));
+        let html = self.session.dashboard_output().to_dashboard_html(&title, self.session.filter_description().as_deref());
+        match std::fs::write(path, html) {
+            Ok(()) => self.status = Some(Status::Info(format!("Exported the dashboard to {}", path.display()))),
+            Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
+        }
+    }
+
     fn export_dialog(&mut self, format: ExportFormat) {
         let stem = self.file_name.as_deref().and_then(|f| f.rsplit_once('.').map(|(s, _)| s.to_string())).unwrap_or_else(|| "output".to_string());
         let extension = match format {
@@ -408,18 +418,22 @@ impl SigmaApp {
         let bottom = SHEET_TABS_HEIGHT + STATUS_HEIGHT;
         let body = (ui.available_height() - bottom - 8.0).max(100.0);
         ui.add_space(6.0);
-        // Data and Variable View get 62% of the width, the Output Viewer the rest.
+        // Data and Variable View get 62% of the width, the Output Viewer the rest; the dashboard,
+        // like a report canvas, takes it all.
         let gap = 6.0;
-        let left_width = ((ui.available_width() - gap) * 0.62).floor();
-        let right_width = ui.available_width() - gap - left_width;
+        let dashboard = self.output_state.dashboard;
+        let left_width = if dashboard { 0.0 } else { ((ui.available_width() - gap) * 0.62).floor() };
+        let right_width = ui.available_width() - if dashboard { 0.0 } else { gap + left_width };
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(gap, 0.0);
             let top_down = egui::Layout::top_down(egui::Align::Min);
-            ui.allocate_ui_with_layout(egui::vec2(left_width, body), top_down, |ui| {
-                ui.set_width(left_width);
-                ui.set_height(body);
-                self.left_pane(ui);
-            });
+            if !dashboard {
+                ui.allocate_ui_with_layout(egui::vec2(left_width, body), top_down, |ui| {
+                    ui.set_width(left_width);
+                    ui.set_height(body);
+                    self.left_pane(ui);
+                });
+            }
             ui.allocate_ui_with_layout(egui::vec2(right_width, body), top_down, |ui| {
                 ui.set_width(right_width);
                 ui.set_height(body);
@@ -520,6 +534,21 @@ impl SigmaApp {
                 self.output_state.transposed.clear();
                 if let Err(e) = self.session.select_category(item, category) {
                     self.status = Some(Status::Error(e.to_string()));
+                }
+            }
+            output::OutputAction::Pin(item) => {
+                let result = self.session.toggle_pin(item).map(drop);
+                self.report(result);
+            }
+            output::OutputAction::MoveTile(tile, earlier) => {
+                let result = self.session.move_tile(tile, earlier);
+                self.report(result);
+            }
+            output::OutputAction::ExportDashboard => {
+                let stem =
+                    self.file_name.as_deref().and_then(|f| f.rsplit_once('.').map(|(s, _)| s.to_string())).unwrap_or_else(|| "dashboard".to_string());
+                if let Some(path) = self.services.pick_export.as_ref().and_then(|pick| pick(&format!("{stem} dashboard.html"))) {
+                    self.export_dashboard(&path);
                 }
             }
             output::OutputAction::Syntax(syntax) => {

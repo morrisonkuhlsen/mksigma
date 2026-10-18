@@ -19,6 +19,8 @@ pub struct OutputState {
     pub pending: Vec<String>,
     /// A range being typed in a slicer, by variable, until Apply.
     pub ranges: HashMap<String, (f64, f64)>,
+    /// Showing the dashboard instead of the Output.
+    pub dashboard: bool,
 }
 
 /// What the user asked for in the viewer this frame.
@@ -30,6 +32,11 @@ pub(crate) enum OutputAction {
     /// A slicer changed: the `SLICE` command to run.
     Syntax(String),
     ClearFilter,
+    /// Pin or unpin an Output item.
+    Pin(usize),
+    /// Move a dashboard tile earlier (`true`) or later.
+    MoveTile(usize, bool),
+    ExportDashboard,
 }
 
 /// What the Output is exported as.
@@ -39,21 +46,56 @@ pub enum ExportFormat {
     Pdf,
 }
 
+/// A header tab: the Output or the dashboard.
+fn pane_tab(ui: &mut egui::Ui, on: bool, icon: crate::icons::Icon, name: &str, tip: &str) -> bool {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let text = egui::RichText::new(name).color(if on { t.text } else { t.text_dim });
+    let response = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            crate::icons::show(ui, icon, 14.0);
+            ui.add(egui::Button::new(if on { text.strong() } else { text }).frame(false))
+        })
+        .inner;
+    if on {
+        let r = response.rect;
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(egui::pos2(r.left(), r.bottom() + 1.0), egui::pos2(r.right(), r.bottom() + 3.0)),
+            1.0,
+            t.accent,
+        );
+    }
+    response.on_hover_text(tip).clicked()
+}
+
 pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut OutputState) -> OutputAction {
     let mut action = OutputAction::None;
     let output = &session.output;
     let t = crate::theme::Tokens::get(ui.ctx());
+    let tiles = session.dashboard();
     ui.horizontal(|ui| {
-        crate::icons::show(ui, crate::icons::Icon::Table, 14.0);
-        ui.label(egui::RichText::new("Output").strong());
-        if !output.items.is_empty() {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("Clear").on_hover_text("Remove every item from the Output").clicked() {
-                    state.transposed.clear();
-                    action = OutputAction::Clear;
-                }
-            });
+        ui.spacing_mut().item_spacing.x = 14.0;
+        if pane_tab(ui, !state.dashboard, crate::icons::Icon::Table, "Output", "Every result, in order") {
+            state.dashboard = false;
         }
+        let tip = format!("The pinned tables and charts ({})", tiles.len());
+        if pane_tab(ui, state.dashboard, crate::icons::Icon::Grid, "Dashboard", &tip) {
+            state.dashboard = true;
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if state.dashboard {
+                if ui
+                    .add_enabled(!tiles.is_empty(), egui::Button::new("Export Dashboard").small())
+                    .on_hover_text("Save the dashboard as a web page")
+                    .clicked()
+                {
+                    action = OutputAction::ExportDashboard;
+                }
+            } else if !output.items.is_empty() && ui.small_button("Clear").on_hover_text("Remove every item from the Output").clicked() {
+                state.transposed.clear();
+                action = OutputAction::Clear;
+            }
+        });
     });
     if let Some(syntax) = slicers(ui, session, state) {
         action = OutputAction::Syntax(syntax);
@@ -70,47 +112,132 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
     ui.add_space(4.0);
     ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), egui::Stroke::new(1.0, t.border));
     ui.add_space(8.0);
-    if output.items.is_empty() {
+    let empty = |ui: &mut egui::Ui, title: &str, hint: &str| {
         ui.add_space(40.0);
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("No output yet").color(t.text_dim).size(15.0));
-            ui.label(egui::RichText::new("Pick a procedure on the Analyze or Graphs tab, or run syntax.").color(t.text_dim));
+            ui.label(egui::RichText::new(title).color(t.text_dim).size(15.0));
+            ui.label(egui::RichText::new(hint).color(t.text_dim));
         });
+    };
+    if state.dashboard {
+        if tiles.is_empty() {
+            empty(ui, "The dashboard is empty", "Pin tables and charts from the Output with the pin beside each one.");
+        }
+        egui::ScrollArea::vertical().id_salt("dashboard").auto_shrink([false, false]).show(ui, |ui| {
+            if let Some(a) = dashboard(ui, session, state, &tiles) {
+                action = a;
+            }
+        });
+        return action;
+    }
+    if output.items.is_empty() {
+        empty(ui, "No output yet", "Pick a procedure on the Analyze or Graphs tab, or run syntax.");
     }
     egui::ScrollArea::vertical().id_salt("output").stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
         for (i, item) in output.items.iter().enumerate() {
-            // Only the item the selection came from shows it; the others are already filtered.
-            let shown = selected.filter(|_| session.is_filter_source(i));
-            match item {
-                Item::Table(t) => {
-                    let flipped = state.transposed.contains(&i);
-                    let clicked = table(ui, i, t, flipped, shown);
-                    if clicked.pivot {
-                        if flipped {
-                            state.transposed.remove(&i);
-                        } else {
-                            state.transposed.insert(i);
-                        }
-                    }
-                    if let Some(category) = clicked.select {
-                        action = OutputAction::Select(i, category);
-                    }
-                }
-                Item::Text(s) => {
-                    ui.small(s);
-                }
-                Item::Warning(s) => {
-                    ui.colored_label(ui.visuals().warn_fg_color, s);
-                }
-                Item::Chart(c) => {
-                    if let Some(category) = draw_chart(ui, c, shown) {
-                        action = OutputAction::Select(i, category);
-                    }
-                }
+            if let Some(a) = show_item(ui, session, state, i, item, Some(session.is_pinned(i))) {
+                action = a;
             }
             ui.add_space(12.0);
         }
     });
+    action
+}
+
+/// The pinned items as cards, two columns when there is room. Each card can move or be unpinned.
+fn dashboard(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, tiles: &[usize]) -> Option<OutputAction> {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let columns = if ui.available_width() >= 860.0 { 2 } else { 1 };
+    let mut action = None;
+    ui.columns(columns, |cols| {
+        for (k, &i) in tiles.iter().enumerate() {
+            let Some(col) = cols.get_mut(k % columns) else { continue };
+            let Some(item) = session.output.items.get(i) else { continue };
+            egui::Frame::new().fill(t.paper).stroke(egui::Stroke::new(1.0, t.border)).corner_radius(8).inner_margin(egui::Margin::same(10)).show(
+                col,
+                |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Unpin").on_hover_text("Take it off the dashboard").clicked() {
+                                action = Some(OutputAction::Pin(i));
+                            }
+                            if ui.add_enabled(k + 1 < tiles.len(), egui::Button::new(">").small()).on_hover_text("Move later").clicked() {
+                                action = Some(OutputAction::MoveTile(k, false));
+                            }
+                            if ui.add_enabled(k > 0, egui::Button::new("<").small()).on_hover_text("Move earlier").clicked() {
+                                action = Some(OutputAction::MoveTile(k, true));
+                            }
+                        });
+                    });
+                    if let Some(a) = show_item(ui, session, state, i, item, None) {
+                        action = Some(a);
+                    }
+                },
+            );
+            col.add_space(10.0);
+        }
+    });
+    action
+}
+
+/// The pin beside an item: filled when it is on the dashboard.
+fn pin_button(ui: &mut egui::Ui, pinned: bool) -> bool {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let name = if pinned { "Unpin from the dashboard" } else { "Pin to the dashboard" };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(22.0, 20.0), egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, pinned, name));
+    if pinned {
+        ui.painter().rect_filled(rect, 4.0, t.accent_soft);
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 4.0, t.hover);
+    }
+    crate::icons::paint(ui.painter(), rect.shrink2(egui::vec2(4.0, 3.0)), crate::icons::Icon::Pin, &t);
+    response.on_hover_text(name).clicked()
+}
+
+/// One item; `pin` shows the pin with whether the item is pinned.
+fn show_item(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, i: usize, item: &Item, pin: Option<bool>) -> Option<OutputAction> {
+    // Only the item the selection came from shows it; the others are already filtered.
+    let shown = session.cross_filter().filter(|_| session.is_filter_source(i));
+    let mut action = None;
+    match item {
+        Item::Table(t) => {
+            let flipped = state.transposed.contains(&i);
+            let clicked = table(ui, i, t, flipped, shown, pin);
+            if clicked.pivot {
+                if flipped {
+                    state.transposed.remove(&i);
+                } else {
+                    state.transposed.insert(i);
+                }
+            }
+            if clicked.pin {
+                action = Some(OutputAction::Pin(i));
+            }
+            if let Some(category) = clicked.select {
+                action = Some(OutputAction::Select(i, category));
+            }
+        }
+        Item::Text(s) => {
+            ui.small(s);
+        }
+        Item::Warning(s) => {
+            ui.colored_label(ui.visuals().warn_fg_color, s);
+        }
+        Item::Chart(c) => {
+            if let Some(pinned) = pin {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    if pin_button(ui, pinned) {
+                        action = Some(OutputAction::Pin(i));
+                    }
+                });
+            }
+            if let Some(category) = draw_chart(ui, c, shown) {
+                action = Some(OutputAction::Select(i, category));
+            }
+        }
+    }
     action
 }
 
@@ -220,16 +347,20 @@ fn slicer_editor(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, 
 /// What was clicked in a table.
 struct TableClick {
     pivot: bool,
+    pin: bool,
     select: Option<Category>,
 }
 
 /// Shows a table, transposed when `flipped`. A row that stands for a category can be selected
 /// at its first text cell (the value of a frequency table's row), or at its label if it has none.
-fn table(ui: &mut egui::Ui, index: usize, t: &Table, flipped: bool, selected: Option<&Category>) -> TableClick {
-    let mut click = TableClick { pivot: false, select: None };
+fn table(ui: &mut egui::Ui, index: usize, t: &Table, flipped: bool, selected: Option<&Category>, pin: Option<bool>) -> TableClick {
+    let mut click = TableClick { pivot: false, pin: false, select: None };
     ui.horizontal(|ui| {
         ui.strong(&t.title);
         click.pivot = ui.small_button("pivot").on_hover_text("Swap rows and columns").clicked();
+        if let Some(pinned) = pin {
+            click.pin = pin_button(ui, pinned);
+        }
     });
     // Where each row of `t` is selected: a cell's column, or `None` for the row label.
     let key = |row: usize| t.rows.get(row).and_then(|(_, cells)| cells.iter().position(|c| matches!(c, Cell::Text(_))));

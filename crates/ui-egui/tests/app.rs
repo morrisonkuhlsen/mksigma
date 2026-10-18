@@ -630,3 +630,31 @@ fn a_slicer_picked_in_the_output_filters_every_item() {
     assert!(h.state().session.slicers().is_empty());
     assert!(shows(&h, "72.38"));
 }
+
+#[test]
+fn pinned_items_make_the_dashboard_and_it_exports() {
+    let path = temp_path("dashboard.html");
+    let picked = path.clone();
+    let services = Services { pick_export: Some(Box::new(move |_: &str| Some(picked.clone()))), ..Services::default() };
+    let mut app = SigmaApp::new(services);
+    app.session.run_syntax("DESCRIPTIVES age income.\nGRAPH /HISTOGRAM=income /TITLE='Renda'.").unwrap();
+    let mut h = harness(app);
+    // The table's pin, then the chart's.
+    h.get_all_by_label("Pin to the dashboard").next().unwrap().click();
+    h.run_steps(3);
+    h.get_by_label("Pin to the dashboard").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.dashboard().len(), 2);
+    h.get_by_label("Dashboard").click();
+    h.run_steps(3);
+    assert!(h.state().output_state.dashboard);
+    assert!(shows(&h, "Descriptive Statistics") && shows(&h, "Renda"), "both tiles");
+    h.get_by_label("Export Dashboard").click();
+    h.run_steps(3);
+    let html = std::fs::read_to_string(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(html.contains("class=\"tiles\"") && html.contains("<svg") && html.contains("Descriptive Statistics"));
+    h.get_all_by_label("Unpin").next().unwrap().click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.dashboard().len(), 1);
+}

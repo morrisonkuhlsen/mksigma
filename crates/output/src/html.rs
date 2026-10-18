@@ -36,6 +36,10 @@ svg .tick { font-size: 11px; fill: var(--muted); }
 svg .label { font-size: 12px; }
 svg .title { font-size: 14px; font-weight: 600; }
 @media print { body { max-width: none; } .wrap { overflow: visible; } }
+body.dashboard { max-width: 1280px; }
+p.filters { color: var(--muted); margin: -12px 0 18px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; }
+.tile { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; break-inside: avoid; min-width: 0; }
 "#;
 
 pub(crate) fn escape(s: &str) -> String {
@@ -60,25 +64,40 @@ fn table(t: &Table) -> String {
     s
 }
 
+fn item(item: &Item) -> String {
+    match item {
+        Item::Table(t) => table(t),
+        Item::Text(s) => format!("<p class=\"note\">{}</p>", escape(s)),
+        Item::Warning(s) => format!("<p class=\"warning\">Warning: {}</p>", escape(s)),
+        Item::Chart(c) => svg(c, 640.0, 400.0),
+    }
+}
+
+fn page(title: &str, class: &str, body: &str) -> String {
+    format!(
+        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+         <title>{t}</title><style>{STYLE}</style></head><body class=\"{class}\"><h1>{t}</h1>\n{body}</body></html>\n",
+        t = escape(title)
+    )
+}
+
 impl Output {
     /// The whole Output as a standalone HTML page with `title` as its heading.
     pub fn to_html(&self, title: &str) -> String {
-        let mut body = String::new();
-        for item in &self.items {
-            body.push_str("<section>");
-            body.push_str(&match item {
-                Item::Table(t) => table(t),
-                Item::Text(s) => format!("<p class=\"note\">{}</p>", escape(s)),
-                Item::Warning(s) => format!("<p class=\"warning\">Warning: {}</p>", escape(s)),
-                Item::Chart(c) => svg(c, 640.0, 400.0),
-            });
-            body.push_str("</section>\n");
+        let body: String = self.items.iter().map(|i| format!("<section>{}</section>\n", item(i))).collect();
+        page(title, "output", &body)
+    }
+
+    /// The items as a dashboard: a card each, in a grid as many columns wide as the page
+    /// allows, under `title` and a line naming the filters, if any.
+    pub fn to_dashboard_html(&self, title: &str, filters: Option<&str>) -> String {
+        let mut body = filters.map(|f| format!("<p class=\"filters\">Filtered by {}</p>\n", escape(f))).unwrap_or_default();
+        body.push_str("<div class=\"tiles\">\n");
+        for i in &self.items {
+            body.push_str(&format!("<div class=\"tile\">{}</div>\n", item(i)));
         }
-        format!(
-            "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-             <title>{t}</title><style>{STYLE}</style></head><body><h1>{t}</h1>\n{body}</body></html>\n",
-            t = escape(title)
-        )
+        body.push_str("</div>\n");
+        page(title, "dashboard", &body)
     }
 }
 
@@ -125,5 +144,23 @@ mod tests {
         assert_eq!(p.columns, ["r1", "r2"]);
         assert_eq!(p.rows, [("a".to_string(), vec![Cell::Int(1), Cell::Int(3)]), ("b".to_string(), vec![Cell::Int(2), Cell::Empty])]);
         assert_eq!(p.transposed().rows[1].1, [Cell::Int(3), Cell::Empty], "twice gives the cells back (short rows padded)");
+    }
+
+    #[test]
+    fn a_dashboard_is_a_grid_of_cards_naming_its_filters() {
+        let mut out = Output::default();
+        out.push(Item::Chart(Chart::Bar {
+            title: "Bars".into(),
+            x_label: "x".into(),
+            y_label: "Count".into(),
+            bars: vec![("A".into(), 1.0)],
+            categories: Vec::new(),
+        }));
+        out.push(Item::Text("note".into()));
+        let html = out.to_dashboard_html("Painel", Some("grupo: Jovem & co"));
+        assert!(html.contains("<body class=\"dashboard\"><h1>Painel</h1>"));
+        assert!(html.contains("<p class=\"filters\">Filtered by grupo: Jovem &amp; co</p>"), "escaped");
+        assert_eq!(html.matches("<div class=\"tile\">").count(), 2);
+        assert!(!out.to_dashboard_html("P", None).contains("filters\">"));
     }
 }
