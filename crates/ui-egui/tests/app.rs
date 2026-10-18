@@ -106,9 +106,12 @@ fn file_open_uses_the_dialog_and_loads_the_file() {
         ..Services::default()
     };
     let mut h = harness(SigmaApp::new(services));
+    // File opens the backstage; its Open page browses.
     h.get_by_label("File").click();
     h.run_steps(3);
-    h.get_by_label("Open…").click();
+    h.get_by_label("Open").click();
+    h.run_steps(3);
+    h.get_by_label("Browse…").click();
     h.run_steps(3);
     std::fs::remove_file(&path).unwrap();
 
@@ -759,4 +762,48 @@ fn an_exported_dashboard_is_interactive() {
         assert!(html.contains("data-item=\"0\"") && html.contains("data-part="), "a first view that can be clicked");
         assert!(matches!(&app.status, Some(Status::Info(s)) if s.contains("interactive")));
     }
+}
+
+#[test]
+fn the_file_backstage() {
+    let data = temp_path("recent.csv");
+    std::fs::write(&data, "x,y\n1,2\n3,4\n").unwrap();
+    let saved = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let keep = saved.clone();
+    let services = Services {
+        load_recent: Some(Box::new(|| vec![std::path::PathBuf::from("/nowhere/old.sav")])),
+        save_recent: Some(Box::new(move |files: &[std::path::PathBuf]| *keep.borrow_mut() = files.to_vec())),
+        ..Services::default()
+    };
+    let mut h = harness(SigmaApp::new(services));
+    h.get_by_label("File").click();
+    h.run_steps(3);
+    assert_eq!(h.state().backstage, Some(mksigma_ui_egui::BackstagePage::Home));
+    assert!(shows(&h, "Blank dataset") && shows(&h, "Sample dataset") && shows(&h, "old.sav"), "templates and recent files");
+    h.get_by_label("Info").click();
+    h.run_steps(3);
+    assert!(shows(&h, "Cases") && shows(&h, "8"));
+
+    // Replacing changed data asks first.
+    h.state_mut().run_edit("VARIABLE LABELS age 'Idade'.");
+    h.get_by_label("Home").click();
+    h.run_steps(3);
+    h.get_by_label("Blank dataset").click();
+    h.run_steps(3);
+    assert!(shows(&h, "The data has changes that aren't saved."));
+    h.get_by_label("Close without saving").click();
+    h.run_steps(3);
+    assert_eq!(h.state().backstage, None);
+    assert!(h.state().session.dataset.variables().is_empty(), "a blank dataset");
+
+    // Opening a file puts it first among the recent ones, kept for later runs.
+    h.state_mut().open_path(&data);
+    std::fs::remove_file(&data).unwrap();
+    assert_eq!(saved.borrow().first().and_then(|p| p.file_name()), data.file_name());
+    assert_eq!(saved.borrow().len(), 2);
+    h.get_by_label("File").click();
+    h.run_steps(3);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert_eq!(h.state().backstage, None, "Esc goes back");
 }

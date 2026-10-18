@@ -53,6 +53,13 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   Variable View as tabs at the bottom; a status bar with the data's size, weight and filter),
   light and dark, indigo accented. Analyze and Graphs buttons paste the procedure's syntax for
   suggested variables into the editor and run it; when no variable fits they paste a template.
+- File backstage — **done**: File opens a page over the window: a column in Morrison
+  Kühlsen's ink with its logo, MK Sigma's name and motto, and the places grouped (Start: Home,
+  New, Open; This data: Info, Save, Save As, Export, Close), and the page beside it with "Back
+  to the data" in its corner. The app's accent is Morrison Kühlsen's blue (#2540D8). Home and New start a blank dataset or the sample; Home
+  and Open list recent files (kept between runs in the user's configuration folder); Info shows
+  the file, cases, variables, weight, steps and whether it is saved; Export has every export.
+  Replacing data with unsaved changes asks first. Esc or Back returns.
 - Editing — **done**: Variable View (name, label, value labels dialog, missing values,
   measurement level, format) turns every edit into syntax (`RENAME VARIABLES`, `VARIABLE LABELS`,
   `VALUE LABELS`, `MISSING VALUES`, `VARIABLE LEVEL`, `FORMATS`), which runs through the engine

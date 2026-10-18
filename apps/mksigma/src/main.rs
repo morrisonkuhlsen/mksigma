@@ -19,6 +19,21 @@ fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
 }
 
+/// Where the recent files are kept: the platform's per-user configuration folder.
+#[allow(clippy::disallowed_methods)] // the desktop app is native only
+fn recent_file() -> Option<std::path::PathBuf> {
+    let base = if cfg!(target_os = "windows") {
+        std::env::var_os("APPDATA").map(std::path::PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Library/Application Support"))
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+    };
+    base.map(|b| b.join("mksigma").join("recent.txt"))
+}
+
 fn main() -> eframe::Result {
     let services = Services {
         pick_open: Some(Box::new(|| {
@@ -45,6 +60,19 @@ fn main() -> eframe::Result {
                 dialog.add_filter("Web page (.html)", &["html", "htm"])
             };
             dialog.save_file()
+        })),
+        load_recent: Some(Box::new(|| {
+            recent_file()
+                .and_then(|f| std::fs::read_to_string(f).ok())
+                .map(|text| text.lines().filter(|l| !l.trim().is_empty()).map(std::path::PathBuf::from).collect())
+                .unwrap_or_default()
+        })),
+        save_recent: Some(Box::new(|files: &[std::path::PathBuf]| {
+            if let Some(file) = recent_file() {
+                let text: Vec<String> = files.iter().map(|p| p.display().to_string()).collect();
+                let _ = file.parent().map(std::fs::create_dir_all);
+                let _ = std::fs::write(file, text.join("\n"));
+            }
         })),
     };
     let mut app = SigmaApp::new(services);

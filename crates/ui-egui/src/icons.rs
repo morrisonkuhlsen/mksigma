@@ -47,6 +47,10 @@ pub enum Icon {
     Pin,
     ChevronUp,
     ChevronDown,
+    House,
+    Page,
+    Info,
+    Close,
     /// The LaTeX name typeset as LaTeX sets it (raised A, lowered E): the name, not the
     /// LaTeX Project's logo artwork, whose terms don't allow it as a program's icon.
     Latex,
@@ -289,6 +293,21 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, t: &Tokens) {
                 painter.text(p(x, 8.0 + dy), egui::Align2::LEFT_CENTER, letter, font.clone(), ink.color);
             }
         }
+        Icon::House => {
+            poly(&[(2.0, 8.0), (8.0, 2.5), (14.0, 8.0)], Stroke::new(w * 1.1, ink.color));
+            poly(&[(3.8, 6.8), (3.8, 14.0), (12.2, 14.0), (12.2, 6.8)], Stroke::new(w, ink.color));
+            poly(&[(6.8, 14.0), (6.8, 10.0), (9.2, 10.0), (9.2, 14.0)], Stroke::new(w, ink.color));
+        }
+        Icon::Page => page(ink.color),
+        Icon::Info => {
+            painter.circle_stroke(p(8.0, 8.0), 6.3 * s, Stroke::new(w, ink.color));
+            line((8.0, 7.0), (8.0, 11.5), Stroke::new(w * 1.2, ink.color));
+            painter.circle_filled(p(8.0, 4.8), 0.9 * s, ink.color);
+        }
+        Icon::Close => {
+            line((3.5, 3.5), (12.5, 12.5), Stroke::new(w * 1.2, ink.color));
+            line((12.5, 3.5), (3.5, 12.5), Stroke::new(w * 1.2, ink.color));
+        }
         Icon::ChevronUp => poly(&[(3.5, 10.5), (8.0, 6.0), (12.5, 10.5)], Stroke::new(w * 1.3, ink.color)),
         Icon::ChevronDown => poly(&[(3.5, 6.0), (8.0, 10.5), (12.5, 6.0)], Stroke::new(w * 1.3, ink.color)),
         Icon::Pin => {
@@ -320,7 +339,7 @@ pub fn show(ui: &mut egui::Ui, icon: Icon, size: f32) -> egui::Response {
 
 /// For tests: every icon stays inside its square.
 #[cfg(test)]
-pub(crate) const ALL: [Icon; 40] = [
+pub(crate) const ALL: [Icon; 44] = [
     Icon::Sigma,
     Icon::Open,
     Icon::Save,
@@ -361,6 +380,10 @@ pub(crate) const ALL: [Icon; 40] = [
     Icon::Latex,
     Icon::ChevronUp,
     Icon::ChevronDown,
+    Icon::House,
+    Icon::Page,
+    Icon::Info,
+    Icon::Close,
 ];
 
 #[cfg(test)]

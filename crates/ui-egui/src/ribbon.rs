@@ -48,6 +48,8 @@ pub(crate) enum Action {
     ToggleAutoSave,
     Search,
     SaveDashboard,
+    /// Show the File backstage.
+    File,
     /// Run this syntax (a control that writes a command, such as the Output style's).
     Syntax(String),
 }
@@ -218,28 +220,11 @@ pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, collapsed: &mut bool, sta
         widgets.inactive.bg_stroke = egui::Stroke::NONE;
         widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
         let file = egui::RichText::new("File").size(14.0).color(t.accent);
-        ui.menu_button(file, |ui| {
-            let mut item = |ui: &mut egui::Ui, icon: Icon, label: &str, enabled: bool, then: Action| {
-                let clicked = ui
-                    .horizontal(|ui| {
-                        icons::show(ui, icon, 16.0);
-                        ui.add_enabled(enabled, egui::Button::new(label).frame(false)).clicked()
-                    })
-                    .inner;
-                if clicked {
-                    ui.close();
-                    action = Some(then);
-                }
-            };
-            item(ui, Icon::Open, "Open…", true, Action::Open);
-            item(ui, Icon::Save, "Save", true, Action::Save);
-            item(ui, Icon::Save, "Save As…", true, Action::SaveAs);
-            item(ui, Icon::Grid, "Save Dashboard…", true, Action::SaveDashboard);
-            ui.separator();
-            item(ui, Icon::Web, "Export Output as HTML…", state.has_output, Action::Export(ExportFormat::Html));
-            item(ui, Icon::Pdf, "Export Output as PDF…", state.has_output, Action::Export(ExportFormat::Pdf));
-            item(ui, Icon::Latex, "Export Output as LaTeX…", state.has_output, Action::Export(ExportFormat::Latex));
-        });
+        // File opens the backstage over the window: open, save, export, recent files.
+        if ui.add(egui::Button::new(file).frame(false).min_size(egui::vec2(0.0, 28.0))).on_hover_text("Open, save, export and recent files").clicked()
+        {
+            action = Some(Action::File);
+        }
         ui.add_space(6.0);
         for (which, name) in TABS {
             let on = *tab == which;

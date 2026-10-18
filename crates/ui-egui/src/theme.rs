@@ -1,6 +1,7 @@
 //! Design tokens: the colours every part of the window is painted with, light and dark. The
 //! layout follows modern desktop office suites (a title row, a ribbon of tabs, a grid with
-//! headers, tabs and a status bar at the bottom); the palette is MK Sigma's own, indigo accented.
+//! headers, tabs and a status bar at the bottom); the palette is MK Sigma's own, accented with
+//! Morrison Kühlsen's blue.
 
 use egui::{Color32, Stroke, Visuals};
 
@@ -46,8 +47,9 @@ impl Tokens {
             border: Color32::from_rgb(0xE0, 0xE0, 0xE6),
             text: Color32::from_rgb(0x22, 0x23, 0x2A),
             text_dim: Color32::from_rgb(0x62, 0x64, 0x70),
-            accent: Color32::from_rgb(0x3B, 0x4C, 0xCA),
-            accent_soft: Color32::from_rgb(0xE5, 0xE8, 0xFB),
+            // Morrison Kühlsen's blue.
+            accent: Color32::from_rgb(0x25, 0x40, 0xD8),
+            accent_soft: Color32::from_rgb(0xE3, 0xE8, 0xFC),
             hover: Color32::from_rgb(0xEA, 0xEA, 0xEF),
             pressed: Color32::from_rgb(0xDC, 0xDC, 0xE4),
             grid_bg: Color32::WHITE,

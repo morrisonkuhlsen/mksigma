@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use mksigma_engine::Session;
 
+mod backstage;
 mod edit;
 mod icons;
 pub mod logo;
@@ -17,6 +18,7 @@ mod suggest;
 mod theme;
 mod views;
 
+pub use backstage::Page as BackstagePage;
 pub use edit::{Editing, Field, Target};
 pub use output::{ExportFormat, OutputState};
 pub use ribbon::Tab;
@@ -36,6 +38,9 @@ use views::DialogOutcome;
 /// `None` when cancelled.
 pub type PickOpen = Box<dyn Fn() -> Option<PathBuf>>;
 pub type PickSave = Box<dyn Fn(&str) -> Option<PathBuf>>;
+/// The recent files kept from earlier runs, and keeping them.
+pub type LoadRecent = Box<dyn Fn() -> Vec<PathBuf>>;
+pub type SaveRecent = Box<dyn Fn(&[PathBuf])>;
 
 /// What the app provides from the platform.
 #[derive(Default)]
@@ -49,7 +54,14 @@ pub struct Services {
     /// Shows a save dialog for exporting the Output, suggesting a file name whose extension
     /// (`.html` or `.pdf`) says the format.
     pub pick_export: Option<PickSave>,
+    /// The recent files kept from earlier runs, newest first.
+    pub load_recent: Option<LoadRecent>,
+    /// Keeps the recent files for later runs.
+    pub save_recent: Option<SaveRecent>,
 }
+
+/// How many recent files the backstage lists.
+const RECENT: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -80,6 +92,12 @@ pub struct SigmaApp {
     pub value_labels_dialog: Option<ValueLabelsDialog>,
     /// Which Output tables are pivoted.
     pub output_state: OutputState,
+    /// The File backstage's page while it is open.
+    pub backstage: Option<BackstagePage>,
+    /// Recent files, newest first.
+    pub recent: Vec<PathBuf>,
+    /// What waits for an answer about unsaved changes.
+    pending: Option<backstage::Action>,
     /// The ribbon tab shown.
     pub tab: Tab,
     /// Only the ribbon's tab row shows, for more room.
@@ -121,6 +139,9 @@ impl SigmaApp {
             value_labels_dialog: None,
             output_state: OutputState::default(),
             tab: Tab::default(),
+            backstage: None,
+            recent: services.load_recent.as_ref().map(|load| load()).unwrap_or_default(),
+            pending: None,
             ribbon_collapsed: false,
             autosave: false,
             search: None,
@@ -141,6 +162,9 @@ impl SigmaApp {
             }
             syntax.push('.');
             let result = self.session.run_syntax(&syntax);
+            if result.is_ok() {
+                self.remember(path);
+            }
             self.after_run(result.map_err(|e| e.to_string()), None);
             return;
         }
@@ -150,6 +174,9 @@ impl SigmaApp {
         }
         let syntax = format!("GET FILE={}.", mksigma_engine::quote(&path.display().to_string()));
         let result = self.session.run_syntax(&syntax);
+        if result.is_ok() {
+            self.remember(path);
+        }
         self.after_run(result.map_err(|e| e.to_string()), None);
     }
 
@@ -176,8 +203,103 @@ impl SigmaApp {
         let ok = result.is_ok();
         self.after_run(result, None);
         if ok {
+            self.remember(path);
             self.output_state.dashboard = true;
             self.status = Some(Status::Info(format!("Opened the dashboard {name}")));
+        }
+    }
+
+    fn export_dashboard_dialog(&mut self) {
+        let stem = self.file_name.as_deref().and_then(|f| f.rsplit_once('.').map(|(s, _)| s.to_string())).unwrap_or_else(|| "dashboard".to_string());
+        if let Some(path) = self.services.pick_export.as_ref().and_then(|pick| pick(&format!("{stem} dashboard.html"))) {
+            self.export_dashboard(&path);
+        }
+    }
+
+    /// Puts `path` first among the recent files and keeps the list.
+    fn remember(&mut self, path: &Path) {
+        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        self.recent.retain(|p| *p != path);
+        self.recent.insert(0, path);
+        self.recent.truncate(RECENT);
+        if let Some(save) = &self.services.save_recent {
+            save(&self.recent);
+        }
+    }
+
+    /// Replaces the session with new data (blank or the sample), leaving the backstage.
+    fn new_data(&mut self, session: Session, what: &str) {
+        self.session = session;
+        self.file_name = None;
+        self.file_path = None;
+        self.editing = None;
+        self.value_labels_dialog = None;
+        self.output_state = OutputState::default();
+        self.backstage = None;
+        self.pending = None;
+        self.status = Some(Status::Info(what.to_string()));
+    }
+
+    /// Does what the backstage asked for. Replacing data with unsaved changes asks first, on
+    /// the Info page.
+    fn backstage_act(&mut self, action: backstage::Action) {
+        use backstage::Action as A;
+        let replaces = matches!(action, A::Blank | A::Sample | A::Close);
+        if replaces && self.session.modified && self.pending.is_none() {
+            self.pending = Some(action);
+            self.backstage = Some(backstage::Page::Info);
+            return;
+        }
+        match action {
+            A::Back => {
+                self.backstage = None;
+                self.pending = None;
+            }
+            A::Page(page) => {
+                self.backstage = Some(page);
+                self.pending = None;
+            }
+            A::Blank | A::Close => self.new_data(Session::new(), "New dataset: add variables in Variable View, or open a file."),
+            A::Sample => match Session::with_sample() {
+                Ok(s) => self.new_data(s, "Sample dataset."),
+                Err(e) => self.status = Some(Status::Error(e.to_string())),
+            },
+            A::Discard => {
+                let then = self.pending.take().unwrap_or(A::Close);
+                self.session.modified = false;
+                self.backstage_act(then);
+            }
+            A::Open(path) => {
+                self.backstage = None;
+                self.open_path(&path);
+            }
+            A::Browse => {
+                self.backstage = None;
+                self.open_dialog();
+            }
+            A::Save => {
+                self.save();
+                if !self.session.modified {
+                    self.pending = None;
+                    self.backstage = None;
+                }
+            }
+            A::SaveAs => {
+                self.backstage = None;
+                self.save_as();
+            }
+            A::Export(format) => {
+                self.backstage = None;
+                self.export_dialog(format);
+            }
+            A::ExportDashboard => {
+                self.backstage = None;
+                self.export_dashboard_dialog();
+            }
+            A::SaveDashboard => {
+                self.backstage = None;
+                self.save_dashboard_dialog();
+            }
         }
     }
 
@@ -302,6 +424,7 @@ impl SigmaApp {
                 self.file_name = Some(name);
                 self.file_path = Some(path.to_path_buf());
                 self.session.saved_to(&path.display().to_string());
+                self.remember(path);
             }
             Err(e) => {
                 let _ = std::fs::remove_file(&temporary);
@@ -480,6 +603,32 @@ impl SigmaApp {
         };
         let mut actions = Vec::new();
         actions.extend(ribbon::title_bar(ui, &state));
+        // The File backstage takes the whole window under the title row.
+        if let Some(page) = self.backstage {
+            for action in actions {
+                self.act(ui.ctx(), action);
+            }
+            let ds = &self.session.dataset;
+            let view = backstage::View {
+                page,
+                recent: &self.recent,
+                file_name: self.file_name.as_deref(),
+                file_path: self.file_path.as_deref(),
+                modified: self.session.modified,
+                cases: ds.n_cases(),
+                variables: ds.variables().len(),
+                weight: ds.weight.and_then(|w| ds.variables().get(w)).map(|v| v.name.as_str()),
+                steps: self.session.steps().len(),
+                has_output: !self.session.output.items.is_empty(),
+                has_dashboard: !self.session.dashboard().is_empty(),
+                confirm_close: self.pending.is_some(),
+            };
+            if let Some(action) = backstage::show(ui, &view) {
+                self.backstage_act(action);
+            }
+            self.dialogs(ui.ctx());
+            return;
+        }
         actions.extend(ribbon::ribbon(ui, &mut self.tab, &mut self.ribbon_collapsed, &state));
         for action in actions {
             self.act(ui.ctx(), action);
@@ -619,13 +768,7 @@ impl SigmaApp {
                 let result = self.session.set_wide(item, wide);
                 self.report(result);
             }
-            output::OutputAction::ExportDashboard => {
-                let stem =
-                    self.file_name.as_deref().and_then(|f| f.rsplit_once('.').map(|(s, _)| s.to_string())).unwrap_or_else(|| "dashboard".to_string());
-                if let Some(path) = self.services.pick_export.as_ref().and_then(|pick| pick(&format!("{stem} dashboard.html"))) {
-                    self.export_dashboard(&path);
-                }
-            }
+            output::OutputAction::ExportDashboard => self.export_dashboard_dialog(),
             output::OutputAction::Syntax(syntax) => {
                 self.output_state.transposed.clear();
                 self.run_edit(&syntax);
@@ -669,6 +812,7 @@ impl SigmaApp {
             Action::Suggest(procedure) => self.paste(procedure),
             Action::Theme(preference) => ctx.set_theme(preference),
             Action::SaveDashboard => self.save_dashboard_dialog(),
+            Action::File => self.backstage = Some(backstage::Page::Home),
             Action::Syntax(syntax) => self.run_edit(&syntax),
             Action::Search => self.search = if self.search.is_some() { None } else { Some(String::new()) },
             Action::ToggleAutoSave => {
