@@ -1765,10 +1765,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mksigma-csv"
+version = "0.1.0"
+dependencies = [
+ "encoding_rs",
+ "mksigma-core",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "mksigma-engine"
 version = "0.1.0"
 dependencies = [
  "mksigma-core",
+ "mksigma-csv",
  "mksigma-output",
  "mksigma-sav",
  "mksigma-stats",

@@ -4,12 +4,14 @@
 
 use thiserror::Error;
 
+mod data;
 mod dictionary;
 mod expr;
 mod lexer;
 mod procedures;
 mod transform;
 
+pub use data::GetData;
 pub use dictionary::{Level, Literal, MissingSpec, NewVariables, ValueLabelList};
 pub use expr::{BinOp, Expr};
 use lexer::Token;
@@ -18,6 +20,8 @@ pub use transform::{RecodeFrom, RecodeGroup, RecodeSpec, RecodeTo};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
+    /// `GET DATA /TYPE=TXT /FILE='...'`: a new active dataset from delimited text.
+    GetData(GetData),
     /// `DESCRIPTIVES [VARIABLES=] var...`
     Descriptives { variables: Vec<String> },
     /// `DISPLAY DICTIONARY`
@@ -243,6 +247,9 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     }
     if is_keyword(name, "LOGISTIC") && second("REGRESSION") {
         return procedures::logistic(rest.get(1..).unwrap_or_default());
+    }
+    if is_keyword(name, "GET") && second("DATA") {
+        return data::get_data(rest.get(1..).unwrap_or_default());
     }
     if is_keyword(name, "DISPLAY") {
         return match rest {

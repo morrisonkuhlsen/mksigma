@@ -23,7 +23,14 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   including strings over 8 bytes (7.21, read too), measurement levels (7.11), documents,
   weight, file label. Checked by round trip and by reading our files with ReadStat
   (pyreadstat). To do: `.zsav`, strings over 255 bytes, long-string missing values.
-- CSV and `.xlsx` import (`GET DATA`)
+- CSV import — **done**: `GET DATA /TYPE=TXT` (`/FILE`, `/DELIMITERS` with `\t`, `/QUALIFIER`,
+  `/FIRSTCASE`, `/ENCODING`, `/VARIABLES=name format`), RFC 4180 quoting (doubled qualifiers,
+  fields across lines), UTF-8 with a Windows-1252 fallback. MK Sigma extensions: without
+  `/VARIABLES` the names come from the first record (`/READNAMES`) and types are inferred
+  (numbers, decimal commas when the delimiter isn't a comma, strings as wide as their longest
+  value; repeated whole-number codes are Nominal); without `/DELIMITERS` the delimiter is
+  detected. Opening `.csv`/`.tsv`/`.txt` in the app or CLI runs `GET DATA`, so the History
+  records it. To do: `.xlsx` (`/TYPE=XLSX`), fixed-width text, dates in text.
 - **Recorded data preparation** (Power Query style): every transformation is a syntax command
   shown as a list of applied steps that can be edited, reordered and replayed.
   **Done:** `COMPUTE`, `IF`, `RECODE` (values, `LO THRU HI` ranges, `MISSING`, `SYSMIS`, `ELSE`,

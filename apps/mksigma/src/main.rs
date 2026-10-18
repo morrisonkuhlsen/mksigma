@@ -22,7 +22,12 @@ fn now() -> i64 {
 fn main() -> eframe::Result {
     let services = Services {
         pick_open: Some(Box::new(|| {
-            rfd::FileDialog::new().add_filter("SPSS Statistics data (.sav, .zsav)", &["sav", "zsav"]).add_filter("All files", &["*"]).pick_file()
+            rfd::FileDialog::new()
+                .add_filter("Data files (.sav, .csv, .tsv, .txt)", &["sav", "zsav", "csv", "tsv", "txt", "dat"])
+                .add_filter("SPSS Statistics data (.sav, .zsav)", &["sav", "zsav"])
+                .add_filter("Delimited text (.csv, .tsv, .txt)", &["csv", "tsv", "txt", "dat"])
+                .add_filter("All files", &["*"])
+                .pick_file()
         })),
         pick_save: Some(Box::new(|suggested: &str| {
             rfd::FileDialog::new().add_filter("SPSS Statistics data (.sav)", &["sav"]).set_file_name(suggested).save_file()

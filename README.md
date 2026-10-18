@@ -14,7 +14,7 @@ One workflow, end to end and reproducible:
 Every step is syntax, so analyses can be rerun, reviewed and driven by agents (CLI, later MCP).
 Runs natively on macOS, Windows, Linux and BSD, and later on the web via WebAssembly.
 
-> Early days. Today it reads and writes `.sav` files, edits data and the dictionary (every edit
+> Early days. Today it reads and writes `.sav` files, reads CSV and other delimited text, edits data and the dictionary (every edit
 > recorded as syntax, with undo), transforms data with `COMPUTE`, `IF`, `RECODE` and `SELECT IF`,
 > and runs `DESCRIPTIVES`, `FREQUENCIES`, `CROSSTABS` (χ², Fisher), `T-TEST`, `ONEWAY`,
 > post hoc tests, `CORRELATIONS`, `REGRESSION`, `LOGISTIC REGRESSION`, `NPAR TESTS` and
@@ -28,6 +28,7 @@ cargo run -p mksigma                                              # desktop app,
 cargo run -p mksigma -- data.sav                                  # or File ▸ Open, or drop a file
 cargo run -p mksigma-cli -- run 'DESCRIPTIVES VARIABLES=age income score.'   # sample data
 cargo run -p mksigma-cli -- run --in data.sav 'DISPLAY DICTIONARY.'
+cargo run -p mksigma-cli -- run --in data.csv 'FREQUENCIES region.'        # read with GET DATA
 cargo run -p mksigma-cli -- run --in data.sav --out fixed.sav "VARIABLE LABELS q1 'Satisfaction'." 
 cargo test
 cargo run -p mksigma-cli -- run --in data.sav --html report.html "GRAPH /HISTOGRAM(NORMAL)=x."
@@ -42,6 +43,7 @@ cargo run -p mksigma-ui-egui --example snapshot -- --in data.sav out.png   # off
 | `crates/output` | L0 | Output items: tables, text, warnings |
 | `crates/syntax` | L1 | Command syntax lexer and parser |
 | `crates/sav` | L1 | `.sav` / `.zsav` reader and writer |
+| `crates/csv` | L1 | Delimited text reader (`GET DATA /TYPE=TXT`) |
 | `crates/stats` | L1 | Statistical procedures |
 | `crates/engine` | L2 | `Session`: runs commands, collects output |
 | `crates/ui-egui` | L3 | egui frontend (swappable) |

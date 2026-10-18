@@ -1,0 +1,188 @@
+//! `GET DATA /TYPE=TXT`: reads delimited text into a new active dataset.
+//!
+//! `GET DATA /TYPE=TXT /FILE='data.csv' [/ENCODING='UTF8'] [/ARRANGEMENT=DELIMITED]
+//! [/DELIMITERS=",;"] [/QUALIFIER='"'] [/FIRSTCASE=n] [/READNAMES=ON|OFF] [/IMPORTCASE=ALL]
+//! [/DELCASE=LINE] [/VARIABLES=name format ...]`. As in SPSS, `/VARIABLES` names the columns
+//! and gives their formats. MK Sigma also reads text without it: the names come from the first
+//! record (`/READNAMES=ON`, the default then) and the types are inferred; without
+//! `/DELIMITERS` the delimiter is detected. `"\t"` in `/DELIMITERS` is a tab.
+
+use crate::lexer::Token;
+use crate::{Command, SyntaxError, is_keyword, unsupported};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetData {
+    pub file: String,
+    /// Characters any of which separates fields; empty to detect.
+    pub delimiters: Vec<char>,
+    /// `None` when fields are never enclosed (`/QUALIFIER=''`).
+    pub qualifier: Option<char>,
+    pub first_case: Option<usize>,
+    /// `None` when not written: on without `/VARIABLES`, off with it.
+    pub read_names: Option<bool>,
+    pub encoding: Option<String>,
+    /// Names and formats as written (`F8.2`, `A20`).
+    pub variables: Vec<(String, String)>,
+}
+
+const CMD: &str = "GET DATA";
+
+/// `"\t"` is a tab and `"\\"` a backslash, as SPSS reads them in `/DELIMITERS`.
+fn delimiter_chars(text: &str) -> Vec<char> {
+    let mut out = Vec::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match (c, chars.clone().next()) {
+            ('\\', Some('t')) => {
+                chars.next();
+                out.push('\t');
+            }
+            ('\\', Some('\\')) => {
+                chars.next();
+                out.push('\\');
+            }
+            _ => out.push(c),
+        }
+    }
+    out.dedup();
+    out
+}
+
+pub(crate) fn get_data(rest: &[Token]) -> Result<Command, SyntaxError> {
+    let mut file = None;
+    let mut spec = GetData {
+        file: String::new(),
+        delimiters: Vec::new(),
+        qualifier: Some('"'),
+        first_case: None,
+        read_names: None,
+        encoding: None,
+        variables: Vec::new(),
+    };
+    let mut text = false;
+    for sub in rest.split(|t| *t == Token::Slash).filter(|s| !s.is_empty()) {
+        let (name, values) = match sub {
+            [Token::Word(name), Token::Equals, values @ ..] | [Token::Word(name), values @ ..] => (name.as_str(), values),
+            _ => return Err(SyntaxError::Expected { command: CMD, expected: "a subcommand such as /FILE='data.csv'" }),
+        };
+        let word = |expected: &'static str| match values {
+            [Token::Word(w)] => Ok(w.as_str()),
+            _ => Err(SyntaxError::Expected { command: CMD, expected }),
+        };
+        let string = |expected: &'static str| match values {
+            [Token::Str(s)] => Ok(s.clone()),
+            _ => Err(SyntaxError::Expected { command: CMD, expected }),
+        };
+        match name {
+            n if is_keyword(n, "TYPE") => {
+                let kind = word("/TYPE=TXT")?;
+                if !kind.eq_ignore_ascii_case("TXT") {
+                    return Err(unsupported(CMD, &format!("/TYPE={kind}")));
+                }
+                text = true;
+            }
+            n if is_keyword(n, "FILE") => file = Some(string("/FILE='path'")?),
+            n if is_keyword(n, "ENCODING") => spec.encoding = Some(string("/ENCODING='UTF8'")?),
+            n if is_keyword(n, "ARRANGEMENT") => {
+                let a = word("/ARRANGEMENT=DELIMITED")?;
+                if !is_keyword(a, "DELIMITED") {
+                    return Err(unsupported(CMD, &format!("/ARRANGEMENT={a}")));
+                }
+            }
+            n if is_keyword(n, "DELIMITERS") => spec.delimiters = delimiter_chars(&string("/DELIMITERS=\",\"")?),
+            n if is_keyword(n, "QUALIFIER") => {
+                let q = string("/QUALIFIER='\"'")?;
+                let mut chars = q.chars();
+                spec.qualifier = match (chars.next(), chars.next()) {
+                    (None, _) => None,
+                    (Some(c), None) => Some(c),
+                    _ => return Err(SyntaxError::Expected { command: CMD, expected: "one character in /QUALIFIER" }),
+                };
+            }
+            n if is_keyword(n, "FIRSTCASE") => {
+                let n = word("/FIRSTCASE=n")?.parse::<usize>().ok().filter(|n| *n >= 1);
+                spec.first_case = Some(n.ok_or(SyntaxError::Expected { command: CMD, expected: "a record number from 1 in /FIRSTCASE" })?);
+            }
+            n if is_keyword(n, "READNAMES") => {
+                spec.read_names = Some(match word("/READNAMES=ON or OFF")? {
+                    w if w.eq_ignore_ascii_case("ON") => true,
+                    w if w.eq_ignore_ascii_case("OFF") => false,
+                    _ => return Err(SyntaxError::Expected { command: CMD, expected: "/READNAMES=ON or OFF" }),
+                });
+            }
+            n if is_keyword(n, "IMPORTCASE") => {
+                let all = word("/IMPORTCASE=ALL")?;
+                if !all.eq_ignore_ascii_case("ALL") {
+                    return Err(unsupported(CMD, &format!("/IMPORTCASE={all}")));
+                }
+            }
+            n if is_keyword(n, "DELCASE") => {
+                let line = word("/DELCASE=LINE")?;
+                if !line.eq_ignore_ascii_case("LINE") {
+                    return Err(unsupported(CMD, &format!("/DELCASE={line}")));
+                }
+            }
+            n if is_keyword(n, "VARIABLES") => {
+                let words: Vec<&str> = values.iter().filter_map(|t| if let Token::Word(w) = t { Some(w.as_str()) } else { None }).collect();
+                if words.len() != values.len() || words.is_empty() || !words.len().is_multiple_of(2) {
+                    return Err(SyntaxError::Expected { command: CMD, expected: "/VARIABLES=name format pairs, such as id F4.0 name A20" });
+                }
+                spec.variables = words
+                    .chunks(2)
+                    .filter_map(|p| match p {
+                        [name, format] => Some((name.to_string(), format.to_string())),
+                        _ => None,
+                    })
+                    .collect();
+            }
+            n => return Err(unsupported(CMD, &format!("/{n}"))),
+        }
+    }
+    if !text {
+        return Err(SyntaxError::Expected { command: CMD, expected: "/TYPE=TXT" });
+    }
+    spec.file = file.ok_or(SyntaxError::Expected { command: CMD, expected: "/FILE='path'" })?;
+    Ok(Command::GetData(spec))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse;
+
+    fn one(src: &str) -> GetData {
+        match parse(src).unwrap().as_slice() {
+            [Command::GetData(g)] => g.clone(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_get_data() {
+        let g = one("GET DATA /TYPE=TXT /FILE='dados.csv'.");
+        assert_eq!((g.file.as_str(), g.delimiters.is_empty(), g.qualifier, g.read_names), ("dados.csv", true, Some('"'), None));
+        let g = one("GET DATA /TYPE=TXT /FILE='C:\\dados\\x.txt' /ENCODING='UTF8' /ARRANGEMENT=DELIMITED /DELIMITERS=\"\\t;\" \
+             /QUALIFIER='' /FIRSTCASE=3 /READNAMES=OFF /IMPORTCASE=ALL /DELCASE=LINE /VARIABLES=id F4.0 nome A20.");
+        assert_eq!(g.file, "C:\\dados\\x.txt");
+        assert_eq!(g.delimiters, ['\t', ';']);
+        assert_eq!((g.qualifier, g.first_case, g.read_names), (None, Some(3), Some(false)));
+        assert_eq!(g.variables, [("id".to_string(), "F4.0".to_string()), ("nome".to_string(), "A20".to_string())]);
+        assert_eq!(g.encoding.as_deref(), Some("UTF8"));
+    }
+
+    #[test]
+    fn rejects_what_it_cannot_read() {
+        for bad in [
+            "GET DATA /FILE='x.csv'.",
+            "GET DATA /TYPE=TXT.",
+            "GET DATA /TYPE=XLSX /FILE='x.xlsx'.",
+            "GET DATA /TYPE=TXT /FILE='x' /ARRANGEMENT=FIXED.",
+            "GET DATA /TYPE=TXT /FILE='x' /FIRSTCASE=0.",
+            "GET DATA /TYPE=TXT /FILE='x' /VARIABLES=a.",
+            "GET DATA /TYPE=TXT /FILE='x' /QUALIFIER='ab'.",
+            "GET DATA /TYPE=TXT /FILE='x' /SHEET=name 'a'.",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+    }
+}

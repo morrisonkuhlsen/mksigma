@@ -575,3 +575,32 @@ fn search_finds_commands_and_zoom_steps() {
     h.run_steps(3);
     assert_eq!(h.state().zoom, 100);
 }
+
+#[test]
+fn opening_a_csv_reads_it_through_get_data() {
+    let path = temp_path("turma.csv");
+    std::fs::write(&path, "nome;nota;turma\nAna;7,5;1\nBia;9;2\nCaio;6,5;1\nDani;8;2\n").unwrap();
+    let picked = path.clone();
+    let suggested = Rc::new(std::cell::RefCell::new(String::new()));
+    let seen = suggested.clone();
+    let services = Services {
+        pick_open: Some(Box::new(move || Some(picked.clone()))),
+        pick_save: Some(Box::new(move |s: &str| {
+            *seen.borrow_mut() = s.to_string();
+            None
+        })),
+        ..Services::default()
+    };
+    let mut h = harness(SigmaApp::new(services));
+    h.get_by_label("Open").click();
+    h.run_steps(3);
+    std::fs::remove_file(&path).unwrap();
+    let app = h.state();
+    assert_eq!(app.session.dataset.n_cases(), 4);
+    assert!(app.session.journal.last().is_some_and(|j| j.starts_with("GET DATA /TYPE=TXT /FILE=")), "{:?}", app.session.journal);
+    assert_eq!(app.file_name.as_deref(), path.file_name().and_then(|n| n.to_str()));
+    assert!(matches!(&app.status, Some(Status::Info(s)) if s.ends_with("4 cases, 3 variables (delimiter ';')")), "{:?}", app.status);
+    assert!(shows(&h, "7.5"), "decimal commas read as numbers, with as many decimals as written (F8.1)");
+    h.state_mut().save();
+    assert!(suggested.borrow().ends_with("turma.sav"), "saved as a system file beside it: {}", suggested.borrow());
+}

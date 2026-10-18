@@ -2,7 +2,8 @@
 //!
 //! `mksigma-cli run [--in data.sav] [--out result.sav] [--html report.html] [--pdf report.pdf]
 //! '<syntax>'` runs
-//! syntax against a system file (or, without `--in`, the built-in sample dataset), prints the
+//! syntax against a system file or delimited text (`.csv`, `.tsv`, `.txt`, read with `GET DATA`;
+//! without `--in`, the built-in sample dataset), prints the
 //! output as text and, with `--out`, saves the resulting dataset; with `--html` / `--pdf`, writes the
 //! Output (tables and charts) as a web page.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -49,6 +50,15 @@ fn now() -> i64 {
 fn run(args: &Args) -> Result<(), String> {
     let mut session = match &args.input {
         None => Session::with_sample().map_err(|e| e.to_string())?,
+        Some(path) if [".csv", ".tsv", ".txt", ".dat"].iter().any(|e| path.to_ascii_lowercase().ends_with(e)) => {
+            let mut s = Session::new();
+            let tab = if path.to_ascii_lowercase().ends_with(".tsv") { " /DELIMITERS=\"\\t\"" } else { "" };
+            s.run_syntax(&format!("GET DATA /TYPE=TXT /FILE={}{tab}.", mksigma_engine::quote(path))).map_err(|e| e.to_string())?;
+            for note in s.take_notes() {
+                eprintln!("{note}");
+            }
+            s
+        }
         Some(path) => {
             let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
             let mut s = Session::new();

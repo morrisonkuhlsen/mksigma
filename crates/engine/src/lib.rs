@@ -21,6 +21,7 @@ use mksigma_output::Category;
 pub use steps::{AppliedStep, StepKind};
 
 pub use mksigma_core as core;
+pub use mksigma_csv as csv;
 pub use mksigma_output as output;
 pub use mksigma_sav::timestamp;
 pub use mksigma_syntax::quote;
@@ -35,6 +36,10 @@ pub enum EngineError {
     Dataset(#[from] DatasetError),
     #[error(transparent)]
     Sav(#[from] mksigma_sav::SavError),
+    #[error(transparent)]
+    Csv(#[from] mksigma_csv::CsvError),
+    #[error("{0}")]
+    File(String),
     #[error("variable {0} does not exist")]
     UnknownVariable(String),
     #[error("{0}")]
@@ -63,6 +68,9 @@ pub struct Session {
     /// The run each item of the Output came from, by item index.
     run_of: Vec<usize>,
     cross_filter: Option<CrossFilter>,
+    /// What loading data had to say (sizes, reader warnings), until `take_notes`.
+    notes: Vec<String>,
+    loaded_file: Option<String>,
 }
 
 /// Whether a command changes the data (and so is an applied step) rather than analysing it.
@@ -114,16 +122,65 @@ impl Session {
     /// Replaces the active dataset with a system file's. Returns the reader's warnings.
     pub fn open_sav(&mut self, bytes: &[u8]) -> Result<Vec<String>, EngineError> {
         let file = mksigma_sav::read(bytes)?;
-        self.base = file.dataset.clone();
-        self.dataset = file.dataset;
+        self.load(file.dataset);
+        Ok(file.warnings)
+    }
+
+    /// Replaces the active dataset with delimited text's (a file with no path, such as one
+    /// dropped on a web page; with a path, `GET DATA` records how it was read). Returns the
+    /// reader's warnings.
+    pub fn open_text(&mut self, bytes: &[u8], options: &mksigma_csv::Options) -> Result<Vec<String>, EngineError> {
+        let file = mksigma_csv::read(bytes, options)?;
+        self.load(file.dataset);
+        Ok(file.warnings)
+    }
+
+    /// A new active dataset: the base of new applied steps, with nothing to undo.
+    fn load(&mut self, dataset: Dataset) {
+        self.base = dataset.clone();
+        self.dataset = dataset;
         self.steps.clear();
         self.modified = false;
         self.history.clear();
-        // The Output stays, but a filter on the old file's cases means nothing for the new one.
+        // The Output stays, but a filter on the old data's cases means nothing for the new.
         if self.cross_filter.take().is_some() {
             self.show_runs();
         }
-        Ok(file.warnings)
+    }
+
+    /// `GET DATA /TYPE=TXT`: reads the file into a new active dataset.
+    fn get_data(&mut self, spec: &mksigma_syntax::GetData) -> Result<(), EngineError> {
+        let bytes = std::fs::read(&spec.file).map_err(|e| EngineError::File(format!("{}: {e}", spec.file)))?;
+        let mut variables = Vec::with_capacity(spec.variables.len());
+        for (name, format) in &spec.variables {
+            variables.push((name.clone(), format.parse().map_err(EngineError::Invalid)?));
+        }
+        let options = mksigma_csv::Options {
+            delimiters: spec.delimiters.clone(),
+            qualifier: spec.qualifier,
+            read_names: spec.read_names.unwrap_or(spec.variables.is_empty()),
+            first_case: spec.first_case,
+            variables,
+            encoding: spec.encoding.clone(),
+        };
+        let file = mksigma_csv::read(&bytes, &options)?;
+        let ds = &file.dataset;
+        let delimiter = if file.delimiter == '\t' { "tab".to_string() } else { format!("'{}'", file.delimiter) };
+        self.notes.push(format!("{}: {} cases, {} variables (delimiter {delimiter})", spec.file, ds.n_cases(), ds.variables().len()));
+        self.notes.extend(file.warnings.iter().map(|w| format!("{}: {w}", spec.file)));
+        self.load(file.dataset);
+        self.loaded_file = Some(spec.file.clone());
+        Ok(())
+    }
+
+    /// The file `GET DATA` last read, if it ran since the last call.
+    pub fn take_loaded_file(&mut self) -> Option<String> {
+        self.loaded_file.take()
+    }
+
+    /// What loading data said since the last call, oldest first.
+    pub fn take_notes(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notes)
     }
 
     /// The active dataset as a bytecode-compressed system file, and anything that couldn't be
@@ -140,6 +197,12 @@ impl Session {
     /// action.
     pub fn run_syntax(&mut self, src: &str) -> Result<(), EngineError> {
         for (command, source) in mksigma_syntax::parse_with_source(src)? {
+            if let Command::GetData(spec) = &command {
+                // A new dataset, not a step on the old one.
+                self.get_data(spec)?;
+                self.journal.push(source);
+                continue;
+            }
             let edits = self.apply(&command)?;
             self.journal.push(source.clone());
             if changes_data(&command) {
@@ -294,6 +357,9 @@ impl Session {
         };
         if !changes_data(command) {
             return Err(EngineError::Invalid("a step changes the data; run analyses from the syntax editor".into()));
+        }
+        if matches!(command, Command::GetData(_)) {
+            return Err(EngineError::Invalid("GET DATA starts new data; run it from the syntax editor".into()));
         }
         let mut steps = self.steps.clone();
         let step = steps.get_mut(index).ok_or_else(|| EngineError::Invalid(format!("there is no step {}", index + 1)))?;
@@ -1042,6 +1108,34 @@ mod tests {
             .find_map(|i| if let Item::Table(t) = i { (t.title == "Case Processing Summary").then_some(t) } else { None })
             .unwrap();
         assert_eq!(summary.rows[0].1[0], mksigma_output::Cell::Int(3), "EXAMINE ran again on the three in the first bin");
+    }
+
+    #[test]
+    fn get_data_reads_text_into_new_data() {
+        let path = std::env::temp_dir().join(format!("mksigma-engine-{}.csv", std::process::id()));
+        // Semicolons and decimal commas, as spreadsheets in Brazil save CSV.
+        std::fs::write(&path, "nome;nota;turma\nAna;7,5;1\nBia;9;2\nCaio;6,5;1\nDani;8;2\n").unwrap();
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("COMPUTE x = 1.").unwrap();
+        let file = path.display().to_string();
+        s.run_syntax(&format!("GET DATA /TYPE=TXT /FILE={}.\nDESCRIPTIVES nota.", quote(&file))).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(s.dataset.n_cases(), 4);
+        assert_eq!(nums(&s, "nota"), [7.5, 9.0, 6.5, 8.0].map(Some));
+        assert!(s.steps().is_empty() && s.undo_label().is_none() && !s.modified, "new data: no steps, nothing to undo");
+        assert_eq!(s.take_notes(), [format!("{file}: 4 cases, 3 variables (delimiter ';')")]);
+        assert!(s.take_notes().is_empty());
+        assert!(s.journal.iter().any(|j| j.starts_with("GET DATA")));
+        // Mean of 7.5, 9, 6.5 and 8.
+        assert!(s.output.to_text().contains("7.75"), "{}", s.output.to_text());
+        s.run_syntax("COMPUTE dobro = nota * 2.").unwrap();
+        assert_eq!(s.steps().len(), 1, "steps start from the text's data");
+        s.set_step_enabled(0, false).unwrap();
+        assert_eq!(s.dataset.n_cases(), 4, "replay starts from it too");
+        assert!(s.replace_step(0, &format!("GET DATA /TYPE=TXT /FILE={}.", quote(&file))).is_err());
+
+        assert!(matches!(s.run_syntax("GET DATA /TYPE=TXT /FILE='/nonexistent/x.csv'."), Err(EngineError::File(_))));
+        assert_eq!(s.dataset.n_cases(), 4, "a file that can't be read changes nothing");
     }
 
     #[test]
