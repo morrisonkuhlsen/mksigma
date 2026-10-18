@@ -13,6 +13,7 @@ mod edit;
 mod icons;
 pub mod logo;
 mod output;
+mod procedure;
 mod ribbon;
 mod suggest;
 mod theme;
@@ -21,6 +22,7 @@ mod views;
 pub use backstage::Page as BackstagePage;
 pub use edit::{Editing, Field, Target};
 pub use output::{ExportFormat, OutputState};
+pub use procedure::{Dialog as ProcedureDialog, Kind as ProcedureKind};
 pub use ribbon::Tab;
 pub use suggest::Procedure;
 pub use views::ValueLabelsDialog;
@@ -98,6 +100,8 @@ pub struct SigmaApp {
     pub recent: Vec<PathBuf>,
     /// What waits for an answer about unsaved changes.
     pending: Option<backstage::Action>,
+    /// The procedure dialog open, if any.
+    pub procedure_dialog: Option<procedure::Dialog>,
     /// The ribbon tab shown.
     pub tab: Tab,
     /// Only the ribbon's tab row shows, for more room.
@@ -139,6 +143,7 @@ impl SigmaApp {
             value_labels_dialog: None,
             output_state: OutputState::default(),
             tab: Tab::default(),
+            procedure_dialog: None,
             backstage: None,
             recent: services.load_recent.as_ref().map(|load| load()).unwrap_or_default(),
             pending: None,
@@ -813,6 +818,7 @@ impl SigmaApp {
             Action::Theme(preference) => ctx.set_theme(preference),
             Action::SaveDashboard => self.save_dashboard_dialog(),
             Action::File => self.backstage = Some(backstage::Page::Home),
+            Action::Dialog(kind) => self.procedure_dialog = Some(procedure::Dialog::new(kind)),
             Action::Syntax(syntax) => self.run_edit(&syntax),
             Action::Search => self.search = if self.search.is_some() { None } else { Some(String::new()) },
             Action::ToggleAutoSave => {
@@ -1059,6 +1065,24 @@ impl SigmaApp {
     }
 
     fn dialogs(&mut self, ctx: &egui::Context) {
+        if let Some(dialog) = self.procedure_dialog.as_mut() {
+            match procedure::show(ctx, dialog, &self.session) {
+                procedure::Outcome::Open => {}
+                procedure::Outcome::Cancel => self.procedure_dialog = None,
+                procedure::Outcome::Run(syntax) => {
+                    self.procedure_dialog = None;
+                    self.run_edit(&syntax);
+                }
+                procedure::Outcome::Paste(syntax) => {
+                    self.procedure_dialog = None;
+                    if !self.syntax.is_empty() && !self.syntax.ends_with('\n') {
+                        self.syntax.push('\n');
+                    }
+                    self.syntax.push_str(&syntax);
+                    self.status = Some(Status::Info("Pasted into the syntax editor: Run runs it.".into()));
+                }
+            }
+        }
         let Some(dialog) = self.value_labels_dialog.as_mut() else { return };
         let Some(var) = self.session.dataset.variables().get(dialog.var) else {
             self.value_labels_dialog = None;

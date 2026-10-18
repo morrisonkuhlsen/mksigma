@@ -49,6 +49,10 @@ pub enum Icon {
     ChevronDown,
     House,
     Page,
+    /// Measurement levels, beside a variable's name.
+    Scale,
+    Ordinal,
+    Nominal,
     Info,
     Close,
     /// The LaTeX name typeset as LaTeX sets it (raised A, lowered E): the name, not the
@@ -299,6 +303,25 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, t: &Tokens) {
             poly(&[(6.8, 14.0), (6.8, 10.0), (9.2, 10.0), (9.2, 14.0)], Stroke::new(w, ink.color));
         }
         Icon::Page => page(ink.color),
+        Icon::Scale => {
+            // A ruler.
+            painter.rect_stroke(r(1.5, 5.0, 14.5, 11.0), 1.0 * s, Stroke::new(w, ink.color), egui::StrokeKind::Middle);
+            for (k, x) in [4.0, 6.5, 9.0, 11.5].iter().enumerate() {
+                let long = if k % 2 == 0 { 8.5 } else { 7.5 };
+                line((*x, 5.0), (*x, long), Stroke::new(w * 0.8, ink.color));
+            }
+        }
+        Icon::Ordinal => {
+            for (k, h) in [4.0f32, 7.0, 10.0].iter().enumerate() {
+                let x = 2.5 + 4.0 * k as f32;
+                painter.rect_filled(r(x, 13.5 - h, x + 3.0, 13.5), 0.5 * s, ink.color);
+            }
+        }
+        Icon::Nominal => {
+            for (x, y) in [(4.5, 5.0), (11.5, 5.0), (8.0, 11.5)] {
+                painter.circle_filled(p(x, y), 2.4 * s, ink.color);
+            }
+        }
         Icon::Info => {
             painter.circle_stroke(p(8.0, 8.0), 6.3 * s, Stroke::new(w, ink.color));
             line((8.0, 7.0), (8.0, 11.5), Stroke::new(w * 1.2, ink.color));
@@ -339,7 +362,7 @@ pub fn show(ui: &mut egui::Ui, icon: Icon, size: f32) -> egui::Response {
 
 /// For tests: every icon stays inside its square.
 #[cfg(test)]
-pub(crate) const ALL: [Icon; 44] = [
+pub(crate) const ALL: [Icon; 47] = [
     Icon::Sigma,
     Icon::Open,
     Icon::Save,
@@ -382,6 +405,9 @@ pub(crate) const ALL: [Icon; 44] = [
     Icon::ChevronDown,
     Icon::House,
     Icon::Page,
+    Icon::Scale,
+    Icon::Ordinal,
+    Icon::Nominal,
     Icon::Info,
     Icon::Close,
 ];

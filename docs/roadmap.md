@@ -60,6 +60,12 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   and Open list recent files (kept between runs in the user's configuration folder); Info shows
   the file, cases, variables, weight, steps and whether it is saved; Export has every export.
   Replacing data with unsaved changes asks first. Esc or Back returns.
+- Procedure dialogs — **done (first five)**: Descriptives, Frequencies, Crosstabs,
+  Independent-Samples T-Test and One-Way ANOVA open a dialog: the file's variables (with their
+  measurement level) on the left, the procedure's slots on the right (`>`/`<` or a double-click
+  move a variable; numeric-only slots refuse strings), options below; a t-test's groups start
+  as the grouping variable's first two values. OK runs the command, Paste puts it in the syntax
+  editor. To do: Correlate, Regression, Logistic, Nonparametric, Explore and the charts.
 - Editing — **done**: Variable View (name, label, value labels dialog, missing values,
   measurement level, format) turns every edit into syntax (`RENAME VARIABLES`, `VARIABLE LABELS`,
   `VALUE LABELS`, `MISSING VALUES`, `VARIABLE LEVEL`, `FORMATS`), which runs through the engine
@@ -173,6 +179,16 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   `get_output` (text, HTML, LaTeX), `export` (html, pdf, latex, sav, the interactive dashboard,
   or syntax that rebuilds the session) and `history`. One session per connection, through the
   same engine as the app.
+
+## Next: the calculation shown by hand (Σ)
+- A **Σ** button beside every table and chart: it opens the whole calculation as it would be
+  done by hand, in mathematical notation (LaTeX, rendered in the app and exportable): the
+  formulas from the public algorithm documentation, then each with the data's own numbers
+  substituted, every intermediate sum and step, down to the figures in the table. Audited and
+  complete: the steps come from the same engine run that produced the result (not recomputed
+  apart), so they always agree with it, and a reader can check every number with a calculator.
+  Weights, missing values and filters show where they enter. Start with DESCRIPTIVES,
+  FREQUENCIES, T-TEST and CORRELATIONS; large data shows the sums, with the terms on demand.
 
 ## Later
 - Multiple related tables (star-schema data model) and measures

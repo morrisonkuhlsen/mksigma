@@ -2,7 +2,7 @@
 //! touching the screen.
 //!
 //! `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav] [--variables] [--labels]
-//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--tab NAME] [--backstage]
+//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--tab NAME] [--backstage] [--dialog KIND [--dialog-vars 'SLOT:VAR...']]
 //!  [--size 1280x800] out.png` (`--disable` switches off applied step N, counting from 1, after
 //!  `--run`; `--select` cross-filters by category PART of Output item ITEM, both counting from 1:
 //!  a bar, bin or box, or a table row; `--pin` pins Output item ITEM to the dashboard and
@@ -20,6 +20,8 @@ fn main() -> Result<(), String> {
     let mut disable: Vec<usize> = Vec::new();
     let mut select = None;
     let mut pins: Vec<usize> = Vec::new();
+    let mut dialog = None;
+    let mut dialog_vars = String::new();
     let mut i = 0;
     while let Some(arg) = args.get(i) {
         match arg.as_str() {
@@ -51,6 +53,21 @@ fn main() -> Result<(), String> {
             "--dashboard" => app.output_state.dashboard = true,
             "--no-ribbon" => app.ribbon_collapsed = true,
             "--backstage" => app.backstage = Some(mksigma_ui_egui::BackstagePage::Home),
+            "--dialog" => {
+                i += 1;
+                use mksigma_ui_egui::ProcedureKind as K;
+                dialog = Some(match args.get(i).map(|t| t.to_ascii_lowercase()).as_deref() {
+                    Some("frequencies") => K::Frequencies,
+                    Some("crosstabs") => K::Crosstabs,
+                    Some("ttest") => K::TTest,
+                    Some("oneway") => K::Oneway,
+                    _ => K::Descriptives,
+                });
+            }
+            "--dialog-vars" => {
+                i += 1;
+                dialog_vars = args.get(i).cloned().unwrap_or_default();
+            }
             "--tab" => {
                 i += 1;
                 use mksigma_ui_egui::Tab;
@@ -79,6 +96,16 @@ fn main() -> Result<(), String> {
     }
     for step in disable {
         app.session.set_step_enabled(step, false).map_err(|e| e.to_string())?;
+    }
+    // `--dialog-vars "0:income 1:grupo"`: variables put in the dialog's slots.
+    if let Some(kind) = dialog {
+        let mut d = mksigma_ui_egui::ProcedureDialog::new(kind);
+        for pair in dialog_vars.split_whitespace() {
+            if let Some((slot, var)) = pair.split_once(':') {
+                d.add(&app.session, slot.parse().unwrap_or(0), var);
+            }
+        }
+        app.procedure_dialog = Some(d);
     }
     for item in pins {
         app.session.toggle_pin(item).map_err(|e| e.to_string())?;

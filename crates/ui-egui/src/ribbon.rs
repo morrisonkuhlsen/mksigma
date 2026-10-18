@@ -5,6 +5,7 @@
 use crate::View;
 use crate::icons::{self, Icon};
 use crate::output::ExportFormat;
+use crate::procedure::Kind;
 use crate::suggest::Procedure;
 use crate::theme::{self, Tokens};
 
@@ -50,6 +51,8 @@ pub(crate) enum Action {
     SaveDashboard,
     /// Show the File backstage.
     File,
+    /// Open a procedure's dialog.
+    Dialog(Kind),
     /// Run this syntax (a control that writes a command, such as the Output style's).
     Syntax(String),
 }
@@ -307,13 +310,14 @@ fn buttons(ui: &mut egui::Ui, tab: Tab, state: &State) -> Option<Action> {
             go(ui, Icon::Filter, "Select Cases", tip, true, false, suggest(Procedure::SelectCases));
         }
         Tab::Analyze => {
-            go(ui, Icon::Table, "Descriptives", analyze, true, false, suggest(Procedure::Descriptives));
-            go(ui, Icon::Frequencies, "Frequencies", analyze, true, false, suggest(Procedure::Frequencies));
+            let dialog = "Opens its dialog: pick the variables and options";
+            go(ui, Icon::Table, "Descriptives", dialog, true, false, Action::Dialog(Kind::Descriptives));
+            go(ui, Icon::Frequencies, "Frequencies", dialog, true, false, Action::Dialog(Kind::Frequencies));
             go(ui, Icon::Boxplot, "Explore", analyze, true, false, suggest(Procedure::Explore));
             divider(ui);
-            go(ui, Icon::Crosstabs, "Crosstabs", analyze, true, false, suggest(Procedure::Crosstabs));
-            go(ui, Icon::TTest, "T-Test", analyze, true, false, suggest(Procedure::TTest));
-            go(ui, Icon::Anova, "One-Way ANOVA", analyze, true, false, suggest(Procedure::Oneway));
+            go(ui, Icon::Crosstabs, "Crosstabs", dialog, true, false, Action::Dialog(Kind::Crosstabs));
+            go(ui, Icon::TTest, "T-Test", dialog, true, false, Action::Dialog(Kind::TTest));
+            go(ui, Icon::Anova, "One-Way ANOVA", dialog, true, false, Action::Dialog(Kind::Oneway));
             divider(ui);
             go(ui, Icon::Correlations, "Correlate", analyze, true, false, suggest(Procedure::Correlations));
             go(ui, Icon::Regression, "Regression", analyze, true, false, suggest(Procedure::Regression));
@@ -437,12 +441,12 @@ pub(crate) fn commands() -> Vec<(&'static str, Action)> {
         ("Compute Variable", Action::Suggest(P::Compute)),
         ("Recode", Action::Suggest(P::Recode)),
         ("Select Cases", Action::Suggest(P::SelectCases)),
-        ("Descriptives", Action::Suggest(P::Descriptives)),
-        ("Frequencies", Action::Suggest(P::Frequencies)),
+        ("Descriptives", Action::Dialog(Kind::Descriptives)),
+        ("Frequencies", Action::Dialog(Kind::Frequencies)),
         ("Explore", Action::Suggest(P::Explore)),
-        ("Crosstabs", Action::Suggest(P::Crosstabs)),
-        ("Independent-Samples T-Test", Action::Suggest(P::TTest)),
-        ("One-Way ANOVA", Action::Suggest(P::Oneway)),
+        ("Crosstabs", Action::Dialog(Kind::Crosstabs)),
+        ("Independent-Samples T-Test", Action::Dialog(Kind::TTest)),
+        ("One-Way ANOVA", Action::Dialog(Kind::Oneway)),
         ("Bivariate Correlations", Action::Suggest(P::Correlations)),
         ("Linear Regression", Action::Suggest(P::Regression)),
         ("Binary Logistic Regression", Action::Suggest(P::Logistic)),

@@ -525,18 +525,52 @@ fn the_analyze_tab_runs_a_procedure_and_pastes_its_syntax() {
     let mut h = harness(SigmaApp::default());
     h.get_by_label("Analyze").click();
     h.run_steps(3);
-    h.get_by_label("Descriptives").click();
+    // Procedures without a dialog yet run on suggested variables.
+    h.get_by_label("Correlate").click();
     h.run_steps(3);
-    assert!(shows(&h, "Descriptive Statistics"));
-    assert!(h.state().syntax.ends_with("\nDESCRIPTIVES VARIABLES=age income score."));
-    // The sample has no categorical variable: Crosstabs is a template to complete, not run.
-    h.get_by_label("Crosstabs").click();
+    assert!(shows(&h, "Correlations"));
+    assert!(h.state().syntax.ends_with("\nCORRELATIONS /VARIABLES=age income score /PRINT=TWOTAIL NOSIG."));
+    // The sample has no 0/1 variable: Logistic is a template to complete, not run.
+    h.get_by_label("Logistic").click();
     h.run_steps(3);
-    assert!(h.state().syntax.ends_with("CROSSTABS /TABLES=row BY column /CELLS=COUNT ROW /STATISTICS=CHISQ."));
+    assert!(h.state().syntax.ends_with("LOGISTIC REGRESSION VARIABLES outcome /METHOD=ENTER covariate1 covariate2."));
     assert!(matches!(&h.state().status, Some(Status::Info(s)) if s.contains("placeholder")));
     h.get_by_label("Variable View").click();
     h.run_steps(3);
     assert_eq!(h.state().view, View::Variables);
+}
+
+#[test]
+fn a_procedure_dialog_builds_and_runs_the_command() {
+    let mut h = harness(SigmaApp::default());
+    h.get_by_label("Analyze").click();
+    h.run_steps(3);
+    h.get_by_label("Descriptives").click();
+    h.run_steps(3);
+    assert!(h.state().procedure_dialog.is_some());
+    // income from the file's list (the dialog's, not Data View's header) into Variables.
+    h.get_all_by_label("income").last().unwrap().click();
+    h.run_steps(3);
+    h.get_by_label(">").click();
+    h.run_steps(3);
+    assert_eq!(h.state().procedure_dialog.as_ref().unwrap().slots[0].vars, ["income"]);
+    h.get_by_label("Paste").click();
+    h.run_steps(3);
+    assert!(h.state().procedure_dialog.is_none());
+    assert!(h.state().syntax.ends_with("\nDESCRIPTIVES VARIABLES=income."), "Paste writes, doesn't run");
+    assert!(!shows(&h, "Descriptive Statistics"));
+
+    // OK runs it.
+    h.get_by_label("Descriptives").click();
+    h.run_steps(3);
+    h.get_all_by_label("score").last().unwrap().click();
+    h.run_steps(3);
+    h.get_by_label(">").click();
+    h.run_steps(3);
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    assert!(shows(&h, "Descriptive Statistics") && shows(&h, "Test score"));
+    assert!(h.state().session.journal.iter().any(|j| j == "DESCRIPTIVES VARIABLES=score."));
 }
 
 #[test]
@@ -569,7 +603,9 @@ fn search_finds_commands_and_zoom_steps() {
     h.get_by_label("Descriptives").click();
     h.run_steps(3);
     assert!(h.state().search.is_none());
-    assert!(shows(&h, "Descriptive Statistics"));
+    assert!(h.state().procedure_dialog.is_some(), "the command opens its dialog");
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
 
     h.get_by_label("Zoom In").click();
     h.run_steps(3);

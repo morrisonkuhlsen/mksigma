@@ -1,0 +1,506 @@
+//! Procedure dialogs, as in SPSS: the file's variables on the left, the procedure's slots on the
+//! right (Variables, Grouping variable, Factor...), options below. OK runs the command the dialog
+//! builds and Paste puts it in the syntax editor; either way the command is syntax, in the
+//! History. The dialog only builds text: the session runs it.
+
+use mksigma_engine::Session;
+use mksigma_engine::core::{Measure, Value, VarType, Variable};
+use mksigma_engine::quote;
+
+use crate::icons::{self, Icon};
+use crate::theme::Tokens;
+
+/// The procedures with a dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Descriptives,
+    Frequencies,
+    Crosstabs,
+    TTest,
+    Oneway,
+}
+
+impl Kind {
+    fn title(self) -> &'static str {
+        match self {
+            Kind::Descriptives => "Descriptives",
+            Kind::Frequencies => "Frequencies",
+            Kind::Crosstabs => "Crosstabs",
+            Kind::TTest => "Independent-Samples T-Test",
+            Kind::Oneway => "One-Way ANOVA",
+        }
+    }
+}
+
+/// A list of variables the procedure takes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Slot {
+    pub name: &'static str,
+    pub vars: Vec<String>,
+    /// Takes one variable: another replaces it.
+    pub single: bool,
+    /// Takes numeric variables only.
+    pub numeric: bool,
+}
+
+impl Slot {
+    fn new(name: &'static str, single: bool, numeric: bool) -> Self {
+        Self { name, vars: Vec::new(), single, numeric }
+    }
+}
+
+/// A dialog's state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Dialog {
+    pub kind: Kind,
+    pub slots: Vec<Slot>,
+    /// Options, by name (the `FREQUENCIES` statistics, `CROSSTABS` cells, post hoc tests...).
+    pub checks: Vec<(&'static str, bool)>,
+    /// The two groups of a t-test, as typed.
+    pub groups: (String, String),
+    /// Confidence level in percent, where the procedure has one.
+    pub confidence: f64,
+    /// The variable picked in the file's list, then in a slot.
+    picked: Option<String>,
+    picked_in: Option<(usize, String)>,
+}
+
+/// What the dialog's buttons asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Outcome {
+    Open,
+    Cancel,
+    /// Run this syntax.
+    Run(String),
+    /// Put this syntax in the editor.
+    Paste(String),
+}
+
+impl Dialog {
+    pub fn new(kind: Kind) -> Self {
+        let (slots, checks): (Vec<Slot>, Vec<(&'static str, bool)>) = match kind {
+            Kind::Descriptives => (vec![Slot::new("Variables", false, true)], vec![]),
+            Kind::Frequencies => (
+                vec![Slot::new("Variables", false, false)],
+                vec![
+                    ("Frequency tables", true),
+                    ("Mean", false),
+                    ("Std. deviation", false),
+                    ("Minimum", false),
+                    ("Maximum", false),
+                    ("Bar charts", false),
+                    ("Histograms", false),
+                ],
+            ),
+            Kind::Crosstabs => (
+                vec![Slot::new("Rows", false, false), Slot::new("Columns", false, false)],
+                vec![
+                    ("Counts", true),
+                    ("Expected", false),
+                    ("Row percentages", false),
+                    ("Column percentages", false),
+                    ("Total percentages", false),
+                    ("Chi-square", true),
+                ],
+            ),
+            Kind::TTest => (vec![Slot::new("Test variables", false, true), Slot::new("Grouping variable", true, false)], vec![]),
+            Kind::Oneway => (
+                vec![Slot::new("Dependent list", false, true), Slot::new("Factor", true, true)],
+                vec![("Descriptives", true), ("Homogeneity of variances", false), ("Tukey", false), ("Bonferroni", false)],
+            ),
+        };
+        Self { kind, slots, checks, groups: (String::new(), String::new()), confidence: 95.0, picked: None, picked_in: None }
+    }
+
+    fn check(&self, name: &str) -> bool {
+        self.checks.iter().any(|(n, on)| *n == name && *on)
+    }
+
+    fn used(&self, name: &str) -> bool {
+        self.slots.iter().any(|s| s.vars.iter().any(|v| v == name))
+    }
+
+    /// Puts `var` in slot `slot` if it fits; a single slot gives back what it held. On a
+    /// t-test's grouping variable, the groups start as its first two values.
+    pub fn add(&mut self, session: &Session, slot: usize, var: &str) -> bool {
+        let Some((_, v)) = session.dataset.variable(var) else { return false };
+        let numeric = v.var_type == VarType::Numeric;
+        let Some(target) = self.slots.get_mut(slot) else { return false };
+        if target.numeric && !numeric {
+            return false;
+        }
+        if target.single {
+            target.vars.clear();
+        }
+        if !target.vars.iter().any(|x| x == var) {
+            target.vars.push(var.to_string());
+        }
+        if self.kind == Kind::TTest && slot == 1 {
+            let values = session.values_of(var, 2);
+            let text = |v: Option<&(Value, String, f64)>| match v.map(|(v, _, _)| v) {
+                Some(Value::Num(x)) => x.to_string(),
+                Some(Value::Str(s)) => s.clone(),
+                _ => String::new(),
+            };
+            self.groups = (text(values.first()), text(values.get(1)));
+        }
+        true
+    }
+
+    pub fn remove(&mut self, slot: usize, var: &str) {
+        if let Some(s) = self.slots.get_mut(slot) {
+            s.vars.retain(|v| v != var);
+        }
+    }
+
+    /// The command, or what is missing for it.
+    pub fn syntax(&self, session: &Session) -> Result<String, String> {
+        let list = |k: usize| self.slots.get(k).map(|s| s.vars.join(" ")).unwrap_or_default();
+        let need = |k: usize| {
+            let s = self.slots.get(k);
+            if s.is_some_and(|s| s.vars.is_empty()) { Err(format!("Put a variable in {}.", s.map_or("", |s| s.name))) } else { Ok(list(k)) }
+        };
+        let ci = if (self.confidence - 95.0).abs() < 1e-9 { String::new() } else { format!(" /CRITERIA=CI({})", self.confidence / 100.0) };
+        Ok(match self.kind {
+            Kind::Descriptives => format!("DESCRIPTIVES VARIABLES={}.", need(0)?),
+            Kind::Frequencies => {
+                let mut s = format!("FREQUENCIES VARIABLES={}", need(0)?);
+                if !self.check("Frequency tables") {
+                    s.push_str(" /FORMAT=NOTABLE");
+                }
+                let stats: Vec<&str> = [("Mean", "MEAN"), ("Std. deviation", "STDDEV"), ("Minimum", "MINIMUM"), ("Maximum", "MAXIMUM")]
+                    .iter()
+                    .filter(|(n, _)| self.check(n))
+                    .map(|(_, k)| *k)
+                    .collect();
+                if !stats.is_empty() {
+                    s.push_str(&format!(" /STATISTICS={}", stats.join(" ")));
+                }
+                if self.check("Bar charts") {
+                    s.push_str(" /BARCHART");
+                }
+                if self.check("Histograms") {
+                    s.push_str(" /HISTOGRAM");
+                }
+                s + "."
+            }
+            Kind::Crosstabs => {
+                let (rows, columns) = (need(0)?, need(1)?);
+                let cells: Vec<&str> = [
+                    ("Counts", "COUNT"),
+                    ("Expected", "EXPECTED"),
+                    ("Row percentages", "ROW"),
+                    ("Column percentages", "COLUMN"),
+                    ("Total percentages", "TOTAL"),
+                ]
+                .iter()
+                .filter(|(n, _)| self.check(n))
+                .map(|(_, k)| *k)
+                .collect();
+                let mut s = format!("CROSSTABS /TABLES={rows} BY {columns}");
+                if !cells.is_empty() {
+                    s.push_str(&format!(" /CELLS={}", cells.join(" ")));
+                }
+                if self.check("Chi-square") {
+                    s.push_str(" /STATISTICS=CHISQ");
+                }
+                s + "."
+            }
+            Kind::TTest => {
+                let (tests, group) = (need(0)?, need(1)?);
+                let (a, b) = (self.groups.0.trim(), self.groups.1.trim());
+                if a.is_empty() || b.is_empty() {
+                    return Err("Define the two groups.".into());
+                }
+                // A string grouping variable takes quoted values.
+                let string = session.dataset.variable(&group).is_some_and(|(_, v)| v.var_type != VarType::Numeric);
+                let value = |x: &str| -> Result<String, String> {
+                    if string {
+                        Ok(quote(x))
+                    } else {
+                        x.parse::<f64>().map(|n| n.to_string()).map_err(|_| format!("{x} is not a number, and {group} is numeric."))
+                    }
+                };
+                format!("T-TEST GROUPS={group}({} {}) /VARIABLES={tests}{ci}.", value(a)?, value(b)?)
+            }
+            Kind::Oneway => {
+                let (deps, factor) = (need(0)?, need(1)?);
+                let stats: Vec<&str> = [("Descriptives", "DESCRIPTIVES"), ("Homogeneity of variances", "HOMOGENEITY")]
+                    .iter()
+                    .filter(|(n, _)| self.check(n))
+                    .map(|(_, k)| *k)
+                    .collect();
+                let posthoc: Vec<&str> =
+                    [("Tukey", "TUKEY"), ("Bonferroni", "BONFERRONI")].iter().filter(|(n, _)| self.check(n)).map(|(_, k)| *k).collect();
+                let mut s = format!("ONEWAY {deps} BY {factor}");
+                if !stats.is_empty() {
+                    s.push_str(&format!(" /STATISTICS={}", stats.join(" ")));
+                }
+                if !posthoc.is_empty() {
+                    s.push_str(&format!(" /POSTHOC={} ALPHA(0.05)", posthoc.join(" ")));
+                }
+                s + "."
+            }
+        })
+    }
+}
+
+fn level_icon(var: &Variable) -> Icon {
+    match var.measure {
+        Measure::Scale => Icon::Scale,
+        Measure::Ordinal => Icon::Ordinal,
+        Measure::Nominal => Icon::Nominal,
+    }
+}
+
+/// A variable in a list: its level's icon and its name (label on hover). Returns (clicked,
+/// double-clicked).
+fn row(ui: &mut egui::Ui, var: &Variable, on: bool, enabled: bool) -> (bool, bool) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, enabled, on, &var.name));
+    if on {
+        ui.painter().rect_filled(rect, 4.0, t.accent_soft);
+    } else if response.hovered() && enabled {
+        ui.painter().rect_filled(rect, 4.0, t.hover);
+    }
+    let mut painter = ui.painter().clone();
+    if !enabled {
+        painter.set_opacity(0.4);
+    }
+    icons::paint(
+        &painter,
+        egui::Rect::from_center_size(egui::pos2(rect.left() + 12.0, rect.center().y), egui::vec2(13.0, 13.0)),
+        level_icon(var),
+        &t,
+    );
+    painter.text(egui::pos2(rect.left() + 26.0, rect.center().y), egui::Align2::LEFT_CENTER, &var.name, egui::FontId::proportional(13.0), t.text);
+    let tip = var.label.as_deref().unwrap_or(&var.name);
+    let response = response.on_hover_text(tip);
+    (response.clicked(), response.double_clicked())
+}
+
+pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) -> Outcome {
+    let t = Tokens::get(ctx);
+    let mut outcome = Outcome::Open;
+    let mut error = None;
+    egui::Window::new(dialog.kind.title())
+        .collapsible(false)
+        .resizable(false)
+        .default_width(560.0)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            ui.horizontal_top(|ui| {
+                // The file's variables, those not in a slot.
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("Variables").color(t.text_dim));
+                    egui::Frame::new()
+                        .fill(t.input_bg)
+                        .stroke(egui::Stroke::new(1.0, t.border))
+                        .corner_radius(6)
+                        .inner_margin(egui::Margin::same(4))
+                        .show(ui, |ui| {
+                            ui.set_width(200.0);
+                            ui.set_min_height(240.0);
+                            egui::ScrollArea::vertical().id_salt("dialog-source").max_height(240.0).show(ui, |ui| {
+                                for var in session.dataset.variables() {
+                                    if dialog.used(&var.name) {
+                                        continue;
+                                    }
+                                    let fits = dialog.slots.iter().any(|s| !s.numeric || var.var_type == VarType::Numeric);
+                                    let on = dialog.picked.as_deref() == Some(var.name.as_str());
+                                    let (clicked, double) = row(ui, var, on, fits);
+                                    if double {
+                                        // Into the first slot that takes it.
+                                        let name = var.name.clone();
+                                        if let Some(k) = (0..dialog.slots.len())
+                                            .find(|k| dialog.slots.get(*k).is_some_and(|s| !s.numeric || var.var_type == VarType::Numeric))
+                                        {
+                                            dialog.add(session, k, &name);
+                                        }
+                                        dialog.picked = None;
+                                    } else if clicked {
+                                        dialog.picked = Some(var.name.clone());
+                                        dialog.picked_in = None;
+                                    }
+                                }
+                            });
+                        });
+                });
+                ui.add_space(6.0);
+                // The slots, each with its arrow.
+                ui.vertical(|ui| {
+                    for k in 0..dialog.slots.len() {
+                        let Some(slot) = dialog.slots.get(k).cloned() else { continue };
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.add_space(22.0);
+                                let back = dialog.picked_in.as_ref().is_some_and(|(s, _)| *s == k);
+                                let (label, tip) =
+                                    if back { ("<", format!("Take it out of {}", slot.name)) } else { (">", format!("Put it in {}", slot.name)) };
+                                let button = egui::Button::new(label).min_size(egui::vec2(28.0, 24.0));
+                                if ui.add(button).on_hover_text(tip).clicked() {
+                                    if let Some((s, name)) = dialog.picked_in.take().filter(|(s, _)| *s == k) {
+                                        dialog.remove(s, &name);
+                                    } else if let Some(name) = dialog.picked.take() {
+                                        dialog.add(session, k, &name);
+                                    }
+                                }
+                            });
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(slot.name).color(t.text_dim));
+                                let height = if slot.single { 26.0 } else { 90.0 };
+                                egui::Frame::new()
+                                    .fill(t.input_bg)
+                                    .stroke(egui::Stroke::new(1.0, t.border))
+                                    .corner_radius(6)
+                                    .inner_margin(egui::Margin::same(4))
+                                    .show(ui, |ui| {
+                                        ui.set_width(220.0);
+                                        ui.set_min_height(height);
+                                        for name in &slot.vars {
+                                            let Some((_, var)) = session.dataset.variable(name) else { continue };
+                                            let on = dialog.picked_in.as_ref().is_some_and(|(s, n)| *s == k && n == name);
+                                            let (clicked, double) = row(ui, var, on, true);
+                                            if double {
+                                                dialog.remove(k, name);
+                                                dialog.picked_in = None;
+                                            } else if clicked {
+                                                dialog.picked_in = Some((k, name.clone()));
+                                                dialog.picked = None;
+                                            }
+                                        }
+                                    });
+                            });
+                        });
+                        ui.add_space(4.0);
+                    }
+                    if dialog.kind == Kind::TTest {
+                        ui.horizontal(|ui| {
+                            ui.label("Group 1");
+                            ui.add(egui::TextEdit::singleline(&mut dialog.groups.0).desired_width(60.0));
+                            ui.label("Group 2");
+                            ui.add(egui::TextEdit::singleline(&mut dialog.groups.1).desired_width(60.0));
+                        });
+                    }
+                });
+            });
+            if !dialog.checks.is_empty() || dialog.kind == Kind::TTest {
+                ui.add_space(8.0);
+                ui.separator();
+                ui.horizontal_wrapped(|ui| {
+                    for (name, on) in &mut dialog.checks {
+                        ui.checkbox(on, *name);
+                    }
+                    if dialog.kind == Kind::TTest {
+                        ui.label("Confidence interval");
+                        ui.add(egui::DragValue::new(&mut dialog.confidence).range(50.0..=99.9).speed(0.5).suffix(" %"));
+                    }
+                });
+            }
+            ui.add_space(8.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                let built = dialog.syntax(session);
+                if let Err(e) = &built {
+                    error = Some(e.clone());
+                }
+                ui.add_enabled_ui(built.is_ok(), |ui| {
+                    let ok = egui::Button::new(egui::RichText::new("OK").color(egui::Color32::WHITE)).fill(t.accent).min_size(egui::vec2(64.0, 26.0));
+                    let run = ui.add(ok).clicked();
+                    let paste = ui
+                        .add(egui::Button::new("Paste").min_size(egui::vec2(64.0, 26.0)))
+                        .on_hover_text("Put the command in the syntax editor")
+                        .clicked();
+                    if let Ok(s) = &built {
+                        if run {
+                            outcome = Outcome::Run(s.clone());
+                        } else if paste {
+                            outcome = Outcome::Paste(s.clone());
+                        }
+                    }
+                });
+                if ui.button("Reset").clicked() {
+                    *dialog = Dialog::new(dialog.kind);
+                }
+                if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    outcome = Outcome::Cancel;
+                }
+                if let Some(e) = &error {
+                    ui.label(egui::RichText::new(e).color(t.text_dim));
+                }
+            });
+        });
+    outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session() -> Session {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("RECODE age (LO THRU 30 = 1) (ELSE = 2) INTO grupo.\nSTRING uf (A2).\nCOMPUTE x = 1.").unwrap();
+        s
+    }
+
+    #[test]
+    fn dialogs_build_runnable_syntax() {
+        let mut s = session();
+        let mut d = Dialog::new(Kind::Descriptives);
+        assert_eq!(d.syntax(&s), Err("Put a variable in Variables.".into()));
+        assert!(!d.add(&s, 0, "uf"), "Descriptives takes numbers");
+        assert!(d.add(&s, 0, "age") && d.add(&s, 0, "score") && d.add(&s, 0, "age"));
+        assert_eq!(d.syntax(&s).unwrap(), "DESCRIPTIVES VARIABLES=age score.");
+
+        let mut d = Dialog::new(Kind::TTest);
+        d.add(&s, 0, "income");
+        d.add(&s, 1, "grupo");
+        assert_eq!(d.groups, ("1".to_string(), "2".to_string()), "the grouping variable's first two values");
+        d.confidence = 90.0;
+        assert_eq!(d.syntax(&s).unwrap(), "T-TEST GROUPS=grupo(1 2) /VARIABLES=income /CRITERIA=CI(0.9).");
+        d.groups.1 = "dois".into();
+        assert!(d.syntax(&s).is_err());
+
+        let mut d = Dialog::new(Kind::Oneway);
+        d.add(&s, 0, "score");
+        d.add(&s, 1, "grupo");
+        d.add(&s, 1, "age");
+        assert_eq!(d.slots[1].vars, ["age"], "a single slot keeps the last");
+        d.remove(1, "age");
+        d.add(&s, 1, "grupo");
+        for c in &mut d.checks {
+            c.1 = c.0 != "Bonferroni";
+        }
+        assert_eq!(d.syntax(&s).unwrap(), "ONEWAY score BY grupo /STATISTICS=DESCRIPTIVES HOMOGENEITY /POSTHOC=TUKEY ALPHA(0.05).");
+
+        let mut d = Dialog::new(Kind::Crosstabs);
+        d.add(&s, 0, "grupo");
+        d.add(&s, 1, "x");
+        assert_eq!(d.syntax(&s).unwrap(), "CROSSTABS /TABLES=grupo BY x /CELLS=COUNT /STATISTICS=CHISQ.");
+
+        let mut d = Dialog::new(Kind::Frequencies);
+        d.add(&s, 0, "grupo");
+        for c in &mut d.checks {
+            c.1 = matches!(c.0, "Mean" | "Bar charts");
+        }
+        assert_eq!(d.syntax(&s).unwrap(), "FREQUENCIES VARIABLES=grupo /FORMAT=NOTABLE /STATISTICS=MEAN /BARCHART.");
+
+        // Every command a dialog builds runs.
+        for kind in [Kind::Descriptives, Kind::Frequencies, Kind::Crosstabs, Kind::TTest, Kind::Oneway] {
+            let mut d = Dialog::new(kind);
+            let (first, second) = match kind {
+                Kind::Crosstabs => ("grupo", "x"),
+                Kind::Frequencies | Kind::Descriptives => ("score", ""),
+                _ => ("score", "grupo"),
+            };
+            d.add(&s, 0, first);
+            if !second.is_empty() {
+                d.add(&s, 1, second);
+            }
+            let syntax = d.syntax(&s).unwrap();
+            s.run_syntax(&syntax).unwrap_or_else(|e| panic!("{syntax}: {e}"));
+        }
+    }
+}
