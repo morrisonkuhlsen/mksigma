@@ -9,6 +9,7 @@ mod dictionary;
 mod expr;
 mod lexer;
 mod procedures;
+mod slice;
 mod transform;
 
 pub use data::GetData;
@@ -16,12 +17,15 @@ pub use dictionary::{Level, Literal, MissingSpec, NewVariables, ValueLabelList};
 pub use expr::{BinOp, Expr};
 use lexer::Token;
 pub use procedures::{BarStat, CrosstabCells, GraphSpec, NparSpec, PostHocTest, TTestSpec};
+pub use slice::SliceSpec;
 pub use transform::{RecodeFrom, RecodeGroup, RecodeSpec, RecodeTo};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     /// `GET DATA /TYPE=TXT /FILE='...'`: a new active dataset from delimited text.
     GetData(GetData),
+    /// `SLICE var (values)`, `SLICE var (low THRU high)`, `SLICE var OFF`; `None` is `SLICE OFF`.
+    Slice(Option<(String, SliceSpec)>),
     /// `DESCRIPTIVES [VARIABLES=] var...`
     Descriptives { variables: Vec<String> },
     /// `DISPLAY DICTIONARY`
@@ -247,6 +251,9 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     }
     if is_keyword(name, "LOGISTIC") && second("REGRESSION") {
         return procedures::logistic(rest.get(1..).unwrap_or_default());
+    }
+    if name.eq_ignore_ascii_case("SLICE") {
+        return slice::slice(rest);
     }
     if is_keyword(name, "GET") && second("DATA") {
         return data::get_data(rest.get(1..).unwrap_or_default());

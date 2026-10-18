@@ -156,8 +156,8 @@ impl SigmaApp {
     pub fn export(&mut self, path: &Path, format: ExportFormat) {
         let mut title = self.file_name.as_deref().map_or_else(|| "MK Sigma Output".to_string(), |f| format!("{f} — Output"));
         // A filtered Output says so, or a reader would take its items for all the cases.
-        if let Some(category) = self.session.cross_filter() {
-            title.push_str(&format!(" (filtered by {})", category.label));
+        if let Some(filters) = self.session.filter_description() {
+            title.push_str(&format!(" (filtered by {filters})"));
         }
         let bytes = match format {
             ExportFormat::Html => self.session.output.to_html(&title).into_bytes(),
@@ -522,6 +522,10 @@ impl SigmaApp {
                     self.status = Some(Status::Error(e.to_string()));
                 }
             }
+            output::OutputAction::Syntax(syntax) => {
+                self.output_state.transposed.clear();
+                self.run_edit(&syntax);
+            }
             output::OutputAction::ClearFilter => {
                 self.output_state.transposed.clear();
                 self.session.clear_cross_filter();
@@ -854,9 +858,9 @@ impl SigmaApp {
             }
             ui.add_space(16.0);
             ui.label(egui::RichText::new(facts.join("   ·   ")).color(t.text_dim).size(12.0));
-            if let Some(category) = self.session.cross_filter() {
+            if let Some(filters) = self.session.filter_description() {
                 ui.add_space(12.0);
-                ui.label(egui::RichText::new(format!("Filtered by {}", category.label)).color(t.accent).size(12.0));
+                ui.label(egui::RichText::new(format!("Filtered by {filters}")).color(t.accent).size(12.0));
             }
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.add(egui::Label::new(egui::RichText::new(text).color(color).size(12.0)).truncate());

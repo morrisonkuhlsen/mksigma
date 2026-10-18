@@ -604,3 +604,29 @@ fn opening_a_csv_reads_it_through_get_data() {
     h.state_mut().save();
     assert!(suggested.borrow().ends_with("turma.sav"), "saved as a system file beside it: {}", suggested.borrow());
 }
+
+#[test]
+fn a_slicer_picked_in_the_output_filters_every_item() {
+    let mut app = SigmaApp::new(Services::default());
+    app.session
+        .run_syntax("RECODE age (LO THRU 30 = 1) (ELSE = 2) INTO grupo.\nVALUE LABELS grupo 1 'Jovem' 2 'Adulto'.\nDESCRIPTIVES score.")
+        .unwrap();
+    let mut h = harness(app);
+    h.get_by_label("+ Slicer").click();
+    h.run_steps(3);
+    // The menu's grupo, not Data View's column header.
+    h.get_all_by_label("grupo").last().unwrap().click();
+    h.run_steps(3);
+    h.get_by_label("grupo: all").click();
+    h.run_steps(3);
+    h.get_by_label("Jovem   (3)").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.slicers().len(), 1);
+    assert!(h.state().session.journal.iter().any(|j| j == "SLICE grupo (1)."), "a slicer is syntax");
+    assert!(shows(&h, "72.67"), "DESCRIPTIVES on the three Jovem");
+    assert!(shows(&h, "grupo: Jovem"));
+    h.get_by_label("Remove slicer").click();
+    h.run_steps(3);
+    assert!(h.state().session.slicers().is_empty());
+    assert!(shows(&h, "72.38"));
+}

@@ -3,8 +3,11 @@
 //! that produced those items run again on the filtered cases; the command whose item was
 //! selected keeps its full view, so the selection can be changed from there. Nothing here
 //! changes the data: the filter is a view, not an applied step.
+//!
+//! Slicers (`SLICE`) filter every item, the selected one included: the cases they keep are what
+//! the analyses, and then the cross-filter, start from.
 
-use mksigma_core::{Dataset, Value};
+use mksigma_core::{Dataset, Value, Variable};
 use mksigma_output::{Cases, Category, Item};
 use mksigma_syntax::Command;
 
@@ -25,25 +28,103 @@ pub(crate) struct CrossFilter {
     pub source: usize,
 }
 
-/// The cases of `ds` in `category`, weights and dictionary unchanged.
-pub(crate) fn subset(ds: &Dataset, category: &Category) -> Result<Dataset, EngineError> {
-    let (index, var) = ds.variable(&category.variable).ok_or_else(|| EngineError::UnknownVariable(category.variable.clone()))?;
+/// Which values of its variable a slicer keeps.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Selection {
+    Values(Vec<Value>),
+    /// `None` ends are open.
+    Range {
+        low: Option<f64>,
+        high: Option<f64>,
+    },
+}
+
+/// A slicer: the cases whose `variable` has a value in `selection`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Slicer {
+    pub variable: String,
+    pub selection: Selection,
+}
+
+impl Slicer {
+    fn keeps(&self, var: &Variable, v: &Value) -> bool {
+        if var.is_missing(v) {
+            return false;
+        }
+        match (&self.selection, v) {
+            (Selection::Values(values), v) => values.contains(v),
+            (Selection::Range { low, high }, Value::Num(x)) => low.is_none_or(|l| *x >= l) && high.is_none_or(|h| *x <= h),
+            _ => false,
+        }
+    }
+
+    /// How the slicer reads in the Output and exports: `grupo: Jovem, Adulto`, `renda 2000 to
+    /// 5000`. Plain text that every export can print.
+    pub fn describe(&self, ds: &Dataset) -> String {
+        let var = ds.variable(&self.variable).map(|(_, v)| v);
+        let name = var.map_or(self.variable.as_str(), |v| v.name.as_str());
+        let show = |v: &Value| {
+            var.map_or_else(
+                || mksigma_core::Format::new(mksigma_core::FormatKind::F, 8, 2).render(v),
+                |var| var.value_label(v).map_or_else(|| var.format.render(v), str::to_string),
+            )
+        };
+        match &self.selection {
+            Selection::Values(values) => format!("{name}: {}", values.iter().map(show).collect::<Vec<_>>().join(", ")),
+            Selection::Range { low: Some(l), high: Some(h) } => format!("{name} {} to {}", show(&Value::Num(*l)), show(&Value::Num(*h))),
+            Selection::Range { low: Some(l), high: None } => format!("{name} from {}", show(&Value::Num(*l))),
+            Selection::Range { low: None, high: Some(h) } => format!("{name} up to {}", show(&Value::Num(*h))),
+            Selection::Range { low: None, high: None } => format!("{name}: any valid value"),
+        }
+    }
+
+    /// The `SLICE` command that sets it.
+    pub fn syntax(&self) -> String {
+        let number = |x: f64| x.to_string();
+        let inner = match &self.selection {
+            Selection::Values(values) => values
+                .iter()
+                .map(|v| match v {
+                    Value::Num(x) => number(*x),
+                    Value::Str(s) => mksigma_syntax::quote(s),
+                    Value::SysMis => ".".to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+            Selection::Range { low, high } => format!("{} THRU {}", low.map_or("LO".to_string(), number), high.map_or("HI".to_string(), number)),
+        };
+        format!("SLICE {} ({inner}).", self.variable)
+    }
+}
+
+/// The cases of `ds` whose `variable` value `keep` accepts, weights and dictionary unchanged.
+fn retain(ds: &Dataset, variable: &str, keep: impl Fn(&Variable, &Value) -> bool) -> Result<Dataset, EngineError> {
+    let (index, var) = ds.variable(variable).ok_or_else(|| EngineError::UnknownVariable(variable.to_string()))?;
     let column = ds.column(index).unwrap_or_default();
-    let outside: Vec<usize> = column
-        .iter()
-        .enumerate()
-        .filter(|(_, v)| {
-            var.is_missing(v)
-                || match (v, &category.cases) {
-                    (Value::Num(x), cases) => !cases.contains_num(*x),
-                    (Value::Str(s), Cases::Str(wanted)) => s != wanted,
-                    _ => true,
-                }
-        })
-        .map(|(i, _)| i)
-        .collect();
+    let outside: Vec<usize> = column.iter().enumerate().filter(|(_, v)| !keep(var, v)).map(|(i, _)| i).collect();
     let mut out = ds.clone();
     out.remove_cases(&outside)?;
+    Ok(out)
+}
+
+/// The cases of `ds` in `category`.
+pub(crate) fn subset(ds: &Dataset, category: &Category) -> Result<Dataset, EngineError> {
+    retain(ds, &category.variable, |var, v| {
+        !var.is_missing(v)
+            && match (v, &category.cases) {
+                (Value::Num(x), cases) => cases.contains_num(*x),
+                (Value::Str(s), Cases::Str(wanted)) => s == wanted,
+                _ => false,
+            }
+    })
+}
+
+/// The cases every slicer keeps.
+pub(crate) fn slice(ds: &Dataset, slicers: &[Slicer]) -> Result<Dataset, EngineError> {
+    let mut out = ds.clone();
+    for slicer in slicers {
+        out = retain(&out, &slicer.variable, |var, v| slicer.keeps(var, v))?;
+    }
     Ok(out)
 }
 

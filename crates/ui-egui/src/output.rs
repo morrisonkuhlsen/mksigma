@@ -3,17 +3,22 @@
 //! HTML export uses, so both look alike. Bars, bins, boxes and the value of a frequency table's
 //! row can be clicked to cross-filter the other items; the engine runs them again.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use mksigma_engine::Session;
+use mksigma_engine::core::{Measure, Value, VarType};
 use mksigma_engine::output::chart::{self, Anchor, Shape, Stroke, TextSize};
 use mksigma_engine::output::{Category, Cell, Chart, Item, Table};
+use mksigma_engine::{Selection, Session, Slicer};
 
 /// What the viewer remembers between frames.
 #[derive(Debug, Default)]
 pub struct OutputState {
     /// Items shown transposed, by index.
     pub transposed: HashSet<usize>,
+    /// Slicers added in the viewer whose values aren't picked yet, by variable.
+    pub pending: Vec<String>,
+    /// A range being typed in a slicer, by variable, until Apply.
+    pub ranges: HashMap<String, (f64, f64)>,
 }
 
 /// What the user asked for in the viewer this frame.
@@ -22,6 +27,8 @@ pub(crate) enum OutputAction {
     Clear,
     /// A category of an item was clicked.
     Select(usize, Category),
+    /// A slicer changed: the `SLICE` command to run.
+    Syntax(String),
     ClearFilter,
 }
 
@@ -48,6 +55,9 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
             });
         }
     });
+    if let Some(syntax) = slicers(ui, session, state) {
+        action = OutputAction::Syntax(syntax);
+    }
     let selected = session.cross_filter();
     if let Some(category) = selected {
         ui.horizontal(|ui| {
@@ -102,6 +112,109 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
         }
     });
     action
+}
+
+/// The slicer strip: a chip per slicer (click it to pick values or a range) and a button to
+/// add one. Returns the `SLICE` command a change asks for.
+fn slicers(ui: &mut egui::Ui, session: &Session, state: &mut OutputState) -> Option<String> {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let ds = &session.dataset;
+    state.pending.retain(|v| ds.variable(v).is_some() && !session.slicers().iter().any(|s| &s.variable == v));
+    let mut syntax = None;
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        crate::icons::show(ui, crate::icons::Icon::Filter, 14.0);
+        ui.label(egui::RichText::new("Slicers").color(t.text_dim));
+        let names: Vec<String> = session.slicers().iter().map(|s| s.variable.clone()).chain(state.pending.iter().cloned()).collect();
+        for name in names {
+            let current = session.slicers().iter().find(|s| s.variable == name);
+            let text = current.map_or_else(|| format!("{name}: all"), |s| s.describe(ds));
+            let chip = ui.add(
+                egui::Button::new(egui::RichText::new(text).color(if current.is_some() { t.accent } else { t.text_dim })).selected(current.is_some()),
+            );
+            egui::Popup::from_toggle_button_response(&chip).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                if let Some(s) = slicer_editor(ui, session, state, &name, current) {
+                    syntax = Some(s);
+                }
+            });
+        }
+        let add = ui.small_button("+ Slicer").on_hover_text("Show only some cases in every item");
+        egui::Popup::menu(&add).show(|ui| {
+            egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                for var in ds.variables() {
+                    let taken = session.slicers().iter().any(|s| s.variable == var.name) || state.pending.contains(&var.name);
+                    let label = var.label.as_deref().map_or_else(|| var.name.clone(), |l| format!("{} ({l})", var.name));
+                    if ui.add_enabled(!taken, egui::Button::new(label).frame(false)).clicked() {
+                        state.pending.push(var.name.clone());
+                    }
+                }
+            });
+        });
+    });
+    syntax
+}
+
+/// Picks a slicer's values (checkboxes with counts) or, for a Scale variable with many values,
+/// its range. Returns the `SLICE` command for a change.
+fn slicer_editor(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, name: &str, current: Option<&Slicer>) -> Option<String> {
+    const SHOWN: usize = 50;
+    let (_, var) = session.dataset.variable(name)?;
+    let values = session.values_of(name, SHOWN + 1);
+    let by_values = var.var_type != VarType::Numeric || (var.measure != Measure::Scale && values.len() <= SHOWN) || values.len() <= 12;
+    let mut syntax = None;
+    ui.strong(var.display_name());
+    if by_values {
+        let checked: Vec<Value> = match current.map(|s| &s.selection) {
+            Some(Selection::Values(v)) => v.clone(),
+            _ => Vec::new(),
+        };
+        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+            for (value, label, count) in values.iter().take(SHOWN) {
+                let mut on = checked.contains(value);
+                if ui.checkbox(&mut on, format!("{label}   ({count:.0})")).changed() {
+                    // Kept in the values' order, whatever order they were ticked in.
+                    let next: Vec<Value> =
+                        values.iter().map(|(v, _, _)| v).filter(|v| if *v == value { on } else { checked.contains(v) }).cloned().collect();
+                    syntax = Some(if next.is_empty() {
+                        format!("SLICE {name} OFF.")
+                    } else {
+                        Slicer { variable: name.to_string(), selection: Selection::Values(next) }.syntax()
+                    });
+                }
+            }
+        });
+        if values.len() > SHOWN {
+            ui.label(egui::RichText::new(format!("The first {SHOWN} values")).small());
+        }
+    } else if let Some((lo, hi)) = session.range_of(name) {
+        let start = match current.map(|s| &s.selection) {
+            Some(Selection::Range { low, high }) => (low.unwrap_or(lo), high.unwrap_or(hi)),
+            _ => (lo, hi),
+        };
+        let range = state.ranges.entry(name.to_string()).or_insert(start);
+        let speed = ((hi - lo) / 200.0).max(0.01);
+        ui.horizontal(|ui| {
+            ui.label("From");
+            ui.add(egui::DragValue::new(&mut range.0).speed(speed));
+            ui.label("to");
+            ui.add(egui::DragValue::new(&mut range.1).speed(speed));
+        });
+        if ui.button("Apply").clicked() {
+            let (a, b) = *range;
+            syntax = Some(Slicer { variable: name.to_string(), selection: Selection::Range { low: Some(a.min(b)), high: Some(a.max(b)) } }.syntax());
+        }
+    }
+    ui.separator();
+    if ui.button("Remove slicer").clicked() {
+        state.ranges.remove(name);
+        if current.is_some() {
+            syntax = Some(format!("SLICE {name} OFF."));
+        } else {
+            state.pending.retain(|v| v != name);
+        }
+        ui.close();
+    }
+    syntax
 }
 
 /// What was clicked in a table.

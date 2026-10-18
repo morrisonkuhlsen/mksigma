@@ -17,6 +17,7 @@ mod steps;
 mod transform;
 
 use filter::{CrossFilter, Run};
+pub use filter::{Selection, Slicer};
 use history::{Edit, Entry, History};
 use mksigma_output::Category;
 pub use steps::{AppliedStep, StepKind};
@@ -69,6 +70,8 @@ pub struct Session {
     /// The run each item of the Output came from, by item index.
     run_of: Vec<usize>,
     cross_filter: Option<CrossFilter>,
+    /// One per variable at most, in the order they were set.
+    slicers: Vec<Slicer>,
     /// What loading data had to say (sizes, reader warnings), until `take_notes`.
     notes: Vec<String>,
     loaded_file: Option<String>,
@@ -90,6 +93,7 @@ fn changes_data(command: &Command) -> bool {
             | Command::Logistic { .. }
             | Command::Graph { .. }
             | Command::Examine { .. }
+            | Command::Slice(_)
     )
 }
 
@@ -143,8 +147,9 @@ impl Session {
         self.steps.clear();
         self.modified = false;
         self.history.clear();
-        // The Output stays, but a filter on the old data's cases means nothing for the new.
-        if self.cross_filter.take().is_some() {
+        // The Output stays, but filters on the old data's cases mean nothing for the new.
+        let filtered = self.cross_filter.take().is_some() | !std::mem::take(&mut self.slicers).is_empty();
+        if filtered {
             self.show_runs();
         }
     }
@@ -223,9 +228,100 @@ impl Session {
 
     /// Filtered items follow the data; the unfiltered ones stay as they were produced.
     fn data_changed(&mut self) {
-        if self.cross_filter.is_some() {
+        if self.cross_filter.is_some() || !self.slicers.is_empty() {
             self.show_runs();
         }
+    }
+
+    /// The slicers, in the order they were set.
+    pub fn slicers(&self) -> &[Slicer] {
+        &self.slicers
+    }
+
+    /// Every filter on the Output in words (slicers, then the cross-filter), for a heading.
+    pub fn filter_description(&self) -> Option<String> {
+        let mut parts: Vec<String> = self.slicers.iter().map(|s| s.describe(&self.dataset)).collect();
+        parts.extend(self.cross_filter().map(|c| c.label.clone()));
+        (!parts.is_empty()).then(|| parts.join("; "))
+    }
+
+    /// A variable's valid values with their labels as shown and weighted counts, in ascending
+    /// order, at most `max` of them: what a slicer offers to pick from.
+    pub fn values_of(&self, variable: &str, max: usize) -> Vec<(Value, String, f64)> {
+        let Some((i, var)) = self.dataset.variable(variable) else { return Vec::new() };
+        let mut out: Vec<(Value, String, f64)> = Vec::new();
+        for (case, v) in self.dataset.column(i).unwrap_or_default().iter().enumerate() {
+            if var.is_missing(v) {
+                continue;
+            }
+            let w = self.dataset.case_weight(case);
+            match out.iter().position(|(value, _, _)| value == v) {
+                Some(at) => {
+                    if let Some(entry) = out.get_mut(at) {
+                        entry.2 += w;
+                    }
+                }
+                None if out.len() < max => out.push((v.clone(), var.value_label(v).map_or_else(|| var.format.render(v), str::to_string), w)),
+                None => {}
+            }
+        }
+        out.sort_by(|a, b| match (&a.0, &b.0) {
+            (Value::Num(x), Value::Num(y)) => x.total_cmp(y),
+            (Value::Str(x), Value::Str(y)) => x.cmp(y),
+            _ => std::cmp::Ordering::Equal,
+        });
+        out
+    }
+
+    /// The smallest and largest valid value of a numeric variable.
+    pub fn range_of(&self, variable: &str) -> Option<(f64, f64)> {
+        let (i, var) = self.dataset.variable(variable)?;
+        self.dataset.column(i)?.iter().filter(|v| !var.is_missing(v)).filter_map(Value::as_num).fold(None, |r, x| match r {
+            None => Some((x, x)),
+            Some((lo, hi)) => Some((f64::min(lo, x), f64::max(hi, x))),
+        })
+    }
+
+    /// `SLICE`: sets, replaces or removes a variable's slicer, or removes them all.
+    fn set_slicer(&mut self, spec: Option<&(String, mksigma_syntax::SliceSpec)>) -> Result<(), EngineError> {
+        use mksigma_syntax::{Literal, SliceSpec};
+        let Some((name, spec)) = spec else {
+            self.slicers.clear();
+            self.show_runs();
+            return Ok(());
+        };
+        let (_, var) = self.dataset.variable(name).ok_or_else(|| EngineError::UnknownVariable(name.clone()))?;
+        let variable = var.name.clone();
+        let numeric = var.var_type == mksigma_core::VarType::Numeric;
+        let selection = match spec {
+            SliceSpec::Off => None,
+            SliceSpec::Range { .. } if !numeric => return Err(EngineError::Invalid(format!("{variable} is a string variable: slice it by values"))),
+            SliceSpec::Range { low, high } => Some(Selection::Range { low: *low, high: *high }),
+            SliceSpec::Values(values) => Some(Selection::Values(
+                values
+                    .iter()
+                    .map(|l| match (l, numeric) {
+                        (Literal::Num(x), true) => Ok(Value::Num(*x)),
+                        (Literal::Str(s), false) => Ok(Value::Str(s.clone())),
+                        _ => Err(EngineError::Invalid(format!("{variable} needs {} values", if numeric { "numeric" } else { "quoted string" }))),
+                    })
+                    .collect::<Result<_, _>>()?,
+            )),
+        };
+        match (self.slicers.iter().position(|s| s.variable == variable), selection) {
+            (Some(at), Some(selection)) => {
+                if let Some(slicer) = self.slicers.get_mut(at) {
+                    slicer.selection = selection;
+                }
+            }
+            (None, Some(selection)) => self.slicers.push(Slicer { variable, selection }),
+            (Some(at), None) => {
+                self.slicers.remove(at);
+            }
+            (None, None) => {}
+        }
+        self.show_runs();
+        Ok(())
     }
 
     /// The category the Output is cross-filtered by, if any.
@@ -270,15 +366,27 @@ impl Session {
     /// Rebuilds the Output from the runs: each on all the cases, or, under a filter, run again
     /// on the filtered cases (except the one the selection came from).
     fn show_runs(&mut self) {
-        let subset = self.cross_filter.as_ref().map(|f| (f.source, filter::subset(&self.dataset, &f.category)));
+        // Slicers first, for every run; then the cross-filter, for all but the selected one.
+        let sliced = (!self.slicers.is_empty()).then(|| filter::slice(&self.dataset, &self.slicers));
+        let crossed = self.cross_filter.as_ref().map(|f| {
+            let ds = match &sliced {
+                Some(Ok(ds)) => filter::subset(ds, &f.category),
+                Some(Err(e)) => Err(EngineError::Invalid(e.to_string())),
+                None => filter::subset(&self.dataset, &f.category),
+            };
+            (f.source, ds)
+        });
+        let run_on = |ds: &Result<Dataset, EngineError>, command: &Command| match ds {
+            Ok(ds) => analyse(ds, command).unwrap_or_else(|e| vec![Item::Warning(format!("Filtered: {e}"))]),
+            Err(e) => vec![Item::Warning(format!("Filtered: {e}"))],
+        };
         let mut items = Vec::new();
         let mut run_of = Vec::new();
         for (i, run) in self.runs.iter().enumerate() {
-            let shown = match &subset {
-                Some((source, _)) if *source == i => run.items.clone(),
-                Some((_, Ok(ds))) => analyse(ds, &run.command).unwrap_or_else(|e| vec![Item::Warning(format!("Filtered: {e}"))]),
-                Some((_, Err(e))) => vec![Item::Warning(format!("Filtered: {e}"))],
-                None => run.items.clone(),
+            let shown = match (&crossed, &sliced) {
+                (Some((source, ds)), _) if *source != i => run_on(ds, &run.command),
+                (_, Some(ds)) => run_on(ds, &run.command),
+                _ => run.items.clone(),
             };
             run_of.extend(std::iter::repeat_n(i, shown.len()));
             items.extend(shown);
@@ -490,6 +598,7 @@ impl Session {
             Command::If { cond, target, expr } => return transform::compute(&mut self.dataset, target, expr, Some(cond)),
             Command::Recode(groups) => return transform::recode(&mut self.dataset, groups),
             Command::SelectIf(cond) => return transform::select_if(&mut self.dataset, cond),
+            Command::Slice(spec) => self.set_slicer(spec.as_ref())?,
             _ => {
                 // The run keeps the command as written, so `ALL` means the variables of the day.
                 let items = analyse(&self.dataset, written)?;
@@ -1163,6 +1272,58 @@ mod tests {
             .find_map(|i| if let Item::Table(t) = i { (t.title == "Descriptive Statistics").then_some(t.rows.len()) } else { None });
         assert_eq!(rows, Some(5), "age, income, score, grupo and Valid N");
         assert!(s.run_syntax("DESCRIPTIVES score TO age.").is_err());
+    }
+
+    #[test]
+    fn slicers_filter_every_item_and_combine() {
+        let mut s = Session::with_sample().unwrap();
+        // Ages 23 35 41 29 52 47 31 26; incomes 1800 4200 5100 2600 6900 3900 3100 2200;
+        // scores 61 74 69 80 58 72 88 77. Jovem (age ≤ 30): cases 1, 4, 8.
+        s.run_syntax("RECODE age (LO THRU 30 = 1) (ELSE = 2) INTO grupo.\nVALUE LABELS grupo 1 'Jovem' 2 'Adulto'.\nDESCRIPTIVES score.").unwrap();
+        assert_eq!(s.values_of("grupo", 50), [(Value::Num(1.0), "Jovem".to_string(), 3.0), (Value::Num(2.0), "Adulto".to_string(), 5.0)]);
+        assert_eq!(s.range_of("income"), Some((1800.0, 6900.0)));
+
+        s.run_syntax("SLICE grupo (1).").unwrap();
+        let (n, mean) = score_n_and_mean(&s);
+        assert_eq!(n, 3);
+        assert!((mean - 218.0 / 3.0).abs() < 1e-12);
+        // Two slicers keep the cases both keep: Jovem with income 2000 to 4000 are cases 4 and 8.
+        s.run_syntax("SLICE income (2000 THRU 4000).").unwrap();
+        assert_eq!(score_n_and_mean(&s), (2, 78.5));
+        assert_eq!(s.filter_description().as_deref(), Some("grupo: Jovem; income 2000.00 to 4000.00"));
+        assert_eq!(s.slicers()[1].syntax(), "SLICE income (2000 THRU 4000).");
+        assert_eq!(s.slicers()[0].syntax(), "SLICE grupo (1).");
+        assert!(s.steps().len() == 2 && s.dataset.n_cases() == 8, "slicers are a view, not steps");
+        assert!(s.journal.iter().any(|j| j == "SLICE grupo (1)."), "but they are syntax, in the History");
+
+        // Slicing a variable again replaces its slicer; OFF removes it.
+        s.run_syntax("SLICE grupo (2).\nSLICE income OFF.").unwrap();
+        assert_eq!(score_n_and_mean(&s).0, 5);
+        // New analyses run sliced too.
+        s.run_syntax("FREQUENCIES grupo.").unwrap();
+        let frequency = s.output.items.iter().rev().find_map(|i| if let Item::Table(t) = i { Some(t) } else { None }).unwrap();
+        assert_eq!(frequency.rows[0].1[1], mksigma_output::Cell::Int(5), "only Adulto");
+        s.run_syntax("SLICE OFF.").unwrap();
+        assert_eq!(score_n_and_mean(&s), (8, 72.375), "the originals again");
+
+        assert!(matches!(s.run_syntax("SLICE nope (1)."), Err(EngineError::UnknownVariable(_))));
+        assert!(s.run_syntax("SLICE grupo ('a').").is_err(), "a numeric variable takes numbers");
+        assert!(s.slicers().is_empty());
+    }
+
+    #[test]
+    fn a_slicer_and_a_cross_filter_together() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("RECODE age (LO THRU 30 = 1) (ELSE = 2) INTO grupo.\nGRAPH /BAR(SIMPLE)=COUNT BY grupo.\nDESCRIPTIVES score.").unwrap();
+        s.run_syntax("SLICE income (LO THRU 4000).").unwrap();
+        // Incomes up to 4000: cases 1, 4, 6, 7, 8; of those, grupo 1 are cases 1, 4 and 8.
+        let Item::Chart(mksigma_output::Chart::Bar { bars, .. }) = &s.output.items[0] else { panic!() };
+        assert_eq!(bars.iter().map(|b| b.1).collect::<Vec<_>>(), [3.0, 2.0], "the selected chart is sliced too");
+        let Item::Chart(chart) = &s.output.items[0] else { panic!() };
+        s.select_category(0, chart.category(1).unwrap().clone()).unwrap();
+        // grupo 2 within the slice: cases 6 and 7, scores 72 and 88.
+        assert_eq!(score_n_and_mean(&s), (2, 80.0));
+        assert_eq!(s.filter_description().as_deref(), Some("income up to 4000.00; grupo = 2.00"));
     }
 
     #[test]

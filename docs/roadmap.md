@@ -120,6 +120,12 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
 - Export to HTML and PDF
 
 ## M4 — dashboards
+- **Slicers — done:** `SLICE var (values)`, `SLICE var (low THRU high)`, `SLICE var OFF`,
+  `SLICE OFF` (an MK Sigma command): every analysis in the Output shows only the cases all
+  slicers keep, and the cross-filter works within them. In the Output Viewer, "+ Slicer" adds
+  one; its chip opens the values with their counts (checkboxes) or, for a Scale variable with
+  many values, a range. Slicers are syntax in the History, not applied steps; they follow data
+  changes and exports name them.
 - A dashboard is a layout of output items with shared filters (slicers), saved with the
   syntax that produced it
 - **Publish as a self-contained interactive page** (HTML + WASM): no server, no account
