@@ -12,13 +12,14 @@ use std::process::ExitCode;
 
 use mksigma_engine::Session;
 
-const USAGE: &str = "usage: mksigma-cli run [--in data.sav] [--out result.sav] [--html report.html] [--pdf report.pdf] '<syntax>'";
+const USAGE: &str = "usage: mksigma-cli run [--in data.sav] [--out result.sav] [--html report.html] [--pdf report.pdf] [--tex report.tex] '<syntax>'";
 
 struct Args {
     input: Option<String>,
     output: Option<String>,
     html: Option<String>,
     pdf: Option<String>,
+    tex: Option<String>,
     syntax: String,
 }
 
@@ -27,18 +28,19 @@ fn parse_args() -> Option<Args> {
     if args.next()? != "run" {
         return None;
     }
-    let (mut input, mut output, mut html, mut pdf, mut syntax) = (None, None, None, None, None);
+    let (mut input, mut output, mut html, mut pdf, mut tex, mut syntax) = (None, None, None, None, None, None);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--in" => input = Some(args.next()?),
             "--out" => output = Some(args.next()?),
             "--html" => html = Some(args.next()?),
             "--pdf" => pdf = Some(args.next()?),
+            "--tex" => tex = Some(args.next()?),
             _ if syntax.is_none() => syntax = Some(arg),
             _ => return None,
         }
     }
-    Some(Args { input, output, html, pdf, syntax: syntax? })
+    Some(Args { input, output, html, pdf, tex, syntax: syntax? })
 }
 
 /// Seconds since 1970 for the file header's creation time.
@@ -77,6 +79,9 @@ fn run(args: &Args) -> Result<(), String> {
     }
     if let Some(path) = &args.pdf {
         std::fs::write(path, session.output.to_pdf(&title)).map_err(|e| format!("{path}: {e}"))?;
+    }
+    if let Some(path) = &args.tex {
+        std::fs::write(path, session.output.to_latex(&title)).map_err(|e| format!("{path}: {e}"))?;
     }
     result.map_err(|e| e.to_string())?;
     if let Some(path) = &args.output {

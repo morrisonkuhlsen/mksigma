@@ -37,6 +37,8 @@ fn main() -> eframe::Result {
             let dialog = rfd::FileDialog::new().set_file_name(suggested);
             let dialog = if suggested.ends_with(".pdf") {
                 dialog.add_filter("PDF document (.pdf)", &["pdf"])
+            } else if suggested.ends_with(".tex") {
+                dialog.add_filter("LaTeX document (.tex)", &["tex"])
             } else if suggested.ends_with(".sps") {
                 dialog.add_filter("MK Sigma dashboard syntax (.sps)", &["sps"])
             } else {

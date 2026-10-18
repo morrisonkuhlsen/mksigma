@@ -199,8 +199,10 @@ pub(crate) fn title_bar(ui: &mut egui::Ui, state: &State) -> Option<Action> {
     action
 }
 
-/// The tab row, with File as a menu at its start, and the ribbon of the current tab.
-pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, state: &State) -> Option<Action> {
+/// The tab row, with File as a menu at its start, and the ribbon of the current tab unless
+/// `collapsed`. The chevron at the row's end, a double-click on a tab or Ctrl+F1 hides or shows
+/// the ribbon; a tab clicked while it is hidden shows it again.
+pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, collapsed: &mut bool, state: &State) -> Option<Action> {
     let t = Tokens::get(ui.ctx());
     let mut action = None;
     ui.horizontal(|ui| {
@@ -233,6 +235,7 @@ pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, state: &State) -> Option<
             ui.separator();
             item(ui, Icon::Web, "Export Output as HTML…", state.has_output, Action::Export(ExportFormat::Html));
             item(ui, Icon::Pdf, "Export Output as PDF…", state.has_output, Action::Export(ExportFormat::Pdf));
+            item(ui, Icon::Latex, "Export Output as LaTeX…", state.has_output, Action::Export(ExportFormat::Latex));
         });
         ui.add_space(6.0);
         for (which, name) in TABS {
@@ -244,11 +247,25 @@ pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, state: &State) -> Option<
                 let bar = egui::Rect::from_min_max(egui::pos2(r.left() + 4.0, r.bottom() - 3.0), egui::pos2(r.right() - 4.0, r.bottom()));
                 ui.painter().rect_filled(bar, 1.5, t.accent);
             }
-            if response.clicked() {
+            if response.double_clicked() {
+                *collapsed = !*collapsed;
+            } else if response.clicked() {
                 *tab = which;
+                *collapsed = false;
             }
         }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(4.0);
+            let (icon, name) =
+                if *collapsed { (Icon::ChevronDown, "Show the ribbon (Ctrl+F1)") } else { (Icon::ChevronUp, "Hide the ribbon (Ctrl+F1)") };
+            if icon_button(ui, icon, name, true).clicked() {
+                *collapsed = !*collapsed;
+            }
+        });
     });
+    if *collapsed {
+        return action;
+    }
     ui.add_space(2.0);
     theme::card(&t).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
         ui.set_min_size(egui::vec2(ui.available_width(), RIBBON_HEIGHT));
@@ -284,6 +301,8 @@ fn buttons(ui: &mut egui::Ui, tab: Tab, state: &State) -> Option<Action> {
             divider(ui);
             go(ui, Icon::Web, "Export HTML", "Save the Output as a web page", state.has_output, false, Action::Export(ExportFormat::Html));
             go(ui, Icon::Pdf, "Export PDF", "Save the Output as a PDF document", state.has_output, false, Action::Export(ExportFormat::Pdf));
+            let tip = "Save the Output as a LaTeX document: booktabs tables, pgfplots charts";
+            go(ui, Icon::Latex, "Export LaTeX", tip, state.has_output, false, Action::Export(ExportFormat::Latex));
             go(ui, Icon::Eraser, "Clear Output", "Remove every item from the Output", state.has_output, false, Action::ClearOutput);
         }
         Tab::Data => {
@@ -351,6 +370,7 @@ pub(crate) fn commands() -> Vec<(&'static str, Action)> {
         ("Run Syntax", Action::Run),
         ("Export Output as HTML…", Action::Export(ExportFormat::Html)),
         ("Export Output as PDF…", Action::Export(ExportFormat::Pdf)),
+        ("Export Output as LaTeX…", Action::Export(ExportFormat::Latex)),
         ("Clear Output", Action::ClearOutput),
         ("Insert Case", Action::InsertCase),
         ("Insert Variable", Action::InsertVariable),

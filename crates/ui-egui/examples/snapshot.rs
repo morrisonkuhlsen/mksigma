@@ -2,7 +2,7 @@
 //! touching the screen.
 //!
 //! `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav] [--variables] [--labels]
-//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard]
+//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon]
 //!  [--size 1280x800] out.png` (`--disable` switches off applied step N, counting from 1, after
 //!  `--run`; `--select` cross-filters by category PART of Output item ITEM, both counting from 1:
 //!  a bar, bin or box, or a table row; `--pin` pins Output item ITEM to the dashboard and
@@ -49,6 +49,7 @@ fn main() -> Result<(), String> {
                 pins.push(args.get(i).and_then(|n| n.parse::<usize>().ok()).and_then(|n| n.checked_sub(1)).ok_or("--pin needs an item number")?);
             }
             "--dashboard" => app.output_state.dashboard = true,
+            "--no-ribbon" => app.ribbon_collapsed = true,
             "--size" => {
                 i += 1;
                 if let Some((w, h)) = args.get(i).and_then(|s| s.split_once('x')) {

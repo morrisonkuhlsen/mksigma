@@ -45,6 +45,11 @@ pub enum Icon {
     Minus,
     Plus,
     Pin,
+    ChevronUp,
+    ChevronDown,
+    /// The LaTeX name typeset as LaTeX sets it (raised A, lowered E): the name, not the
+    /// LaTeX Project's logo artwork, whose terms don't allow it as a program's icon.
+    Latex,
 }
 
 /// Draws `icon` in `rect` (square) in one colour, the theme's accent; tints of it fill shapes.
@@ -274,6 +279,18 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, t: &Tokens) {
             line((8.0, 1.5), (8.0, 10.0), ink);
             poly(&[(5.0, 4.5), (8.0, 1.5), (11.0, 4.5)], ink);
         }
+        Icon::Latex => {
+            let big = egui::FontId::proportional(7.0 * s);
+            let small = egui::FontId::proportional(5.2 * s);
+            // As \LaTeX sets it: A raised and tucked under the L's arm, E lowered.
+            for (letter, font, x, dy) in
+                [("L", &big, -0.6, 0.0), ("A", &small, 2.5, -1.8), ("T", &big, 5.2, 0.0), ("E", &big, 8.5, 1.6), ("X", &big, 11.8, 0.0)]
+            {
+                painter.text(p(x, 8.0 + dy), egui::Align2::LEFT_CENTER, letter, font.clone(), ink.color);
+            }
+        }
+        Icon::ChevronUp => poly(&[(3.5, 10.5), (8.0, 6.0), (12.5, 10.5)], Stroke::new(w * 1.3, ink.color)),
+        Icon::ChevronDown => poly(&[(3.5, 6.0), (8.0, 10.5), (12.5, 6.0)], Stroke::new(w * 1.3, ink.color)),
         Icon::Pin => {
             // A pushpin, tilted: head, collar and needle.
             fill(&[(9.0, 1.5), (14.5, 7.0), (12.0, 8.0), (8.0, 4.0)], ink.color);
@@ -303,7 +320,7 @@ pub fn show(ui: &mut egui::Ui, icon: Icon, size: f32) -> egui::Response {
 
 /// For tests: every icon stays inside its square.
 #[cfg(test)]
-pub(crate) const ALL: [Icon; 37] = [
+pub(crate) const ALL: [Icon; 40] = [
     Icon::Sigma,
     Icon::Open,
     Icon::Save,
@@ -341,6 +358,9 @@ pub(crate) const ALL: [Icon; 37] = [
     Icon::Minus,
     Icon::Plus,
     Icon::Pin,
+    Icon::Latex,
+    Icon::ChevronUp,
+    Icon::ChevronDown,
 ];
 
 #[cfg(test)]

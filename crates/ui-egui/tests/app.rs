@@ -700,3 +700,31 @@ fn a_dashboard_needs_data_from_a_file() {
     assert!(matches!(&app.status, Some(Status::Error(s)) if s.contains("didn't come from a file")));
     assert!(!temp_path("never.sps").exists());
 }
+
+#[test]
+fn the_ribbon_hides_and_comes_back() {
+    let mut h = harness(SigmaApp::default());
+    assert!(shows(&h, "Run Syntax"));
+    h.get_by_label("Hide the ribbon (Ctrl+F1)").click();
+    h.run_steps(3);
+    assert!(h.state().ribbon_collapsed && !shows(&h, "Run Syntax"), "only the tabs are left");
+    // A tab clicked while it is hidden shows it again, on that tab.
+    h.get_by_label("Analyze").click();
+    h.run_steps(3);
+    assert!(!h.state().ribbon_collapsed && shows(&h, "Descriptives"));
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::F1);
+    h.run_steps(3);
+    assert!(h.state().ribbon_collapsed);
+}
+
+#[test]
+fn the_output_exports_as_latex() {
+    let path = temp_path("output.tex");
+    let mut app = SigmaApp::default();
+    app.session.run_syntax("DESCRIPTIVES age income.\nGRAPH /HISTOGRAM(NORMAL)=income.").unwrap();
+    app.export(&path, mksigma_ui_egui::ExportFormat::Latex);
+    let tex = std::fs::read_to_string(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(tex.contains("\\documentclass{article}") && tex.contains("\\toprule") && tex.contains("\\begin{axis}"));
+    assert!(matches!(&app.status, Some(Status::Info(s)) if s.starts_with("Exported the Output")));
+}

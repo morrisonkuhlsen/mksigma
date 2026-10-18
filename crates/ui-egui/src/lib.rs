@@ -82,6 +82,8 @@ pub struct SigmaApp {
     pub output_state: OutputState,
     /// The ribbon tab shown.
     pub tab: Tab,
+    /// Only the ribbon's tab row shows, for more room.
+    pub ribbon_collapsed: bool,
     /// Save to the file after every change (only when the data has a file).
     pub autosave: bool,
     /// The search box's text, while it is open.
@@ -119,6 +121,7 @@ impl SigmaApp {
             value_labels_dialog: None,
             output_state: OutputState::default(),
             tab: Tab::default(),
+            ribbon_collapsed: false,
             autosave: false,
             search: None,
             zoom: 100,
@@ -210,6 +213,7 @@ impl SigmaApp {
         let bytes = match format {
             ExportFormat::Html => self.session.output.to_html(&title).into_bytes(),
             ExportFormat::Pdf => self.session.output.to_pdf(&title),
+            ExportFormat::Latex => self.session.output.to_latex(&title).into_bytes(),
         };
         match std::fs::write(path, bytes) {
             Ok(()) => self.status = Some(Status::Info(format!("Exported the Output to {}", path.display()))),
@@ -233,6 +237,7 @@ impl SigmaApp {
         let extension = match format {
             ExportFormat::Html => "html",
             ExportFormat::Pdf => "pdf",
+            ExportFormat::Latex => "tex",
         };
         if let Some(path) = self.services.pick_export.as_ref().and_then(|pick| pick(&format!("{stem}.{extension}"))) {
             self.export(&path, format);
@@ -460,7 +465,7 @@ impl SigmaApp {
         };
         let mut actions = Vec::new();
         actions.extend(ribbon::title_bar(ui, &state));
-        actions.extend(ribbon::ribbon(ui, &mut self.tab, &state));
+        actions.extend(ribbon::ribbon(ui, &mut self.tab, &mut self.ribbon_collapsed, &state));
         for action in actions {
             self.act(ui.ctx(), action);
         }
@@ -724,6 +729,9 @@ impl SigmaApp {
         }
         if shortcut(egui::Modifiers::COMMAND, egui::Key::O) {
             self.open_dialog();
+        }
+        if shortcut(egui::Modifiers::COMMAND, egui::Key::F1) {
+            self.ribbon_collapsed = !self.ribbon_collapsed;
         }
         if shortcut(egui::Modifiers::COMMAND, egui::Key::F) {
             self.search = Some(String::new());

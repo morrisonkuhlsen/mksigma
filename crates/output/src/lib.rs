@@ -4,6 +4,7 @@
 
 pub mod chart;
 mod html;
+pub mod latex;
 mod pdf;
 
 pub use chart::Chart;

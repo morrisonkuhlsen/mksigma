@@ -118,6 +118,13 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
 - **Cross-filtering:** items from one dataset share a filter; selecting a bar or a table
   category filters the other items
 - Export to HTML and PDF
+- **LaTeX export — done:** File > Export Output as LaTeX (and `mksigma-cli --tex`) writes a
+  document that compiles as it is: tables with `booktabs` (no vertical rules, notes inside the
+  table), wide tables scaled to the line, charts as `pgfplots` axes drawn from the data (bars,
+  histograms with the normal curve, scatterplots, boxplots), captions and unique labels.
+  Right-click a table title or a chart: Copy as LaTeX. The button shows the LaTeX name as LaTeX
+  typesets it, not the LaTeX Project's logo artwork, which its terms keep off program icons.
+- Output style (fonts, sizes, palette, decimals) shared by screen, HTML, PDF and LaTeX: to do.
 
 ## M4 — dashboards
 - **Slicers — done:** `SLICE var (values)`, `SLICE var (low THRU high)`, `SLICE var OFF`,

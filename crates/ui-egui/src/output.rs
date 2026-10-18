@@ -47,6 +47,17 @@ pub(crate) enum OutputAction {
 pub enum ExportFormat {
     Html,
     Pdf,
+    Latex,
+}
+
+/// Right-click on an item: copy it as LaTeX, ready to paste into a document.
+fn copy_as_latex(response: &egui::Response, item: &Item) {
+    response.context_menu(|ui| {
+        if ui.button("Copy as LaTeX").on_hover_text("booktabs tables, pgfplots charts").clicked() {
+            ui.ctx().copy_text(mksigma_engine::output::latex::item_to_latex(item));
+            ui.close();
+        }
+    });
 }
 
 /// A header tab: the Output or the dashboard.
@@ -388,7 +399,8 @@ struct TableClick {
 fn table(ui: &mut egui::Ui, index: usize, t: &Table, flipped: bool, selected: Option<&Category>, pin: Option<bool>) -> TableClick {
     let mut click = TableClick { pivot: false, pin: false, select: None };
     ui.horizontal(|ui| {
-        ui.strong(&t.title);
+        let title = ui.add(egui::Label::new(egui::RichText::new(&t.title).strong()).sense(egui::Sense::click()));
+        copy_as_latex(&title, &Item::Table(t.clone()));
         click.pivot = ui.small_button("pivot").on_hover_text("Swap rows and columns").clicked();
         if let Some(pinned) = pin {
             click.pin = pin_button(ui, pinned);
@@ -458,6 +470,7 @@ fn draw_chart(ui: &mut egui::Ui, c: &Chart, selected: Option<&Category>) -> Opti
     let shapes = chart::layout(c, f64::from(size.0), f64::from(size.1));
     let (rect, response) = ui.allocate_exact_size(egui::vec2(size.0, size.1), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, c.title()));
+    copy_as_latex(&response, &Item::Chart(c.clone()));
     let part_at = |pos: egui::Pos2| chart::part_at(&shapes, f64::from(pos.x - rect.min.x)).filter(|p| c.category(*p).is_some());
     let hovered = response.hover_pos().and_then(part_at);
     let clicked = if response.clicked() { response.interact_pointer_pos().and_then(part_at) } else { None };
