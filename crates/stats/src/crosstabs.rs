@@ -206,7 +206,7 @@ fn table(row_var: &Variable, column_var: &Variable, counts: &Counts, cells: Cell
             rows.push((if i == 0 { label.clone() } else { String::new() }, out));
         }
     }
-    Table { title: format!("{} * {} Crosstabulation", row_var.display_name(), column_var.display_name()), columns, rows }
+    Table { title: format!("{} * {} Crosstabulation", row_var.display_name(), column_var.display_name()), columns, rows, categories: Vec::new() }
 }
 
 /// Pearson correlation of the row and column scores, weighted by the cell counts.
@@ -289,7 +289,7 @@ fn chi_square(row_var: &Variable, column_var: &Variable, counts: &Counts) -> Vec
         "a. {small} cells ({:.1}%) have expected count less than 5. The minimum expected count is {min_expected:.2}.",
         small as f64 / total_cells as f64 * 100.0
     );
-    let mut items = vec![Item::Table(Table { title: "Chi-Square Tests".to_string(), columns, rows }), Item::Text(note)];
+    let mut items = vec![Item::Table(Table { title: "Chi-Square Tests".to_string(), columns, rows, categories: Vec::new() }), Item::Text(note)];
     if two_by_two {
         items.push(Item::Text("b. Continuity Correction is computed only for a 2x2 table.".to_string()));
     }
@@ -318,7 +318,7 @@ pub fn crosstabs(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErro
         }
     }
     let columns = ["Valid N", "Valid Percent", "Missing N", "Missing Percent", "Total N", "Total Percent"].map(String::from).to_vec();
-    let mut items = vec![Item::Table(Table { title: "Case Processing Summary".to_string(), columns, rows: summary })];
+    let mut items = vec![Item::Table(Table { title: "Case Processing Summary".to_string(), columns, rows: summary, categories: Vec::new() })];
     items.extend(tables);
     Ok(items)
 }

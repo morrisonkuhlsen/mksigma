@@ -137,17 +137,20 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
         title: "Dependent Variable Encoding".into(),
         columns: vec!["Internal Value".into()],
         rows: vec![(value_text(yvar, &Value::Num(low)), vec![Cell::Int(0)]), (value_text(yvar, &Value::Num(high)), vec![Cell::Int(1)])],
+        categories: Vec::new(),
     };
     let omnibus_row = || vec![num(Some(chi), 3), n_cell(df), num(chi_sig, 3)];
     let omnibus = Table {
         title: "Omnibus Tests of Model Coefficients".into(),
         columns: ["Chi-square", "df", "Sig."].map(String::from).to_vec(),
         rows: vec![("Step".into(), omnibus_row()), ("Block".into(), omnibus_row()), ("Model".into(), omnibus_row())],
+        categories: Vec::new(),
     };
     let summary = Table {
         title: "Model Summary".into(),
         columns: ["-2 Log likelihood", "Cox & Snell R Square", "Nagelkerke R Square"].map(String::from).to_vec(),
         rows: vec![("1".into(), vec![num(Some(-2.0 * ll), 3), num(Some(cox_snell), 3), num(Some(nagelkerke), 3)])],
+        categories: Vec::new(),
     };
 
     // Classification at the cut value.
@@ -180,6 +183,7 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
             (String::new(), vec![Cell::Text(value_text(yvar, &Value::Num(high))), n_cell(counts[1][0]), n_cell(counts[1][1]), correct(counts[1], 1)]),
             ("Overall Percentage".into(), vec![Cell::Empty, Cell::Empty, Cell::Empty, num(Some(overall), 1)]),
         ],
+        categories: Vec::new(),
     };
 
     let z = options.ci.and_then(|level| Normal::new(0.0, 1.0).ok().map(|d| d.inverse_cdf(0.5 + level / 2.0)));
@@ -224,7 +228,7 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
         Item::Table(summary),
         Item::Text(note),
         Item::Table(classification),
-        Item::Table(Table { title: "Variables in the Equation".into(), columns, rows: coefficients }),
+        Item::Table(Table { title: "Variables in the Equation".into(), columns, rows: coefficients, categories: Vec::new() }),
     ];
     if !converged {
         items.insert(0, Item::Warning("LOGISTIC REGRESSION did not converge".into()));

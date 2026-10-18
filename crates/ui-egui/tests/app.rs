@@ -473,3 +473,48 @@ fn charts_pivot_and_html_export() {
     std::fs::remove_file(&path).unwrap();
     assert!(pdf.starts_with(b"%PDF-") && pdf.ends_with(b"%%EOF\n"));
 }
+
+#[test]
+fn clicking_a_category_cross_filters_the_other_items() {
+    let mut app = SigmaApp::new(Services::default());
+    // Jovem (age ≤ 30) are three cases, scores 61, 80 and 77.
+    app.session
+        .run_syntax(
+            "RECODE age (LO THRU 30 = 1) (ELSE = 2) INTO grupo.\nVALUE LABELS grupo 1 'Jovem' 2 'Adulto'.\n\
+             FREQUENCIES grupo.\nGRAPH /BAR(SIMPLE)=COUNT BY grupo /TITLE='Grupos'.\nDESCRIPTIVES score.",
+        )
+        .unwrap();
+    let mut h = harness(app);
+    assert!(shows(&h, "72.38"), "the mean of all eight scores");
+
+    // The value in a frequency table's row.
+    h.get_by_label("Jovem").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.cross_filter().map(|c| c.label.as_str()), Some("grupo = Jovem"));
+    assert!(shows(&h, "Filtered by grupo = Jovem"));
+    assert!(shows(&h, "72.67") && !shows(&h, "72.38"), "DESCRIPTIVES ran again on the three");
+    h.get_by_label("Clear filter").click();
+    h.run_steps(3);
+    assert!(h.state().session.cross_filter().is_none() && shows(&h, "72.38"));
+
+    // A bar: two slots across the plot, which starts 64 points in and ends 16 before the edge.
+    let chart = h.get_by_label("Grupos").rect();
+    let slot = (chart.width() - 80.0) / 2.0;
+    let adulto = egui::pos2(chart.min.x + 64.0 + slot * 1.5, chart.center().y);
+    h.hover_at(adulto);
+    h.run_steps(2);
+    h.drag_at(adulto);
+    h.run_steps(1);
+    h.drop_at(adulto);
+    h.run_steps(3);
+    assert_eq!(h.state().session.cross_filter().map(|c| c.label.as_str()), Some("grupo = Adulto"));
+    // Adulto: scores 74, 69, 58, 72 and 88, mean 72.2; the frequency table now has one value.
+    assert!(shows(&h, "72.20"));
+    assert!(!shows(&h, "Jovem"), "the frequency table ran again without them");
+
+    let path = temp_path("filtered.html");
+    h.state_mut().export(&path, mksigma_ui_egui::ExportFormat::Html);
+    let html = std::fs::read_to_string(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(html.contains("<h1>MK Sigma Output (filtered by grupo = Adulto)</h1>"), "an export says it is filtered");
+}

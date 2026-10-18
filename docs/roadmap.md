@@ -93,6 +93,12 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   PDF export (File menu, Output button, `mksigma-cli --pdf`): A4, standard Helvetica (nothing
   embedded) with Windows-1252 text, tables split across pages with their header repeated and
   wrapped headers, the same chart layouts, page numbers.
+- **Done (third part): cross-filtering.** Click a bar, a histogram bin, a box of a boxplot by
+  group, or a value in a frequency table: every other item runs again on just those cases, the
+  clicked item highlights the selection, a bar above the Output names the filter and clears it.
+  The filter is a view (not a step) and follows data changes; exports say they are filtered.
+  To do: categories in `CROSSTABS`, `ONEWAY` and `T-TEST` group rows; several selections at once
+  (Ctrl+click); highlighting instead of filtering inside charts of the same variable.
 - To do: clustered bars, pie, stem-and-leaf; pivot layers; chart and table editing.
 - Pivot tables (transpose, move layers), charts (histogram, bar, scatter, boxplot)
 - **Cross-filtering:** items from one dataset share a filter; selecting a bar or a table

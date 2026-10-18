@@ -27,6 +27,18 @@ later HTML/PDF export.
 `Session` owns the active dataset and the output, and is the single entry point for syntax,
 menus, the CLI and a future MCP server.
 
+## Cross-filtering (`engine`)
+Output items can carry **categories**: a bar, a histogram bin, a box of a grouped boxplot, the
+valid rows of a frequency table. A category names a variable and the values in it (one value or
+a range); procedures fill them in, since only they know which value a label stands for.
+
+The session remembers each analysis command with the items it produced on all the cases (a
+*run*). Selecting a category filters the dataset to its cases and runs every other analysis
+again on that subset; the run the selection came from keeps its full view and highlights it.
+Clearing the filter shows the original items again. The filter is a view, not a data change: it
+is not an applied step, not undoable and not journaled. While it is on, data changes re-run the
+filtered analyses too.
+
 ## Applied steps and undo (`engine`)
 The session keeps the dataset as opened (`base`) and the **applied steps**: every change to the
 data since, in order — data commands as written, and Data View edits (cell, insert/delete case).

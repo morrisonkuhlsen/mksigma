@@ -2,9 +2,11 @@
 //! touching the screen.
 //!
 //! `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav] [--variables] [--labels]
-//!  [--run 'SYNTAX'] [--disable N]... [--size 1280x800] out.png` (`--disable` switches off applied
-//!  step N, counting from 1, after `--run`)
+//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--size 1280x800] out.png` (`--disable`
+//!  switches off applied step N, counting from 1, after `--run`; `--select` cross-filters by
+//!  category PART of Output item ITEM, both counting from 1: a bar, bin or box, or a table row)
 
+use mksigma_engine::output::Item;
 use mksigma_ui_egui::{SigmaApp, View};
 
 fn main() -> Result<(), String> {
@@ -14,6 +16,7 @@ fn main() -> Result<(), String> {
     let mut out = "snapshot.png".to_string();
     let mut run = None;
     let mut disable: Vec<usize> = Vec::new();
+    let mut select = None;
     let mut i = 0;
     while let Some(arg) = args.get(i) {
         match arg.as_str() {
@@ -32,6 +35,12 @@ fn main() -> Result<(), String> {
                 i += 1;
                 disable.push(args.get(i).and_then(|n| n.parse::<usize>().ok()).filter(|n| *n > 0).ok_or("--disable needs a step number")? - 1);
             }
+            "--select" => {
+                i += 1;
+                let pair = args.get(i).and_then(|s| s.split_once(':'));
+                let pair = pair.and_then(|(a, b)| Some((a.parse::<usize>().ok()?.checked_sub(1)?, b.parse::<usize>().ok()?.checked_sub(1)?)));
+                select = Some(pair.ok_or("--select needs ITEM:PART")?);
+            }
             "--size" => {
                 i += 1;
                 if let Some((w, h)) = args.get(i).and_then(|s| s.split_once('x')) {
@@ -48,6 +57,15 @@ fn main() -> Result<(), String> {
     }
     for step in disable {
         app.session.set_step_enabled(step, false).map_err(|e| e.to_string())?;
+    }
+    if let Some((item, part)) = select {
+        let category = match app.session.output.items.get(item) {
+            Some(Item::Chart(c)) => c.category(part),
+            Some(Item::Table(t)) => t.category(part),
+            _ => None,
+        };
+        let category = category.cloned().ok_or("--select: that item has no such category")?;
+        app.session.select_category(item, category).map_err(|e| e.to_string())?;
     }
     let mut harness = egui_kittest::Harness::builder()
         .with_size(egui::vec2(size.0, size.1))

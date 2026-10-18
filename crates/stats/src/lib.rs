@@ -4,7 +4,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use mksigma_core::{Dataset, Value, Variable};
-use mksigma_output::{Cell, Table};
+use mksigma_output::{Cases, Category, Cell, Table};
 use thiserror::Error;
 
 mod charts;
@@ -81,6 +81,16 @@ pub(crate) fn value_text(var: &Variable, v: &Value) -> String {
     var.value_label(v).map_or_else(|| var.format.render(v), str::to_string)
 }
 
+/// The cases where `var` has the value `v`, for cross-filtering; none for system-missing.
+pub(crate) fn category(var: &Variable, v: &Value) -> Option<Category> {
+    let cases = match v {
+        Value::Num(x) => Cases::Num(*x),
+        Value::Str(s) => Cases::Str(s.clone()),
+        Value::SysMis => return None,
+    };
+    Some(Category { variable: var.name.clone(), cases, label: format!("{} = {}", var.display_name(), value_text(var, v)) })
+}
+
 /// A statistic shown with `decimals` places, or empty when it can't be computed.
 pub(crate) fn num(value: Option<f64>, decimals: u8) -> Cell {
     value.filter(|v| v.is_finite()).map_or(Cell::Empty, |value| Cell::Num { value, decimals })
@@ -135,6 +145,7 @@ pub fn descriptives(ds: &Dataset, names: &[String]) -> Result<Table, StatsError>
         title: "Descriptive Statistics".to_string(),
         columns: ["N", "Minimum", "Maximum", "Mean", "Std. Deviation"].map(String::from).to_vec(),
         rows,
+        categories: Vec::new(),
     })
 }
 

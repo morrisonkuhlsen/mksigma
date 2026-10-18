@@ -125,7 +125,11 @@ impl SigmaApp {
 
     /// Writes the Output as a self-contained HTML page or a PDF document.
     pub fn export(&mut self, path: &Path, format: ExportFormat) {
-        let title = self.file_name.as_deref().map_or_else(|| "MK Sigma Output".to_string(), |f| format!("{f} — Output"));
+        let mut title = self.file_name.as_deref().map_or_else(|| "MK Sigma Output".to_string(), |f| format!("{f} — Output"));
+        // A filtered Output says so, or a reader would take its items for all the cases.
+        if let Some(category) = self.session.cross_filter() {
+            title.push_str(&format!(" (filtered by {})", category.label));
+        }
         let bytes = match format {
             ExportFormat::Html => self.session.output.to_html(&title).into_bytes(),
             ExportFormat::Pdf => self.session.output.to_pdf(&title),
@@ -364,8 +368,21 @@ impl SigmaApp {
             ui.allocate_ui_with_layout(egui::vec2(right_width, body), top_down, |ui| {
                 ui.set_width(right_width);
                 ui.set_height(body);
-                if let output::OutputAction::Export(format) = output::output_view(ui, &mut self.session.output, &mut self.output_state) {
-                    self.export_dialog(format);
+                match output::output_view(ui, &self.session, &mut self.output_state) {
+                    output::OutputAction::None => {}
+                    output::OutputAction::Export(format) => self.export_dialog(format),
+                    output::OutputAction::Clear => self.session.clear_output(),
+                    output::OutputAction::Select(item, category) => {
+                        // Filtering changes which items there are, so pivots by index would land on others.
+                        self.output_state.transposed.clear();
+                        if let Err(e) = self.session.select_category(item, category) {
+                            self.status = Some(Status::Error(e.to_string()));
+                        }
+                    }
+                    output::OutputAction::ClearFilter => {
+                        self.output_state.transposed.clear();
+                        self.session.clear_cross_filter();
+                    }
                 }
             });
         });

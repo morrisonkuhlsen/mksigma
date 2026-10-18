@@ -4,10 +4,10 @@
 
 use mksigma_core::{Dataset, Value};
 use mksigma_output::chart::ticks;
-use mksigma_output::{Chart, Item};
+use mksigma_output::{Cases, Category, Chart, Item};
 
 use crate::groups::{moments, numeric, valid, valid_value};
-use crate::{StatsError, value_text};
+use crate::{StatsError, category, value_text};
 
 /// A histogram of `name`. The bin count follows Sturges' rule (1 + log₂ n, 5 to 30 bins), on
 /// round bin edges; the last bin includes its upper edge.
@@ -38,7 +38,23 @@ pub fn histogram(ds: &Dataset, name: &str, normal: bool) -> Result<Item, StatsEr
         }
     }
     let normal = if normal { m.std_dev().map(|sd| (m.mean, sd)) } else { None };
-    Ok(Item::Chart(Chart::Histogram { title: var.display_name().to_string(), x_label: var.display_name().to_string(), bins, normal, n: m.w }))
+    let categories = bins
+        .iter()
+        .enumerate()
+        .map(|(k, (low, high, _))| Category {
+            variable: var.name.clone(),
+            cases: Cases::Range { low: *low, high: *high, closed: k == last },
+            label: format!("{} {low} to {high}", var.display_name()),
+        })
+        .collect();
+    Ok(Item::Chart(Chart::Histogram {
+        title: var.display_name().to_string(),
+        x_label: var.display_name().to_string(),
+        bins,
+        normal,
+        n: m.w,
+        categories,
+    }))
 }
 
 /// What the bars of a bar chart measure.
@@ -92,11 +108,13 @@ pub fn bar(ds: &Dataset, value: &BarValue, by: &str) -> Result<Item, StatsError>
             (value_text(bvar, v), if measured.is_some() { m.mean } else { m.w })
         })
         .collect();
+    // Every category is a valid value, so each bar gets one; all or none keeps them in step.
+    let categories = groups.iter().map(|(v, _)| category(bvar, v)).collect::<Option<Vec<_>>>().unwrap_or_default();
     let (y_label, title) = match measured {
         Some((_, var)) => (format!("Mean {}", var.display_name()), format!("Mean {} by {}", var.display_name(), bvar.display_name())),
         None => ("Count".to_string(), bvar.display_name().to_string()),
     };
-    Ok(Item::Chart(Chart::Bar { title, x_label: bvar.display_name().to_string(), y_label, bars }))
+    Ok(Item::Chart(Chart::Bar { title, x_label: bvar.display_name().to_string(), y_label, bars, categories }))
 }
 
 /// A point per case valid on both variables.

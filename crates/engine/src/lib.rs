@@ -10,11 +10,14 @@ use thiserror::Error;
 mod dictionary;
 mod edit;
 mod expr;
+mod filter;
 mod history;
 mod steps;
 mod transform;
 
+use filter::{CrossFilter, Run};
 use history::{Edit, Entry, History};
+use mksigma_output::Category;
 pub use steps::{AppliedStep, StepKind};
 
 pub use mksigma_core as core;
@@ -50,6 +53,11 @@ pub struct Session {
     base: Dataset,
     steps: Vec<AppliedStep>,
     history: History,
+    /// The analyses behind the Output, each with its items on all the cases.
+    runs: Vec<Run>,
+    /// The run each item of the Output came from, by item index.
+    run_of: Vec<usize>,
+    cross_filter: Option<CrossFilter>,
 }
 
 /// Whether a command changes the data (and so is an applied step) rather than analysing it.
@@ -106,6 +114,10 @@ impl Session {
         self.steps.clear();
         self.modified = false;
         self.history.clear();
+        // The Output stays, but a filter on the old file's cases means nothing for the new one.
+        if self.cross_filter.take().is_some() {
+            self.show_runs();
+        }
         Ok(file.warnings)
     }
 
@@ -137,6 +149,73 @@ impl Session {
         self.modified = true;
         self.steps.push(step.clone());
         self.history.push(Entry::Edits { label, edits, journal, step: Some(step) });
+        self.data_changed();
+    }
+
+    /// Filtered items follow the data; the unfiltered ones stay as they were produced.
+    fn data_changed(&mut self) {
+        if self.cross_filter.is_some() {
+            self.show_runs();
+        }
+    }
+
+    /// The category the Output is cross-filtered by, if any.
+    pub fn cross_filter(&self) -> Option<&Category> {
+        self.cross_filter.as_ref().map(|f| &f.category)
+    }
+
+    /// Whether Output item `item` came from the command whose item was selected: it shows all
+    /// the cases, with the selection highlighted.
+    pub fn is_filter_source(&self, item: usize) -> bool {
+        self.cross_filter.as_ref().is_some_and(|f| self.run_of.get(item) == Some(&f.source))
+    }
+
+    /// Selects `category` of Output item `item` and filters the other items to its cases.
+    /// Selecting the selected category again clears the filter.
+    pub fn select_category(&mut self, item: usize, category: Category) -> Result<(), EngineError> {
+        let source = *self.run_of.get(item).ok_or_else(|| EngineError::Invalid(format!("there is no output item {}", item + 1)))?;
+        let filter = CrossFilter { category, source };
+        self.cross_filter = if self.cross_filter.as_ref() == Some(&filter) { None } else { Some(filter) };
+        self.show_runs();
+        Ok(())
+    }
+
+    pub fn clear_cross_filter(&mut self) {
+        if self.cross_filter.take().is_some() {
+            self.show_runs();
+        }
+    }
+
+    /// Empties the Output, and with it the filter.
+    pub fn clear_output(&mut self) {
+        self.runs.clear();
+        self.cross_filter = None;
+        self.show_runs();
+    }
+
+    fn add_run(&mut self, command: Command, items: Vec<Item>) {
+        self.runs.push(Run { command, items });
+        self.show_runs();
+    }
+
+    /// Rebuilds the Output from the runs: each on all the cases, or, under a filter, run again
+    /// on the filtered cases (except the one the selection came from).
+    fn show_runs(&mut self) {
+        let subset = self.cross_filter.as_ref().map(|f| (f.source, filter::subset(&self.dataset, &f.category)));
+        let mut items = Vec::new();
+        let mut run_of = Vec::new();
+        for (i, run) in self.runs.iter().enumerate() {
+            let shown = match &subset {
+                Some((source, _)) if *source == i => run.items.clone(),
+                Some((_, Ok(ds))) => analyse(ds, &run.command).unwrap_or_else(|e| vec![Item::Warning(format!("Filtered: {e}"))]),
+                Some((_, Err(e))) => vec![Item::Warning(format!("Filtered: {e}"))],
+                None => run.items.clone(),
+            };
+            run_of.extend(std::iter::repeat_n(i, shown.len()));
+            items.extend(shown);
+        }
+        self.output.items = items;
+        self.run_of = run_of;
     }
 
     /// Edits one cell from typed text (Data View); the row after the last case adds a case. Not
@@ -227,6 +306,7 @@ impl Session {
         self.replay();
         self.history.push(Entry::Steps { label, before, after: self.steps.clone() });
         self.modified = true;
+        self.data_changed();
     }
 
     /// Rebuilds the dataset from the base with the enabled steps. A step that fails is skipped
@@ -291,6 +371,7 @@ impl Session {
         }
         self.history.undone(entry);
         self.modified = true;
+        self.data_changed();
         Ok(true)
     }
 
@@ -312,6 +393,7 @@ impl Session {
         }
         self.history.redone(entry);
         self.modified = true;
+        self.data_changed();
         Ok(true)
     }
 
@@ -334,176 +416,189 @@ impl Session {
             Command::If { cond, target, expr } => return transform::compute(&mut self.dataset, target, expr, Some(cond)),
             Command::Recode(groups) => return transform::recode(&mut self.dataset, groups),
             Command::SelectIf(cond) => return transform::select_if(&mut self.dataset, cond),
-            Command::Descriptives { variables } => {
-                let table = mksigma_stats::descriptives(&self.dataset, variables)?;
-                self.output.push(Item::Table(table));
-            }
-            Command::Frequencies { variables, table, order, statistics, histogram, barchart } => {
-                use mksigma_stats::{FrequenciesOrder as O, FrequenciesStatistic as S};
-                use mksigma_syntax::{FreqOrder, FreqStatistic};
-                let options = mksigma_stats::FrequenciesOptions {
-                    variables: variables.clone(),
-                    table: *table,
-                    order: match order {
-                        FreqOrder::AscendingValue => O::AscendingValue,
-                        FreqOrder::DescendingValue => O::DescendingValue,
-                        FreqOrder::AscendingFrequency => O::AscendingFrequency,
-                        FreqOrder::DescendingFrequency => O::DescendingFrequency,
-                    },
-                    statistics: statistics
-                        .iter()
-                        .map(|s| match s {
-                            FreqStatistic::Mean => S::Mean,
-                            FreqStatistic::SeMean => S::SeMean,
-                            FreqStatistic::Mode => S::Mode,
-                            FreqStatistic::StdDev => S::StdDev,
-                            FreqStatistic::Variance => S::Variance,
-                            FreqStatistic::Range => S::Range,
-                            FreqStatistic::Minimum => S::Minimum,
-                            FreqStatistic::Maximum => S::Maximum,
-                            FreqStatistic::Sum => S::Sum,
-                        })
-                        .collect(),
-                };
-                for item in mksigma_stats::frequencies(&self.dataset, &options)? {
-                    self.output.push(item);
-                }
-                for variable in variables {
-                    if *barchart {
-                        self.output.push(mksigma_stats::bar(&self.dataset, &mksigma_stats::BarValue::Count, variable)?);
-                    }
-                    if let Some(normal) = histogram {
-                        self.output.push(mksigma_stats::histogram(&self.dataset, variable, *normal)?);
-                    }
-                }
-            }
-            Command::Examine { variables, by, descriptives, boxplot, stemleaf } => {
-                let options =
-                    mksigma_stats::ExamineOptions { variables: variables.clone(), by: by.clone(), descriptives: *descriptives, boxplot: *boxplot };
-                self.output.items.extend(mksigma_stats::examine(&self.dataset, &options)?);
-                if *stemleaf {
-                    self.output.push(Item::Text("Stem-and-leaf plots are not drawn yet.".into()));
-                }
-            }
-            Command::Graph { chart, title } => {
-                use mksigma_syntax::{BarStat, GraphSpec};
-                let mut item = match chart {
-                    GraphSpec::Histogram { variable, normal } => mksigma_stats::histogram(&self.dataset, variable, *normal)?,
-                    GraphSpec::Bar { value, by } => {
-                        let value = match value {
-                            BarStat::Count => mksigma_stats::BarValue::Count,
-                            BarStat::Mean(y) => mksigma_stats::BarValue::Mean(y.clone()),
-                        };
-                        mksigma_stats::bar(&self.dataset, &value, by)?
-                    }
-                    GraphSpec::Scatter { x, y } => mksigma_stats::scatter(&self.dataset, x, y)?,
-                };
-                if let (Some(title), Item::Chart(chart)) = (title, &mut item) {
-                    chart.set_title(title);
-                }
-                self.output.push(item);
-            }
-            Command::DisplayDictionary => {
-                for table in dictionary::tables(&self.dataset) {
-                    self.output.push(Item::Table(table));
-                }
-            }
-            Command::Crosstabs { rows, columns, cells, chisq } => {
-                let options = mksigma_stats::CrosstabsOptions {
-                    rows: rows.clone(),
-                    columns: columns.clone(),
-                    cells: mksigma_stats::CrosstabsCells {
-                        count: cells.count,
-                        expected: cells.expected,
-                        row: cells.row,
-                        column: cells.column,
-                        total: cells.total,
-                    },
-                    chisq: *chisq,
-                };
-                self.output.items.extend(mksigma_stats::crosstabs(&self.dataset, &options)?);
-            }
-            Command::TTest { test, ci } => {
-                use mksigma_syntax::{Literal, TTestSpec};
-                let value = |l: &Literal| match l {
-                    Literal::Num(x) => Value::Num(*x),
-                    Literal::Str(s) => Value::Str(s.clone()),
-                };
-                let test = match test {
-                    TTestSpec::OneSample { variables, test_value } => {
-                        mksigma_stats::TTest::OneSample { variables: variables.clone(), test_value: *test_value }
-                    }
-                    TTestSpec::Independent { variables, group, first, second } => mksigma_stats::TTest::Independent {
-                        variables: variables.clone(),
-                        group: group.clone(),
-                        first: value(first),
-                        second: value(second),
-                    },
-                    TTestSpec::Paired { pairs } => mksigma_stats::TTest::Paired { pairs: pairs.clone() },
-                };
-                self.output.items.extend(mksigma_stats::t_test(&self.dataset, &test, *ci)?);
-            }
-            Command::Correlations { variables, with, one_tailed, flag, listwise } => {
-                let options = mksigma_stats::CorrelationsOptions {
-                    variables: variables.clone(),
-                    with: with.clone(),
-                    one_tailed: *one_tailed,
-                    flag: *flag,
-                    listwise: *listwise,
-                };
-                self.output.items.extend(mksigma_stats::correlations(&self.dataset, &options)?);
-            }
-            Command::NparTests(specs) => {
-                use mksigma_stats::NparTest;
-                use mksigma_syntax::NparSpec;
-                let tests: Vec<NparTest> = specs
-                    .iter()
-                    .map(|s| match s {
-                        NparSpec::MannWhitney { variables, group, first, second } => {
-                            NparTest::MannWhitney { variables: variables.clone(), group: group.clone(), first: *first, second: *second }
-                        }
-                        NparSpec::Wilcoxon { pairs } => NparTest::Wilcoxon { pairs: pairs.clone() },
-                        NparSpec::KruskalWallis { variables, group, low, high } => {
-                            NparTest::KruskalWallis { variables: variables.clone(), group: group.clone(), low: *low, high: *high }
-                        }
-                    })
-                    .collect();
-                self.output.items.extend(mksigma_stats::npar_tests(&self.dataset, &tests)?);
-            }
-            Command::Logistic { dependent, covariates, ci, iterations, cut } => {
-                let options = mksigma_stats::LogisticOptions {
-                    dependent: dependent.clone(),
-                    covariates: covariates.clone(),
-                    ci: *ci,
-                    iterations: *iterations,
-                    cut: *cut,
-                };
-                self.output.items.extend(mksigma_stats::logistic(&self.dataset, &options)?);
-            }
-            Command::Regression { dependent, predictors, ci } => {
-                let options = mksigma_stats::RegressionOptions { dependent: dependent.clone(), predictors: predictors.clone(), ci: *ci };
-                self.output.items.extend(mksigma_stats::regression(&self.dataset, &options)?);
-            }
-            Command::Oneway { dependents, factor, descriptives, homogeneity, posthoc, alpha } => {
-                let options = mksigma_stats::OnewayOptions {
-                    dependents: dependents.clone(),
-                    factor: factor.clone(),
-                    descriptives: *descriptives,
-                    homogeneity: *homogeneity,
-                    posthoc: posthoc
-                        .iter()
-                        .map(|p| match p {
-                            mksigma_syntax::PostHocTest::Tukey => mksigma_stats::PostHoc::Tukey,
-                            mksigma_syntax::PostHocTest::Bonferroni => mksigma_stats::PostHoc::Bonferroni,
-                        })
-                        .collect(),
-                    alpha: *alpha,
-                };
-                self.output.items.extend(mksigma_stats::oneway(&self.dataset, &options)?);
+            _ => {
+                let items = analyse(&self.dataset, command)?;
+                self.add_run(command.clone(), items);
             }
         }
         Ok(Vec::new())
     }
+}
+
+/// The output of an analysis command on `ds`; nothing for commands that change the data.
+fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
+    let mut items = Vec::new();
+    match command {
+        Command::Descriptives { variables } => {
+            let table = mksigma_stats::descriptives(ds, variables)?;
+            items.push(Item::Table(table));
+        }
+        Command::Frequencies { variables, table, order, statistics, histogram, barchart } => {
+            use mksigma_stats::{FrequenciesOrder as O, FrequenciesStatistic as S};
+            use mksigma_syntax::{FreqOrder, FreqStatistic};
+            let options = mksigma_stats::FrequenciesOptions {
+                variables: variables.clone(),
+                table: *table,
+                order: match order {
+                    FreqOrder::AscendingValue => O::AscendingValue,
+                    FreqOrder::DescendingValue => O::DescendingValue,
+                    FreqOrder::AscendingFrequency => O::AscendingFrequency,
+                    FreqOrder::DescendingFrequency => O::DescendingFrequency,
+                },
+                statistics: statistics
+                    .iter()
+                    .map(|s| match s {
+                        FreqStatistic::Mean => S::Mean,
+                        FreqStatistic::SeMean => S::SeMean,
+                        FreqStatistic::Mode => S::Mode,
+                        FreqStatistic::StdDev => S::StdDev,
+                        FreqStatistic::Variance => S::Variance,
+                        FreqStatistic::Range => S::Range,
+                        FreqStatistic::Minimum => S::Minimum,
+                        FreqStatistic::Maximum => S::Maximum,
+                        FreqStatistic::Sum => S::Sum,
+                    })
+                    .collect(),
+            };
+            for item in mksigma_stats::frequencies(ds, &options)? {
+                items.push(item);
+            }
+            for variable in variables {
+                if *barchart {
+                    items.push(mksigma_stats::bar(ds, &mksigma_stats::BarValue::Count, variable)?);
+                }
+                if let Some(normal) = histogram {
+                    items.push(mksigma_stats::histogram(ds, variable, *normal)?);
+                }
+            }
+        }
+        Command::Examine { variables, by, descriptives, boxplot, stemleaf } => {
+            let options =
+                mksigma_stats::ExamineOptions { variables: variables.clone(), by: by.clone(), descriptives: *descriptives, boxplot: *boxplot };
+            items.extend(mksigma_stats::examine(ds, &options)?);
+            if *stemleaf {
+                items.push(Item::Text("Stem-and-leaf plots are not drawn yet.".into()));
+            }
+        }
+        Command::Graph { chart, title } => {
+            use mksigma_syntax::{BarStat, GraphSpec};
+            let mut item = match chart {
+                GraphSpec::Histogram { variable, normal } => mksigma_stats::histogram(ds, variable, *normal)?,
+                GraphSpec::Bar { value, by } => {
+                    let value = match value {
+                        BarStat::Count => mksigma_stats::BarValue::Count,
+                        BarStat::Mean(y) => mksigma_stats::BarValue::Mean(y.clone()),
+                    };
+                    mksigma_stats::bar(ds, &value, by)?
+                }
+                GraphSpec::Scatter { x, y } => mksigma_stats::scatter(ds, x, y)?,
+            };
+            if let (Some(title), Item::Chart(chart)) = (title, &mut item) {
+                chart.set_title(title);
+            }
+            items.push(item);
+        }
+        Command::DisplayDictionary => {
+            for table in dictionary::tables(ds) {
+                items.push(Item::Table(table));
+            }
+        }
+        Command::Crosstabs { rows, columns, cells, chisq } => {
+            let options = mksigma_stats::CrosstabsOptions {
+                rows: rows.clone(),
+                columns: columns.clone(),
+                cells: mksigma_stats::CrosstabsCells {
+                    count: cells.count,
+                    expected: cells.expected,
+                    row: cells.row,
+                    column: cells.column,
+                    total: cells.total,
+                },
+                chisq: *chisq,
+            };
+            items.extend(mksigma_stats::crosstabs(ds, &options)?);
+        }
+        Command::TTest { test, ci } => {
+            use mksigma_syntax::{Literal, TTestSpec};
+            let value = |l: &Literal| match l {
+                Literal::Num(x) => Value::Num(*x),
+                Literal::Str(s) => Value::Str(s.clone()),
+            };
+            let test = match test {
+                TTestSpec::OneSample { variables, test_value } => {
+                    mksigma_stats::TTest::OneSample { variables: variables.clone(), test_value: *test_value }
+                }
+                TTestSpec::Independent { variables, group, first, second } => mksigma_stats::TTest::Independent {
+                    variables: variables.clone(),
+                    group: group.clone(),
+                    first: value(first),
+                    second: value(second),
+                },
+                TTestSpec::Paired { pairs } => mksigma_stats::TTest::Paired { pairs: pairs.clone() },
+            };
+            items.extend(mksigma_stats::t_test(ds, &test, *ci)?);
+        }
+        Command::Correlations { variables, with, one_tailed, flag, listwise } => {
+            let options = mksigma_stats::CorrelationsOptions {
+                variables: variables.clone(),
+                with: with.clone(),
+                one_tailed: *one_tailed,
+                flag: *flag,
+                listwise: *listwise,
+            };
+            items.extend(mksigma_stats::correlations(ds, &options)?);
+        }
+        Command::NparTests(specs) => {
+            use mksigma_stats::NparTest;
+            use mksigma_syntax::NparSpec;
+            let tests: Vec<NparTest> = specs
+                .iter()
+                .map(|s| match s {
+                    NparSpec::MannWhitney { variables, group, first, second } => {
+                        NparTest::MannWhitney { variables: variables.clone(), group: group.clone(), first: *first, second: *second }
+                    }
+                    NparSpec::Wilcoxon { pairs } => NparTest::Wilcoxon { pairs: pairs.clone() },
+                    NparSpec::KruskalWallis { variables, group, low, high } => {
+                        NparTest::KruskalWallis { variables: variables.clone(), group: group.clone(), low: *low, high: *high }
+                    }
+                })
+                .collect();
+            items.extend(mksigma_stats::npar_tests(ds, &tests)?);
+        }
+        Command::Logistic { dependent, covariates, ci, iterations, cut } => {
+            let options = mksigma_stats::LogisticOptions {
+                dependent: dependent.clone(),
+                covariates: covariates.clone(),
+                ci: *ci,
+                iterations: *iterations,
+                cut: *cut,
+            };
+            items.extend(mksigma_stats::logistic(ds, &options)?);
+        }
+        Command::Regression { dependent, predictors, ci } => {
+            let options = mksigma_stats::RegressionOptions { dependent: dependent.clone(), predictors: predictors.clone(), ci: *ci };
+            items.extend(mksigma_stats::regression(ds, &options)?);
+        }
+        Command::Oneway { dependents, factor, descriptives, homogeneity, posthoc, alpha } => {
+            let options = mksigma_stats::OnewayOptions {
+                dependents: dependents.clone(),
+                factor: factor.clone(),
+                descriptives: *descriptives,
+                homogeneity: *homogeneity,
+                posthoc: posthoc
+                    .iter()
+                    .map(|p| match p {
+                        mksigma_syntax::PostHocTest::Tukey => mksigma_stats::PostHoc::Tukey,
+                        mksigma_syntax::PostHocTest::Bonferroni => mksigma_stats::PostHoc::Bonferroni,
+                    })
+                    .collect(),
+                alpha: *alpha,
+            };
+            items.extend(mksigma_stats::oneway(ds, &options)?);
+        }
+        _ => {}
+    }
+    Ok(items)
 }
 
 #[cfg(test)]
@@ -846,6 +941,102 @@ mod tests {
         ] {
             assert!(text.contains(title), "{title} missing from:\n{text}");
         }
+    }
+
+    /// N and mean of score in the first "Descriptive Statistics" table of the Output.
+    fn score_n_and_mean(s: &Session) -> (i64, f64) {
+        let table = s
+            .output
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Table(t) if t.title == "Descriptive Statistics" => Some(t),
+                _ => None,
+            })
+            .unwrap();
+        match &table.rows[0].1[..] {
+            [mksigma_output::Cell::Int(n), _, _, mksigma_output::Cell::Num { value, .. }, _] => (*n, *value),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn selecting_a_category_filters_the_other_items() {
+        use mksigma_output::{Cases, Chart};
+        let mut s = Session::with_sample().unwrap();
+        // Ages 23 35 41 29 52 47 31 26: Jovem (≤ 30) are cases 1, 4 and 8, scores 61, 80, 77.
+        s.run_syntax(
+            "RECODE age (LO THRU 30 = 1) (ELSE = 2) INTO grupo.\nVALUE LABELS grupo 1 'Jovem' 2 'Adulto'.\n\
+             GRAPH /BAR(SIMPLE)=COUNT BY grupo.\nDESCRIPTIVES score.",
+        )
+        .unwrap();
+        let Item::Chart(chart) = &s.output.items[0] else { panic!() };
+        let jovem = chart.category(0).unwrap().clone();
+        assert_eq!((jovem.label.as_str(), &jovem.cases), ("grupo = Jovem", &Cases::Num(1.0)));
+        assert_eq!(score_n_and_mean(&s), (8, 72.375));
+
+        s.select_category(0, jovem.clone()).unwrap();
+        assert_eq!(s.cross_filter(), Some(&jovem));
+        let (n, mean) = score_n_and_mean(&s);
+        assert_eq!(n, 3);
+        assert!((mean - 218.0 / 3.0).abs() < 1e-12);
+        assert!(s.is_filter_source(0) && !s.is_filter_source(1));
+        let Item::Chart(Chart::Bar { bars, .. }) = &s.output.items[0] else { panic!() };
+        assert_eq!(bars.len(), 2, "the selected chart keeps every bar");
+        assert!(s.steps().len() == 2 && s.dataset.n_cases() == 8, "a filter is a view, not a step");
+
+        // New analyses and changes to the data follow the filter.
+        s.run_syntax("FREQUENCIES grupo.").unwrap();
+        let frequency = s.output.items.iter().rev().find_map(|i| if let Item::Table(t) = i { Some(t) } else { None }).unwrap();
+        assert_eq!(frequency.rows[0].1[1], mksigma_output::Cell::Int(3), "only Jovem is left");
+        s.set_cell(0, 2, "70").unwrap();
+        assert!((score_n_and_mean(&s).1 - 227.0 / 3.0).abs() < 1e-12);
+
+        // Selecting it again clears the filter; the unfiltered items are as they were produced.
+        s.select_category(0, jovem).unwrap();
+        assert_eq!(s.cross_filter(), None);
+        assert_eq!(score_n_and_mean(&s), (8, 72.375));
+        assert!(s.select_category(99, chart_category(&s)).is_err());
+        s.clear_output();
+        assert!(s.output.items.is_empty() && s.cross_filter().is_none());
+    }
+
+    fn chart_category(s: &Session) -> Category {
+        s.output.items.iter().find_map(|i| if let Item::Chart(c) = i { c.category(1).cloned() } else { None }).unwrap()
+    }
+
+    #[test]
+    fn tables_histograms_and_boxes_have_categories() {
+        use mksigma_output::{Cases, Chart};
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax(
+            "RECODE age (LO THRU 30 = 1) (ELSE = 2) INTO grupo.\nFREQUENCIES grupo /HISTOGRAM.\n\
+             EXAMINE score BY grupo /PLOT=BOXPLOT.",
+        )
+        .unwrap();
+        let frequency = s.output.items.iter().find_map(|i| if let Item::Table(t) = i { (t.title == "grupo").then_some(t) } else { None }).unwrap();
+        assert_eq!(frequency.category(1).map(|c| &c.cases), Some(&Cases::Num(2.0)));
+        assert!(frequency.category(2).is_none(), "the Total row");
+        let histogram = s.output.items.iter().find_map(|i| if let Item::Chart(c @ Chart::Histogram { .. }) = i { Some(c) } else { None }).unwrap();
+        let Chart::Histogram { bins, categories, .. } = histogram else { panic!() };
+        assert_eq!(bins.len(), categories.len());
+        assert!(matches!(categories.last().unwrap().cases, Cases::Range { closed: true, .. }));
+        let boxplot = s.output.items.iter().find_map(|i| if let Item::Chart(c @ Chart::Boxplot { .. }) = i { Some(c) } else { None }).unwrap();
+        assert_eq!(boxplot.category(1).map(|c| c.label.as_str()), Some("grupo = 2.00"));
+
+        // The first bin of the histogram holds grupo 1: the three youngest.
+        let item = s.output.items.iter().position(|i| matches!(i, Item::Chart(Chart::Histogram { .. }))).unwrap();
+        let first_bin = histogram.category(0).unwrap().clone();
+        s.select_category(item, first_bin).unwrap();
+        let frequency = s.output.items.iter().find_map(|i| if let Item::Table(t) = i { (t.title == "grupo").then_some(t) } else { None }).unwrap();
+        assert_eq!(frequency.rows.len(), 3, "the same command as the histogram: all the cases");
+        let summary = s
+            .output
+            .items
+            .iter()
+            .find_map(|i| if let Item::Table(t) = i { (t.title == "Case Processing Summary").then_some(t) } else { None })
+            .unwrap();
+        assert_eq!(summary.rows[0].1[0], mksigma_output::Cell::Int(3), "EXAMINE ran again on the three in the first bin");
     }
 
     #[test]

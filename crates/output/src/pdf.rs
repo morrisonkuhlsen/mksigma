@@ -341,7 +341,7 @@ impl Pages {
                     };
                     self.line(at(from.0, from.1), at(to.0, to.1), color, width);
                 }
-                Shape::Rect { x, y, width, height } => {
+                Shape::Rect { x, y, width, height, .. } => {
                     let (px, py) = at(x, y + height);
                     self.rect(px, py, width, height, BAR);
                 }
@@ -492,9 +492,16 @@ mod tests {
             title: "Satisfação (n)".into(),
             columns: vec!["N".into(), "Média".into()],
             rows: (0..rows).map(|i| (format!("Grupo {i}"), vec![Cell::Int(i as i64), Cell::Num { value: 1.5, decimals: 2 }])).collect(),
+            categories: Vec::new(),
         }));
         out.push(Item::Text("a. Nota (com parênteses) e \\ barra.".into()));
-        out.push(Item::Chart(Chart::Bar { title: "Barras".into(), x_label: "x".into(), y_label: "N".into(), bars: vec![("A".into(), 2.0)] }));
+        out.push(Item::Chart(Chart::Bar {
+            title: "Barras".into(),
+            x_label: "x".into(),
+            y_label: "N".into(),
+            bars: vec![("A".into(), 2.0)],
+            categories: Vec::new(),
+        }));
         out
     }
 

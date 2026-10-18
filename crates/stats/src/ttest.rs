@@ -48,8 +48,13 @@ fn one_sample(ds: &Dataset, variables: &[String], test_value: f64, ci: f64) -> R
     let mut test_columns = ["t", "df", "Sig. (2-tailed)", "Mean Difference"].map(String::from).to_vec();
     test_columns.extend([ci_label(ci, "Lower"), ci_label(ci, "Upper")]);
     Ok(vec![
-        Item::Table(Table { title: "One-Sample Statistics".into(), columns: stat_columns, rows: stats }),
-        Item::Table(Table { title: format!("One-Sample Test (Test Value = {test_value})"), columns: test_columns, rows: tests }),
+        Item::Table(Table { title: "One-Sample Statistics".into(), columns: stat_columns, rows: stats, categories: Vec::new() }),
+        Item::Table(Table {
+            title: format!("One-Sample Test (Test Value = {test_value})"),
+            columns: test_columns,
+            rows: tests,
+            categories: Vec::new(),
+        }),
     ])
 }
 
@@ -121,8 +126,8 @@ fn independent(ds: &Dataset, variables: &[String], group: &str, first: &Value, s
         ["", "Levene F", "Levene Sig.", "t", "df", "Sig. (2-tailed)", "Mean Difference", "Std. Error Difference"].map(String::from).to_vec();
     test_columns.extend([ci_label(ci, "Lower"), ci_label(ci, "Upper")]);
     Ok(vec![
-        Item::Table(Table { title: "Group Statistics".into(), columns: stat_columns, rows: stats }),
-        Item::Table(Table { title: "Independent Samples Test".into(), columns: test_columns, rows: tests }),
+        Item::Table(Table { title: "Group Statistics".into(), columns: stat_columns, rows: stats, categories: Vec::new() }),
+        Item::Table(Table { title: "Independent Samples Test".into(), columns: test_columns, rows: tests, categories: Vec::new() }),
     ])
 }
 
@@ -184,9 +189,9 @@ fn paired(ds: &Dataset, pairs: &[(String, String)], ci: f64) -> Result<Vec<Item>
     test_columns.extend([ci_label(ci, "Lower"), ci_label(ci, "Upper")]);
     test_columns.extend(["t", "df", "Sig. (2-tailed)"].map(String::from));
     Ok(vec![
-        Item::Table(Table { title: "Paired Samples Statistics".into(), columns: stat_columns, rows: stats }),
-        Item::Table(Table { title: "Paired Samples Correlations".into(), columns: corr_columns, rows: correlations }),
-        Item::Table(Table { title: "Paired Samples Test".into(), columns: test_columns, rows: tests }),
+        Item::Table(Table { title: "Paired Samples Statistics".into(), columns: stat_columns, rows: stats, categories: Vec::new() }),
+        Item::Table(Table { title: "Paired Samples Correlations".into(), columns: corr_columns, rows: correlations, categories: Vec::new() }),
+        Item::Table(Table { title: "Paired Samples Test".into(), columns: test_columns, rows: tests, categories: Vec::new() }),
     ])
 }
 

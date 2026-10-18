@@ -86,7 +86,7 @@ pub fn correlations(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsE
     }
     let mut columns = vec![String::new()];
     columns.extend(column_vars.iter().map(|(_, v)| v.display_name().to_string()));
-    let mut items = vec![Item::Table(Table { title: "Correlations".into(), columns, rows })];
+    let mut items = vec![Item::Table(Table { title: "Correlations".into(), columns, rows, categories: Vec::new() })];
     let tails = if options.one_tailed { "1-tailed" } else { "2-tailed" };
     if flagged_01 {
         items.push(Item::Text(format!("**. Correlation is significant at the 0.01 level ({tails}).")));

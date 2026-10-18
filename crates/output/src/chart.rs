@@ -2,18 +2,19 @@
 //! ticks, bars, points, curves, labels) and every renderer draws those shapes: egui on screen,
 //! SVG for export. Both show the same chart because neither decides the geometry.
 
-/// What a chart shows.
+/// What a chart shows. `categories` holds the category of each bin, bar or box, in order, when
+/// they can be selected to filter other items; it is empty when they can't.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Chart {
     /// Bins `[low, high)` with their (weighted) counts; with `normal`, the normal curve of the
     /// given mean and standard deviation scaled to the counts.
-    Histogram { title: String, x_label: String, bins: Vec<(f64, f64, f64)>, normal: Option<(f64, f64)>, n: f64 },
+    Histogram { title: String, x_label: String, bins: Vec<(f64, f64, f64)>, normal: Option<(f64, f64)>, n: f64, categories: Vec<Category> },
     /// One bar per category.
-    Bar { title: String, x_label: String, y_label: String, bars: Vec<(String, f64)> },
+    Bar { title: String, x_label: String, y_label: String, bars: Vec<(String, f64)>, categories: Vec<Category> },
     /// Points (x, y).
     Scatter { title: String, x_label: String, y_label: String, points: Vec<(f64, f64)> },
     /// One box per group.
-    Boxplot { title: String, x_label: String, y_label: String, boxes: Vec<BoxStats> },
+    Boxplot { title: String, x_label: String, y_label: String, boxes: Vec<BoxStats>, categories: Vec<Category> },
 }
 
 /// A box of a boxplot: the hinges and median, the whisker ends (the most extreme values within
@@ -34,6 +35,14 @@ impl Chart {
     pub fn title(&self) -> &str {
         match self {
             Chart::Histogram { title, .. } | Chart::Bar { title, .. } | Chart::Scatter { title, .. } | Chart::Boxplot { title, .. } => title,
+        }
+    }
+
+    /// The category of bin, bar or box `part`, if it can be selected.
+    pub fn category(&self, part: usize) -> Option<&Category> {
+        match self {
+            Chart::Histogram { categories, .. } | Chart::Bar { categories, .. } | Chart::Boxplot { categories, .. } => categories.get(part),
+            Chart::Scatter { .. } => None,
         }
     }
 
@@ -78,12 +87,13 @@ pub enum Shape {
         to: (f64, f64),
         stroke: Stroke,
     },
-    /// A filled bar.
+    /// A filled bar; `part` is the bin, bar or box it draws, for selection.
     Rect {
         x: f64,
         y: f64,
         width: f64,
         height: f64,
+        part: Option<usize>,
     },
     Circle {
         x: f64,
@@ -222,16 +232,16 @@ pub fn layout(chart: &Chart, width: f64, height: f64) -> Vec<Shape> {
     let f = Frame::new(width, height);
     let mut out = Vec::new();
     match chart {
-        Chart::Histogram { title, x_label, bins, normal, n } => {
+        Chart::Histogram { title, x_label, bins, normal, n, .. } => {
             axis_titles(&mut out, &f, width, title, x_label, "Frequency");
             let (lo, hi) = (bins.first().map_or(0.0, |b| b.0), bins.last().map_or(1.0, |b| b.1));
             let top = bins.iter().map(|b| b.2).fold(0.0, f64::max);
             let curve_top = normal.map_or(0.0, |(m, s)| normal_pdf(m, m, s) * n * bins.first().map_or(1.0, |b| b.1 - b.0));
             let yr = y_axis(&mut out, &f, 0.0, top.max(curve_top).max(1.0));
             let xr = x_axis(&mut out, &f, lo, hi);
-            for (a, b, count) in bins {
+            for (i, (a, b, count)) in bins.iter().enumerate() {
                 let (x0, x1, y) = (f.x(*a, xr), f.x(*b, xr), f.y(*count, yr));
-                out.push(Shape::Rect { x: x0, y, width: x1 - x0, height: f.bottom - y });
+                out.push(Shape::Rect { x: x0, y, width: x1 - x0, height: f.bottom - y, part: Some(i) });
             }
             if let (Some((mean, sd)), Some((a, b, _))) = (normal, bins.first())
                 && *sd > 0.0
@@ -254,7 +264,7 @@ pub fn layout(chart: &Chart, width: f64, height: f64) -> Vec<Shape> {
                 });
             }
         }
-        Chart::Bar { title, x_label, y_label, bars } => {
+        Chart::Bar { title, x_label, y_label, bars, .. } => {
             axis_titles(&mut out, &f, width, title, x_label, y_label);
             let top = bars.iter().map(|b| b.1).fold(0.0, f64::max);
             let bottom = bars.iter().map(|b| b.1).fold(0.0, f64::min);
@@ -264,7 +274,7 @@ pub fn layout(chart: &Chart, width: f64, height: f64) -> Vec<Shape> {
             for (i, (name, value)) in bars.iter().enumerate() {
                 let x = f.left + slot * i as f64 + slot * 0.15;
                 let y = f.y(*value, yr);
-                out.push(Shape::Rect { x, y: y.min(zero), width: slot * 0.7, height: (zero - y).abs() });
+                out.push(Shape::Rect { x, y: y.min(zero), width: slot * 0.7, height: (zero - y).abs(), part: Some(i) });
                 out.push(Shape::Text {
                     x: x + slot * 0.35,
                     y: f.bottom + 18.0,
@@ -286,7 +296,7 @@ pub fn layout(chart: &Chart, width: f64, height: f64) -> Vec<Shape> {
                 out.push(Shape::Circle { x: f.x(*x, xr), y: f.y(*y, yr), radius: 3.0 });
             }
         }
-        Chart::Boxplot { title, x_label, y_label, boxes } => {
+        Chart::Boxplot { title, x_label, y_label, boxes, .. } => {
             axis_titles(&mut out, &f, width, title, x_label, y_label);
             let all = boxes.iter().flat_map(|b| [b.low, b.high].into_iter().chain(b.outliers.iter().copied()).chain(b.extremes.iter().copied()));
             let (lo, hi) = all.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| (a.min(v), b.max(v)));
@@ -296,7 +306,7 @@ pub fn layout(chart: &Chart, width: f64, height: f64) -> Vec<Shape> {
                 let center = f.left + slot * (i as f64 + 0.5);
                 let half = (slot * 0.25).min(40.0);
                 let (y1, y3) = (f.y(b.q1, yr), f.y(b.q3, yr));
-                out.push(Shape::Rect { x: center - half, y: y3, width: half * 2.0, height: (y1 - y3).max(0.0) });
+                out.push(Shape::Rect { x: center - half, y: y3, width: half * 2.0, height: (y1 - y3).max(0.0), part: Some(i) });
                 let ym = f.y(b.median, yr);
                 out.push(Shape::Line { from: (center - half, ym), to: (center + half, ym), stroke: Stroke::Median });
                 for (end, hinge) in [(b.low, b.q1), (b.high, b.q3)] {
@@ -332,6 +342,16 @@ pub fn layout(chart: &Chart, width: f64, height: f64) -> Vec<Shape> {
     out
 }
 
+/// The bin, bar or box whose column holds `x` in `shapes` (a `layout`): the whole height of the
+/// plot counts, so a short bar is as easy to pick as a tall one.
+pub fn part_at(shapes: &[Shape], x: f64) -> Option<usize> {
+    shapes.iter().find_map(|shape| match shape {
+        Shape::Rect { x: left, width, part, .. } if (*left..=left + width).contains(&x) => *part,
+        _ => None,
+    })
+}
+
+use crate::Category;
 use crate::html::escape;
 
 /// The chart as a standalone SVG element (colours via CSS classes, so a page can theme it).
@@ -351,7 +371,7 @@ pub fn svg(chart: &Chart, width: f64, height: f64) -> String {
                 };
                 s.push_str(&format!(r#"<line class="{class}" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}"/>"#, from.0, from.1, to.0, to.1));
             }
-            Shape::Rect { x, y, width, height } => {
+            Shape::Rect { x, y, width, height, .. } => {
                 s.push_str(&format!(r#"<rect class="bar" x="{x:.1}" y="{y:.1}" width="{width:.1}" height="{height:.1}"/>"#))
             }
             Shape::Circle { x, y, radius } => s.push_str(&format!(r#"<circle class="point" cx="{x:.1}" cy="{y:.1}" r="{radius}"/>"#)),
@@ -406,8 +426,15 @@ mod tests {
                 bins: vec![(0.0, 10.0, 3.0), (10.0, 20.0, 7.0), (20.0, 30.0, 2.0)],
                 normal: Some((14.0, 6.0)),
                 n: 12.0,
+                categories: Vec::new(),
             },
-            Chart::Bar { title: "b".into(), x_label: "c".into(), y_label: "Count".into(), bars: vec![("A".into(), 4.0), ("B".into(), 9.0)] },
+            Chart::Bar {
+                title: "b".into(),
+                x_label: "c".into(),
+                y_label: "Count".into(),
+                bars: vec![("A".into(), 4.0), ("B".into(), 9.0)],
+                categories: Vec::new(),
+            },
             Chart::Scatter { title: "s".into(), x_label: "x".into(), y_label: "y".into(), points: vec![(1.0, 2.0), (3.0, -1.0), (2.0, 5.5)] },
             Chart::Boxplot {
                 title: "box".into(),
@@ -417,6 +444,7 @@ mod tests {
                     BoxStats { label: "A".into(), low: 1.0, q1: 3.0, median: 5.0, q3: 8.0, high: 15.0, outliers: vec![], extremes: vec![40.0] },
                     BoxStats { label: "B".into(), low: 2.0, q1: 4.0, median: 4.5, q3: 6.0, high: 9.0, outliers: vec![12.0], extremes: vec![] },
                 ],
+                categories: Vec::new(),
             },
         ];
         for chart in &charts {
@@ -425,7 +453,7 @@ mod tests {
                 let inside = |x: f64, y: f64| (0.0..=480.0).contains(&x) && (0.0..=320.0).contains(&y);
                 let ok = match shape {
                     Shape::Line { from, to, .. } => inside(from.0, from.1) && inside(to.0, to.1),
-                    Shape::Rect { x, y, width, height } => inside(*x, *y) && inside(x + width, y + height) && *height >= 0.0,
+                    Shape::Rect { x, y, width, height, .. } => inside(*x, *y) && inside(x + width, y + height) && *height >= 0.0,
                     Shape::Circle { x, y, .. } => inside(*x, *y),
                     Shape::Path { points } => points.iter().all(|(x, y)| inside(*x, *y)),
                     Shape::Text { x, y, .. } => inside(*x, *y),
@@ -434,7 +462,11 @@ mod tests {
             }
             assert!(svg(chart, 480.0, 320.0).starts_with("<svg"));
         }
-        let bars = layout(&charts[1], 480.0, 320.0).into_iter().filter(|s| matches!(s, Shape::Rect { .. })).count();
-        assert_eq!(bars, 2);
+        let bars = layout(&charts[1], 480.0, 320.0);
+        assert_eq!(bars.iter().filter(|s| matches!(s, Shape::Rect { .. })).count(), 2);
+        // Two slots of 200 between x = 64 and 464; each bar takes the middle 70 %.
+        assert_eq!(part_at(&bars, 164.0), Some(0));
+        assert_eq!(part_at(&bars, 364.0), Some(1));
+        assert_eq!(part_at(&bars, 70.0), None, "between bars");
     }
 }

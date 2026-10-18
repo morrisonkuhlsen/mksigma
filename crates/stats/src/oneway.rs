@@ -191,19 +191,24 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
     if options.descriptives {
         let columns =
             ["", "N", "Mean", "Std. Deviation", "Std. Error", "95% CI Lower", "95% CI Upper", "Minimum", "Maximum"].map(String::from).to_vec();
-        items.push(Item::Table(Table { title: "Descriptives".into(), columns, rows: descriptive_rows }));
+        items.push(Item::Table(Table { title: "Descriptives".into(), columns, rows: descriptive_rows, categories: Vec::new() }));
     }
     if options.homogeneity {
         let columns = ["Levene Statistic", "df1", "df2", "Sig."].map(String::from).to_vec();
-        items.push(Item::Table(Table { title: "Test of Homogeneity of Variances".into(), columns, rows: levene_rows }));
+        items.push(Item::Table(Table { title: "Test of Homogeneity of Variances".into(), columns, rows: levene_rows, categories: Vec::new() }));
     }
     let columns = ["", "Sum of Squares", "df", "Mean Square", "F", "Sig."].map(String::from).to_vec();
-    items.push(Item::Table(Table { title: "ANOVA".into(), columns, rows: anova_rows }));
+    items.push(Item::Table(Table { title: "ANOVA".into(), columns, rows: anova_rows, categories: Vec::new() }));
     if !options.posthoc.is_empty() {
         let level = format!("{:.0}%", (1.0 - alpha) * 100.0);
         let mut columns = ["(I)", "(J)", "Mean Difference (I-J)", "Std. Error", "Sig."].map(String::from).to_vec();
         columns.extend([format!("{level} CI Lower"), format!("{level} CI Upper")]);
-        items.push(Item::Table(Table { title: format!("Multiple Comparisons ({})", fvar.display_name()), columns, rows: posthoc_rows }));
+        items.push(Item::Table(Table {
+            title: format!("Multiple Comparisons ({})", fvar.display_name()),
+            columns,
+            rows: posthoc_rows,
+            categories: Vec::new(),
+        }));
         items.push(Item::Text(format!("*. The mean difference is significant at the {alpha} level.")));
     }
     Ok(items)

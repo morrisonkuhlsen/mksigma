@@ -94,9 +94,16 @@ mod tests {
             title: "Stats <1>".into(),
             columns: vec!["N".into(), "Label".into()],
             rows: vec![("age".into(), vec![Cell::Int(3), Cell::Text("a & b".into())])],
+            categories: Vec::new(),
         }));
         out.push(Item::Text("a. note".into()));
-        out.push(Item::Chart(Chart::Bar { title: "Bars".into(), x_label: "x".into(), y_label: "Count".into(), bars: vec![("A".into(), 1.0)] }));
+        out.push(Item::Chart(Chart::Bar {
+            title: "Bars".into(),
+            x_label: "x".into(),
+            y_label: "Count".into(),
+            bars: vec![("A".into(), 1.0)],
+            categories: Vec::new(),
+        }));
         let html = out.to_html("Output");
         assert!(html.starts_with("<!doctype html>"));
         assert!(html.contains("<caption>Stats &lt;1&gt;</caption>"), "escaped");
@@ -112,6 +119,7 @@ mod tests {
             title: "t".into(),
             columns: vec!["a".into(), "b".into()],
             rows: vec![("r1".into(), vec![Cell::Int(1), Cell::Int(2)]), ("r2".into(), vec![Cell::Int(3)])],
+            categories: Vec::new(),
         };
         let p = t.transposed();
         assert_eq!(p.columns, ["r1", "r2"]);

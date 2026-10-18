@@ -46,6 +46,7 @@ pub(crate) fn tables(ds: &Dataset) -> Vec<Table> {
                 (v.name.clone(), cells)
             })
             .collect(),
+        categories: Vec::new(),
     };
     let mut tables = vec![info];
     let labelled: Vec<_> = ds.variables().iter().filter(|v| !v.value_labels.is_empty()).collect();
@@ -57,7 +58,12 @@ pub(crate) fn tables(ds: &Dataset) -> Vec<Table> {
                 rows.push((v.name.clone(), vec![Cell::Text(format!("{}{missing}", value_text(value))), Cell::Text(label.clone())]));
             }
         }
-        tables.push(Table { title: "Variable Values".to_string(), columns: vec!["Value".to_string(), "Label".to_string()], rows });
+        tables.push(Table {
+            title: "Variable Values".to_string(),
+            columns: vec!["Value".to_string(), "Label".to_string()],
+            rows,
+            categories: Vec::new(),
+        });
     }
     tables
 }

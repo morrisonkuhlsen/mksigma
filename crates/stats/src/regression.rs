@@ -112,6 +112,7 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
         title: "Model Summary".into(),
         columns: ["R", "R Square", "Adjusted R Square", "Std. Error of the Estimate"].map(String::from).to_vec(),
         rows: vec![("1".into(), vec![num(Some(r2.sqrt()), 3), num(Some(r2), 3), num(Some(adjusted), 3), num(Some(ms_residual.sqrt()), 3)])],
+        categories: Vec::new(),
     };
     let anova = Table {
         title: "ANOVA".into(),
@@ -141,6 +142,7 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
             ),
             (String::new(), vec![Cell::Text("Total".into()), num(Some(syy), 3), n_cell(df_total), Cell::Empty, Cell::Empty, Cell::Empty]),
         ],
+        categories: Vec::new(),
     };
 
     let t_crit = options.ci.and_then(|level| dist::t_quantile(0.5 + level / 2.0, df_residual));
@@ -171,7 +173,7 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
         Item::Table(summary),
         Item::Text(format!("Predictors: (Constant), {}. Dependent Variable: {}", names.join(", "), yvar.display_name())),
         Item::Table(anova),
-        Item::Table(Table { title: "Coefficients".into(), columns, rows: coefficients }),
+        Item::Table(Table { title: "Coefficients".into(), columns, rows: coefficients, categories: Vec::new() }),
     ])
 }
 

@@ -11,7 +11,7 @@ use mksigma_output::chart::BoxStats;
 use mksigma_output::{Cell, Chart, Item, Table};
 
 use crate::groups::{moments, numeric, std_error, valid, valid_value};
-use crate::{StatsError, dist, n_cell, num, value_text};
+use crate::{StatsError, category, dist, n_cell, num, value_text};
 
 #[derive(Debug, Clone, Default)]
 pub struct Options {
@@ -188,6 +188,11 @@ pub fn examine(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError>
         let valid_n: f64 = groups.iter().flat_map(|(_, g)| g.iter().map(|(_, w)| w)).sum();
         summary.push((var.display_name().to_string(), vec![n_cell(valid_n), n_cell(missing), n_cell(valid_n + missing)]));
         let mut boxes = Vec::new();
+        // With BY, each box is a group of cases that can be selected; all or none.
+        let categories = match by {
+            Some((_, bvar)) => groups.iter().map(|(key, _)| key.as_ref().and_then(|v| category(bvar, v))).collect::<Option<Vec<_>>>(),
+            None => None,
+        };
         for (key, values) in groups {
             let group_label = match (&key, by) {
                 (Some(v), Some((_, bvar))) => value_text(bvar, v),
@@ -207,6 +212,7 @@ pub fn examine(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError>
                 x_label,
                 y_label: var.display_name().to_string(),
                 boxes,
+                categories: categories.unwrap_or_default(),
             }));
         }
     }
@@ -214,12 +220,14 @@ pub fn examine(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError>
         title: "Case Processing Summary".into(),
         columns: ["Valid N", "Missing N", "Total N"].map(String::from).to_vec(),
         rows: summary,
+        categories: Vec::new(),
     })];
     if options.descriptives {
         items.push(Item::Table(Table {
             title: "Descriptives".into(),
             columns: ["", "Statistic", "Std. Error"].map(String::from).to_vec(),
             rows: descriptives,
+            categories: Vec::new(),
         }));
     }
     items.extend(charts);

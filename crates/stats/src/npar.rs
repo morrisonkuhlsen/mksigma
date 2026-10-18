@@ -56,7 +56,7 @@ fn two_sided(z: f64) -> Option<f64> {
 }
 
 fn table(title: &str, columns: Vec<String>, rows: Vec<(String, Vec<Cell>)>) -> Item {
-    Item::Table(Table { title: title.into(), columns, rows })
+    Item::Table(Table { title: title.into(), columns, rows, categories: Vec::new() })
 }
 
 fn group_values(ds: &Dataset, var: usize, group: usize, keep: impl Fn(f64) -> bool) -> Vec<(f64, f64, f64)> {

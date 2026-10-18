@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use mksigma_core::{Dataset, Value, VarType, Variable};
 use mksigma_output::{Cell, Item, Table};
 
-use crate::{Moments, StatsError, n_cell, value_text};
+use crate::{Moments, StatsError, category, n_cell, value_text};
 
 /// Row order of a frequency table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -127,6 +127,8 @@ fn frequency_table(var: &Variable, counts: &Counts) -> Table {
     let valid = counts.valid_total();
     let total = valid + counts.missing_total();
     let mut rows = Vec::new();
+    // Only the rows of valid values stand for a category; they come first.
+    let categories = counts.valid.iter().map(|(value, _)| category(var, value)).collect();
     let mut cumulative = 0.0;
     for (i, (value, w)) in counts.valid.iter().enumerate() {
         cumulative += w;
@@ -156,6 +158,7 @@ fn frequency_table(var: &Variable, counts: &Counts) -> Table {
         title: var.display_name().to_string(),
         columns: ["", "Frequency", "Percent", "Valid Percent", "Cumulative Percent"].map(String::from).to_vec(),
         rows,
+        categories,
     }
 }
 
@@ -216,6 +219,7 @@ pub fn frequencies(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsEr
         title: "Statistics".to_string(),
         columns: vars.iter().map(|(var, _)| var.display_name().to_string()).collect(),
         rows,
+        categories: Vec::new(),
     })];
     if per_var.iter().any(|(_, multiple)| *multiple) {
         items.push(Item::Text("a. Multiple modes exist. The smallest value is shown".to_string()));
