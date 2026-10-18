@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*"]
-default-members = ["crates/*", "apps/mksigma", "apps/mksigma-cli"]
+default-members = ["crates/*", "apps/mksigma", "apps/mksigma-cli", "apps/mksigma-mcp"]
 
 [workspace.package]
 version = "0.1.0"
@@ -30,6 +30,9 @@ statrs = { version = "0.19", default-features = false }
 
 # The app's logo (a PNG) decoded for the window icon and the title row. MIT/Apache, pure Rust.
 png = "0.18"
+
+# The MCP server's JSON-RPC messages. MIT/Apache.
+serde_json = "1"
 
 # ui
 egui = "0.36"

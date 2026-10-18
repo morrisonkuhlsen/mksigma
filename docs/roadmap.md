@@ -160,7 +160,12 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   before the engine starts, or if it can't. The page holds every case of every variable.
   `crates/web/build.rs` builds the WebAssembly (`rustup target add wasm32-unknown-unknown`);
   without that target the export is the static page. To do: adding slicers in the page.
-- MCP server, so agents can run analyses and build dashboards
+- **MCP server — done:** `mksigma-mcp` speaks the Model Context Protocol over stdio (register it
+  with `claude mcp add mksigma -- mksigma-mcp`). Tools: `open_data` (.sav, .csv, .tsv),
+  `describe_data` (the dictionary), `run_syntax` (returns only the new output, as text),
+  `get_output` (text, HTML, LaTeX), `export` (html, pdf, latex, sav, the interactive dashboard,
+  or syntax that rebuilds the session) and `history`. One session per connection, through the
+  same engine as the app.
 
 ## Later
 - Multiple related tables (star-schema data model) and measures

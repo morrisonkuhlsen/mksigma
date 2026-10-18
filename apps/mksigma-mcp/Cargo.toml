@@ -1,0 +1,19 @@
+[package]
+name = "mksigma-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "MK Sigma as a Model Context Protocol server: agents open data, run syntax and export results"
+
+[lints]
+workspace = true
+
+[dependencies]
+mksigma-engine = { workspace = true }
+mksigma-web = { workspace = true }
+serde_json = { workspace = true }
+
+[[bin]]
+name = "mksigma-mcp"
+path = "src/main.rs"

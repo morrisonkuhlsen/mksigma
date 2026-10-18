@@ -48,7 +48,7 @@ cargo run -p mksigma-ui-egui --example snapshot -- --in data.sav out.png   # off
 | `crates/engine` | L2 | `Session`: runs commands, collects output |
 | `crates/ui-egui` | L3 | egui frontend (swappable) |
 | `crates/web` | L3 | Interactive dashboard pages: the engine as WebAssembly in one HTML file |
-| `apps/mksigma`, `apps/mksigma-cli` | L4 | Desktop app and CLI |
+| `apps/mksigma`, `apps/mksigma-cli`, `apps/mksigma-mcp` | L4 | Desktop app, CLI and MCP server for agents |
 
 Details in [`docs/architecture.md`](docs/architecture.md); rules for contributors and agents in
 [`AGENTS.md`](AGENTS.md).
