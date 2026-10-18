@@ -38,6 +38,8 @@ pub(crate) enum OutputAction {
     MoveTile(usize, bool),
     ExportDashboard,
     SaveDashboard,
+    /// Make a tile take a whole row (`true`) or half of one.
+    Wide(usize, bool),
 }
 
 /// What the Output is exported as.
@@ -151,36 +153,61 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
 
 /// The pinned items as cards, two columns when there is room. Each card can move or be unpinned.
 fn dashboard(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, tiles: &[usize]) -> Option<OutputAction> {
-    let t = crate::theme::Tokens::get(ui.ctx());
-    let columns = if ui.available_width() >= 860.0 { 2 } else { 1 };
+    let two = ui.available_width() >= 860.0;
+    // Rows: a wide tile alone, the others two by two (one column when the pane is narrow).
+    let mut rows: Vec<(bool, Vec<usize>)> = Vec::new();
+    for (k, &i) in tiles.iter().enumerate() {
+        let wide = !two || session.is_wide(i);
+        match rows.last_mut() {
+            Some((false, row)) if !wide && row.len() == 1 => row.push(k),
+            _ => rows.push((wide, vec![k])),
+        }
+    }
     let mut action = None;
-    ui.columns(columns, |cols| {
-        for (k, &i) in tiles.iter().enumerate() {
-            let Some(col) = cols.get_mut(k % columns) else { continue };
-            let Some(item) = session.output.items.get(i) else { continue };
-            egui::Frame::new().fill(t.paper).stroke(egui::Stroke::new(1.0, t.border)).corner_radius(8).inner_margin(egui::Margin::same(10)).show(
-                col,
-                |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("Unpin").on_hover_text("Take it off the dashboard").clicked() {
-                                action = Some(OutputAction::Pin(i));
-                            }
-                            if ui.add_enabled(k + 1 < tiles.len(), egui::Button::new(">").small()).on_hover_text("Move later").clicked() {
-                                action = Some(OutputAction::MoveTile(k, false));
-                            }
-                            if ui.add_enabled(k > 0, egui::Button::new("<").small()).on_hover_text("Move earlier").clicked() {
-                                action = Some(OutputAction::MoveTile(k, true));
-                            }
-                        });
-                    });
-                    if let Some(a) = show_item(ui, session, state, i, item, None) {
-                        action = Some(a);
-                    }
-                },
-            );
-            col.add_space(10.0);
+    for (wide, row) in rows {
+        if wide {
+            for k in row {
+                action = card(ui, session, state, tiles, k).or(action);
+            }
+        } else {
+            ui.columns(2, |cols| {
+                for (col, k) in cols.iter_mut().zip(row) {
+                    action = card(col, session, state, tiles, k).or(action.take());
+                }
+            });
+        }
+        ui.add_space(10.0);
+    }
+    action
+}
+
+/// Tile `k` of the dashboard: its buttons (move, width, unpin) over the item.
+fn card(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, tiles: &[usize], k: usize) -> Option<OutputAction> {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let (&i, item) = tiles.get(k).and_then(|i| Some((i, session.output.items.get(*i)?)))?;
+    let wide = session.is_wide(i);
+    let mut action = None;
+    egui::Frame::new().fill(t.paper).stroke(egui::Stroke::new(1.0, t.border)).corner_radius(8).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("Unpin").on_hover_text("Take it off the dashboard").clicked() {
+                    action = Some(OutputAction::Pin(i));
+                }
+                let (label, tip) = if wide { ("Narrow", "Half a row") } else { ("Wide", "A whole row") };
+                if ui.small_button(label).on_hover_text(tip).clicked() {
+                    action = Some(OutputAction::Wide(i, !wide));
+                }
+                if ui.add_enabled(k + 1 < tiles.len(), egui::Button::new(">").small()).on_hover_text("Move later").clicked() {
+                    action = Some(OutputAction::MoveTile(k, false));
+                }
+                if ui.add_enabled(k > 0, egui::Button::new("<").small()).on_hover_text("Move earlier").clicked() {
+                    action = Some(OutputAction::MoveTile(k, true));
+                }
+            });
+        });
+        if let Some(a) = show_item(ui, session, state, i, item, None) {
+            action = Some(a);
         }
     });
     action

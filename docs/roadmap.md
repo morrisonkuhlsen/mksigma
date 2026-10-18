@@ -136,8 +136,9 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   `SLICE`s and `DASHBOARD /TILES=(analysis item)...`. Opening the `.sps` (File > Open) runs it on
   an empty Output and shows the dashboard. Also new: `GET FILE='x.sav'` (File > Open reads system
   files through it), comments (`* ...` and `COMMENT ...`). Analyses rerun on the data as it is
-  after every step; Data View edits aren't syntax and are left out, with a note. To do: tile
-  sizes and free placement, interactive export (below).
+  after every step; Data View edits aren't syntax and are left out, with a note. Tiles are half a row or,
+  with Wide (`DASHBOARD /TILES=(n m WIDE)`), a whole row, on screen and in the export. To do:
+  free placement and heights, interactive export (below).
 - **Publish as a self-contained interactive page** (HTML + WASM): no server, no account
 - MCP server, so agents can run analyses and build dashboards
 

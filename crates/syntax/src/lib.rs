@@ -26,8 +26,9 @@ pub enum Command {
     GetData(GetData),
     /// `GET FILE='...'`: a new active dataset from a system file.
     GetFile(String),
-    /// `DASHBOARD /TILES=(analysis item)...`: the dashboard's tiles, counted from 1.
-    Dashboard(Vec<(usize, usize)>),
+    /// `DASHBOARD /TILES=(analysis item [WIDE])...`: the dashboard's tiles, counted from 1, and
+    /// whether each takes a whole row.
+    Dashboard(Vec<(usize, usize, bool)>),
     /// `SLICE var (values)`, `SLICE var (low THRU high)`, `SLICE var OFF`; `None` is `SLICE OFF`.
     Slice(Option<(String, SliceSpec)>),
     /// `DESCRIPTIVES [VARIABLES=] var...`

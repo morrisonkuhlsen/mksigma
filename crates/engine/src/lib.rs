@@ -79,6 +79,8 @@ pub struct Session {
     /// The dashboard's tiles, in order: a run and the place of the item among the run's items,
     /// so a tile follows its item when filters run the analyses again.
     tiles: Vec<(usize, usize)>,
+    /// The tiles that take a whole row.
+    wide: Vec<(usize, usize)>,
     /// What loading data had to say (sizes, reader warnings), until `take_notes`.
     notes: Vec<String>,
     loaded_file: Option<String>,
@@ -204,17 +206,22 @@ impl Session {
     }
 
     /// `DASHBOARD /TILES`: tiles by analysis and item, counted from 1.
-    fn set_tiles(&mut self, tiles: &[(usize, usize)]) -> Result<(), EngineError> {
+    fn set_tiles(&mut self, tiles: &[(usize, usize, bool)]) -> Result<(), EngineError> {
         let mut out = Vec::with_capacity(tiles.len());
-        for &(analysis, item) in tiles {
+        let mut wide = Vec::new();
+        for &(analysis, item, is_wide) in tiles {
             let (run, offset) = (analysis - 1, item - 1);
             let count = self.run_of.iter().filter(|r| **r == run).count();
             if offset >= count {
                 return Err(EngineError::Invalid(format!("analysis {analysis} has no output item {item}")));
             }
             out.push((run, offset));
+            if is_wide {
+                wide.push((run, offset));
+            }
         }
         self.tiles = out;
+        self.wide = wide;
         Ok(())
     }
 
@@ -261,7 +268,10 @@ impl Session {
         let tiles: Vec<String> = self
             .tiles
             .iter()
-            .filter_map(|(run, offset)| written.iter().position(|r| r == run).map(|n| format!("({} {})", n + 1, offset + 1)))
+            .filter_map(|tile @ (run, offset)| {
+                let wide = if self.wide.contains(tile) { " WIDE" } else { "" };
+                written.iter().position(|r| r == run).map(|n| format!("({} {}{wide})", n + 1, offset + 1))
+            })
             .collect();
         out.push_str(&format!("DASHBOARD /TILES={}.\n", tiles.join(" ")));
         Some(out)
@@ -458,6 +468,7 @@ impl Session {
     pub fn clear_output(&mut self) {
         self.runs.clear();
         self.tiles.clear();
+        self.wide.clear();
         self.cross_filter = None;
         self.show_runs();
     }
@@ -479,6 +490,7 @@ impl Session {
         match self.tiles.iter().position(|t| *t == tile) {
             Some(at) => {
                 self.tiles.remove(at);
+                self.wide.retain(|t| *t != tile);
                 Ok(false)
             }
             None => {
@@ -505,6 +517,24 @@ impl Session {
             .collect()
     }
 
+    /// Whether Output item `item` is a wide tile: a whole row of the dashboard.
+    pub fn is_wide(&self, item: usize) -> bool {
+        self.locate(item).is_some_and(|tile| self.wide.contains(&tile))
+    }
+
+    /// Makes the tile of Output item `item` take a whole row, or half of one.
+    pub fn set_wide(&mut self, item: usize, wide: bool) -> Result<(), EngineError> {
+        let tile = self
+            .locate(item)
+            .filter(|t| self.tiles.contains(t))
+            .ok_or_else(|| EngineError::Invalid(format!("output item {} is not on the dashboard", item + 1)))?;
+        self.wide.retain(|t| *t != tile);
+        if wide {
+            self.wide.push(tile);
+        }
+        Ok(())
+    }
+
     /// Moves tile `tile` one place earlier or later.
     pub fn move_tile(&mut self, tile: usize, earlier: bool) -> Result<(), EngineError> {
         let other = if earlier { tile.checked_sub(1) } else { tile.checked_add(1).filter(|t| *t < self.tiles.len()) };
@@ -517,9 +547,11 @@ impl Session {
         }
     }
 
-    /// The dashboard as an Output of its own, for export.
-    pub fn dashboard_output(&self) -> Output {
-        Output { items: self.dashboard().into_iter().filter_map(|i| self.output.items.get(i).cloned()).collect() }
+    /// The dashboard as an Output of its own, for export, with which of its items are wide.
+    pub fn dashboard_output(&self) -> (Output, Vec<bool>) {
+        let items = self.dashboard();
+        let wide = items.iter().map(|i| self.is_wide(*i)).collect();
+        (Output { items: items.into_iter().filter_map(|i| self.output.items.get(i).cloned()).collect() }, wide)
     }
 
     fn add_run(&mut self, command: Command, items: Vec<Item>) {
@@ -1512,8 +1544,9 @@ mod tests {
         // Tiles follow their items when filters run the analyses again.
         s.run_syntax("SLICE grupo (1).").unwrap();
         assert_eq!(score_n_and_mean(&s).0, 3);
-        let board = s.dashboard_output();
+        let (board, wide) = s.dashboard_output();
         assert_eq!(board.items.len(), 2);
+        assert_eq!(wide, [false, false]);
         assert!(board.to_text().contains("Descriptive Statistics"));
         assert!(s.is_pinned(descriptives) && !s.is_pinned(0));
 
@@ -1537,16 +1570,19 @@ mod tests {
         .unwrap();
         s.toggle_pin(1).unwrap();
         s.toggle_pin(0).unwrap();
+        s.set_wide(1, true).unwrap();
+        assert!(s.set_wide(2, true).is_err(), "not on the dashboard");
         let syntax = s.dashboard_syntax().unwrap();
         assert!(syntax.starts_with("* MK Sigma dashboard"));
         assert!(syntax.contains("COMPUTE folga = vendas - meta.\nGRAPH"), "{syntax}");
-        assert!(syntax.ends_with("SLICE regiao ('Norte' 'Sul').\nDASHBOARD /TILES=(2 1) (1 1).\n"), "{syntax}");
+        assert!(syntax.ends_with("SLICE regiao ('Norte' 'Sul').\nDASHBOARD /TILES=(2 1 WIDE) (1 1).\n"), "{syntax}");
 
         let mut again = Session::new();
         again.run_syntax(&syntax).unwrap();
         std::fs::remove_file(&path).unwrap();
         assert_eq!(again.dashboard(), [1, 0]);
-        assert_eq!(again.dashboard_output().to_text(), s.dashboard_output().to_text(), "the same dashboard, filtered the same");
+        assert!(again.is_wide(1) && !again.is_wide(0), "widths come back too");
+        assert_eq!(again.dashboard_output().0.to_text(), s.dashboard_output().0.to_text(), "the same dashboard, filtered the same");
         assert!(again.run_syntax("DASHBOARD /TILES=(9 1).").is_err());
     }
 

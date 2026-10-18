@@ -220,7 +220,8 @@ impl SigmaApp {
     /// Writes the dashboard as a self-contained web page: its tiles in a grid, as filtered now.
     pub fn export_dashboard(&mut self, path: &Path) {
         let title = self.file_name.as_deref().map_or_else(|| "MK Sigma Dashboard".to_string(), |f| format!("{f} — Dashboard"));
-        let html = self.session.dashboard_output().to_dashboard_html(&title, self.session.filter_description().as_deref());
+        let (board, wide) = self.session.dashboard_output();
+        let html = board.to_dashboard_html(&title, self.session.filter_description().as_deref(), &wide);
         match std::fs::write(path, html) {
             Ok(()) => self.status = Some(Status::Info(format!("Exported the dashboard to {}", path.display()))),
             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
@@ -594,6 +595,10 @@ impl SigmaApp {
                 self.report(result);
             }
             output::OutputAction::SaveDashboard => self.save_dashboard_dialog(),
+            output::OutputAction::Wide(item, wide) => {
+                let result = self.session.set_wide(item, wide);
+                self.report(result);
+            }
             output::OutputAction::ExportDashboard => {
                 let stem =
                     self.file_name.as_deref().and_then(|f| f.rsplit_once('.').map(|(s, _)| s.to_string())).unwrap_or_else(|| "dashboard".to_string());

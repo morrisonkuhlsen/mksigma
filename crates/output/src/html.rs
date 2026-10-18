@@ -40,6 +40,7 @@ body.dashboard { max-width: 1280px; }
 p.filters { color: var(--muted); margin: -12px 0 18px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; }
 .tile { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; break-inside: avoid; min-width: 0; }
+.tile.wide { grid-column: 1 / -1; }
 "#;
 
 pub(crate) fn escape(s: &str) -> String {
@@ -89,12 +90,14 @@ impl Output {
     }
 
     /// The items as a dashboard: a card each, in a grid as many columns wide as the page
-    /// allows, under `title` and a line naming the filters, if any.
-    pub fn to_dashboard_html(&self, title: &str, filters: Option<&str>) -> String {
+    /// allows (a `wide` item, by index, takes a whole row), under `title` and a line naming the
+    /// filters, if any.
+    pub fn to_dashboard_html(&self, title: &str, filters: Option<&str>, wide: &[bool]) -> String {
         let mut body = filters.map(|f| format!("<p class=\"filters\">Filtered by {}</p>\n", escape(f))).unwrap_or_default();
         body.push_str("<div class=\"tiles\">\n");
-        for i in &self.items {
-            body.push_str(&format!("<div class=\"tile\">{}</div>\n", item(i)));
+        for (k, i) in self.items.iter().enumerate() {
+            let class = if wide.get(k).copied().unwrap_or(false) { "tile wide" } else { "tile" };
+            body.push_str(&format!("<div class=\"{class}\">{}</div>\n", item(i)));
         }
         body.push_str("</div>\n");
         page(title, "dashboard", &body)
@@ -157,10 +160,11 @@ mod tests {
             categories: Vec::new(),
         }));
         out.push(Item::Text("note".into()));
-        let html = out.to_dashboard_html("Painel", Some("grupo: Jovem & co"));
+        let html = out.to_dashboard_html("Painel", Some("grupo: Jovem & co"), &[true]);
         assert!(html.contains("<body class=\"dashboard\"><h1>Painel</h1>"));
         assert!(html.contains("<p class=\"filters\">Filtered by grupo: Jovem &amp; co</p>"), "escaped");
-        assert_eq!(html.matches("<div class=\"tile\">").count(), 2);
-        assert!(!out.to_dashboard_html("P", None).contains("filters\">"));
+        assert_eq!(html.matches("<div class=\"tile wide\">").count(), 1, "the chart takes a row");
+        assert_eq!(html.matches("<div class=\"tile\">").count(), 1);
+        assert!(!out.to_dashboard_html("P", None, &[]).contains("filters\">"));
     }
 }

@@ -155,12 +155,13 @@ pub(crate) fn get_file(rest: &[Token]) -> Result<Command, SyntaxError> {
     }
 }
 
-/// `DASHBOARD /TILES=(analysis item) ...`: the dashboard's tiles, in order. An analysis is
+/// `DASHBOARD /TILES=(analysis item [WIDE]) ...`: the dashboard's tiles, in order; a `WIDE`
+/// tile takes a whole row. An analysis is
 /// counted from 1 among the commands with output since the Output was last cleared, and an
 /// item among that command's output items (notes included), in order.
 pub(crate) fn dashboard(rest: &[Token]) -> Result<Command, SyntaxError> {
     const CMD: &str = "DASHBOARD";
-    let expected = SyntaxError::Expected { command: CMD, expected: "/TILES=(analysis item) ..., numbers from 1" };
+    let expected = SyntaxError::Expected { command: CMD, expected: "/TILES=(analysis item [WIDE]) ..., numbers from 1" };
     let list = match rest {
         [Token::Slash, Token::Word(w), Token::Equals, list @ ..] | [Token::Slash, Token::Word(w), list @ ..] if is_keyword(w, "TILES") => list,
         _ => return Err(expected),
@@ -172,7 +173,12 @@ pub(crate) fn dashboard(rest: &[Token]) -> Result<Command, SyntaxError> {
             [Token::LParen, Token::Word(a), Token::Comma, Token::Word(b), Token::RParen, after @ ..]
             | [Token::LParen, Token::Word(a), Token::Word(b), Token::RParen, after @ ..] => {
                 let n = |w: &str| w.parse::<usize>().ok().filter(|n| *n >= 1);
-                tiles.push((n(a).ok_or(expected.clone())?, n(b).ok_or(expected.clone())?));
+                tiles.push((n(a).ok_or(expected.clone())?, n(b).ok_or(expected.clone())?, false));
+                rest = after;
+            }
+            [Token::LParen, Token::Word(a), Token::Word(b), Token::Word(wide), Token::RParen, after @ ..] if wide.eq_ignore_ascii_case("WIDE") => {
+                let n = |w: &str| w.parse::<usize>().ok().filter(|n| *n >= 1);
+                tiles.push((n(a).ok_or(expected.clone())?, n(b).ok_or(expected.clone())?, true));
                 rest = after;
             }
             _ => return Err(expected),
@@ -209,7 +215,10 @@ mod tests {
     #[test]
     fn get_file_and_dashboard() {
         assert_eq!(parse("GET FILE='/dados/turma.sav'.").unwrap(), [Command::GetFile("/dados/turma.sav".into())]);
-        assert_eq!(parse("DASHBOARD /TILES=(3 1) (1, 2).").unwrap(), [Command::Dashboard(vec![(3, 1), (1, 2)])]);
+        assert_eq!(
+            parse("DASHBOARD /TILES=(3 1) (1, 2) (2 1 wide).").unwrap(),
+            [Command::Dashboard(vec![(3, 1, false), (1, 2, false), (2, 1, true)])]
+        );
         assert_eq!(parse("DASHBOARD /TILES.").unwrap(), [Command::Dashboard(Vec::new())], "an empty dashboard");
         for bad in ["GET FILE.", "GET FILE=x.", "DASHBOARD (1 1).", "DASHBOARD /TILES=(0 1).", "DASHBOARD /TILES=(1).", "DASHBOARD /TILES=1 1."] {
             assert!(parse(bad).is_err(), "{bad}");
