@@ -254,6 +254,14 @@ impl Session {
         if skipped > 0 {
             out.push_str(&format!("* {skipped} Data View edits are not syntax and were left out.\n"));
         }
+        out.push_str(&self.dashboard_program());
+        Some(out)
+    }
+
+    /// The dashboard's own syntax, run on the data as it is now: the analyses, the slicers, the
+    /// style and the tiles.
+    pub fn dashboard_program(&self) -> String {
+        let mut out = String::new();
         // Runs from a frame of the past (sources lost) can't be written; their numbers shift.
         let written: Vec<usize> = (0..self.runs.len()).filter(|r| self.runs.get(*r).is_some_and(|run| !run.source.is_empty())).collect();
         for r in &written {
@@ -279,7 +287,13 @@ impl Session {
             })
             .collect();
         out.push_str(&format!("DASHBOARD /TILES={}.\n", tiles.join(" ")));
-        Some(out)
+        out
+    }
+
+    /// The active dataset as a system file, without touching the session (Save marks it saved).
+    pub fn data_sav(&self) -> Result<Vec<u8>, EngineError> {
+        let options = mksigma_sav::WriteOptions { compression: mksigma_sav::Compression::Bytecode, created: mksigma_sav::timestamp(0) };
+        Ok(mksigma_sav::write(&self.dataset, &options)?.0)
     }
 
     /// The file `GET DATA` last read, if it ran since the last call.

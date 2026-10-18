@@ -1755,6 +1755,7 @@ version = "0.1.0"
 dependencies = [
  "mksigma-engine",
  "mksigma-output",
+ "mksigma-web",
 ]
 
 [[package]]
@@ -1824,7 +1825,15 @@ dependencies = [
  "egui_kittest",
  "mksigma-engine",
  "mksigma-output",
+ "mksigma-web",
  "png",
+]
+
+[[package]]
+name = "mksigma-web"
+version = "0.1.0"
+dependencies = [
+ "mksigma-engine",
 ]
 
 [[package]]

@@ -742,3 +742,21 @@ fn the_output_style_shows_on_screen() {
     h.run_steps(3);
     assert!(shows(&h, "Output Style"), "the controls are on the View tab");
 }
+
+#[test]
+fn an_exported_dashboard_is_interactive() {
+    let path = temp_path("interactive.html");
+    let mut app = SigmaApp::default();
+    app.session.run_syntax("GRAPH /BAR(SIMPLE)=COUNT BY age.\nDESCRIPTIVES score.\nDASHBOARD /TILES=(1 1) (2 1).").unwrap();
+    app.export_dashboard(&path);
+    let html = std::fs::read_to_string(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    if mksigma_web::ENGINE.is_empty() {
+        // A build without the WebAssembly target: the cards as they are.
+        assert!(html.contains("class=\"tiles\"") && !html.contains("mks_open"));
+    } else {
+        assert!(html.contains("mks_open") && html.contains("id=\"engine\">AGFzbQ"), "the engine, as base64 of \\0asm");
+        assert!(html.contains("data-item=\"0\"") && html.contains("data-part="), "a first view that can be clicked");
+        assert!(matches!(&app.status, Some(Status::Info(s)) if s.contains("interactive")));
+    }
+}

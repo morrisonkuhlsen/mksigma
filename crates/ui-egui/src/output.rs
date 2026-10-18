@@ -349,7 +349,12 @@ fn slicer_editor(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, 
     const SHOWN: usize = 50;
     let (_, var) = session.dataset.variable(name)?;
     let values = session.values_of(name, SHOWN + 1);
-    let by_values = var.var_type != VarType::Numeric || (var.measure != Measure::Scale && values.len() <= SHOWN) || values.len() <= 12;
+    // A slicer keeps its kind; a new one is by values unless a Scale variable has many.
+    let by_values = match current.map(|s| &s.selection) {
+        Some(Selection::Values(_)) => true,
+        Some(Selection::Range { .. }) => false,
+        None => var.var_type != VarType::Numeric || (var.measure != Measure::Scale && values.len() <= SHOWN) || values.len() <= 12,
+    };
     let mut syntax = None;
     ui.strong(var.display_name());
     if by_values {

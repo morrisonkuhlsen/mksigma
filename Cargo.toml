@@ -19,6 +19,7 @@ mksigma-syntax = { path = "crates/syntax" }
 mksigma-output = { path = "crates/output" }
 mksigma-engine = { path = "crates/engine" }
 mksigma-ui-egui = { path = "crates/ui-egui" }
+mksigma-web = { path = "crates/web" }
 
 # foundation
 thiserror = "2"
@@ -38,3 +39,12 @@ egui_kittest = "0.36"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# The dashboard engine compiled to WebAssembly, embedded in exported pages: small over fast.
+[profile.wasm]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

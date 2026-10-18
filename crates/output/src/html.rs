@@ -1,7 +1,8 @@
 //! The Output as one self-contained HTML page: tables, notes, warnings and charts (inline SVG),
 //! styled for screen (light and dark) and print, with nothing loaded from elsewhere.
 
-use crate::chart::svg;
+use crate::Category;
+use crate::chart::{svg, svg_picking};
 use crate::style::{Family, Style};
 use crate::{Cell, Item, Output, Table};
 
@@ -36,6 +37,12 @@ svg text { fill: var(--fg); font-family: inherit; }
 svg .tick { font-size: 11px; fill: var(--muted); }
 svg .label { font-size: 12px; }
 svg .title { font-size: 14px; font-weight: 600; }
+svg rect.pick, td.pick { cursor: pointer; }
+svg rect.pick:hover { opacity: 0.8; }
+svg rect.dim { opacity: 0.3; }
+svg rect.sel { stroke: var(--fg); stroke-width: 2; }
+td.pick { text-decoration: underline dotted var(--muted); }
+td.sel { font-weight: 600; background: var(--stripe); }
 @media print { body { max-width: none; } .wrap { overflow: visible; } }
 body.dashboard { max-width: 1280px; }
 p.filters { color: var(--muted); margin: -12px 0 18px; }
@@ -44,20 +51,32 @@ p.filters { color: var(--muted); margin: -12px 0 18px; }
 .tile.wide { grid-column: 1 / -1; }
 "#;
 
-pub(crate) fn escape(s: &str) -> String {
+pub fn escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 fn table(t: &Table, style: &Style) -> String {
+    table_marked(t, style, false, None)
+}
+
+/// A table whose rows that stand for a category can be picked at their first text cell, which
+/// carries `data-row` and the `pick` class (`sel` when it is `selected`).
+fn table_marked(t: &Table, style: &Style, picking: bool, selected: Option<&Category>) -> String {
     let mut s = format!("<div class=\"wrap\"><table><caption>{}</caption><thead><tr><th></th>", escape(&t.title));
     for c in &t.columns {
         s.push_str(&format!("<th>{}</th>", escape(c)));
     }
     s.push_str("</tr></thead><tbody>");
-    for (label, cells) in &t.rows {
+    for (r, (label, cells)) in t.rows.iter().enumerate() {
         s.push_str(&format!("<tr><th>{}</th>", escape(label)));
-        for cell in cells {
-            let class = if matches!(cell, Cell::Text(_) | Cell::Empty) { "" } else { " class=\"num\"" };
+        let category = t.category(r).filter(|_| picking);
+        let key = cells.iter().position(|c| matches!(c, Cell::Text(_)));
+        for (c, cell) in cells.iter().enumerate() {
+            let class = match (category, key == Some(c)) {
+                (Some(cat), true) => format!(" class=\"pick{}\" data-row=\"{r}\"", if selected == Some(cat) { " sel" } else { "" }),
+                _ if matches!(cell, Cell::Text(_) | Cell::Empty) => String::new(),
+                _ => " class=\"num\"".to_string(),
+            };
             s.push_str(&format!("<td{class}>{}</td>", escape(&style.cell(cell))));
         }
         s.push_str("</tr>");
@@ -107,7 +126,37 @@ fn page(title: &str, class: &str, body: &str, style: &Style) -> String {
     )
 }
 
+/// The page's CSS: the base sheet and what the style changes.
+pub fn css(style: &Style) -> String {
+    format!("{STYLE}{}", style_css(style))
+}
+
+/// A dashboard tile for `Output::tiles_html`: the engine's id of the item, whether it takes a
+/// whole row, and the category to show selected in it (the item a cross-filter came from).
+pub struct Tile<'a> {
+    pub id: usize,
+    pub wide: bool,
+    pub selected: Option<&'a Category>,
+}
+
 impl Output {
+    /// The items as dashboard cards that can be picked (`data-item` on each card, `data-part`
+    /// on bars and `data-row` on table values), one per tile, in order.
+    pub fn tiles_html(&self, tiles: &[Tile]) -> String {
+        let mut out = String::from("<div class=\"tiles\">\n");
+        for (i, tile) in self.items.iter().zip(tiles) {
+            let class = if tile.wide { "tile wide" } else { "tile" };
+            let body = match i {
+                Item::Table(t) => table_marked(t, &self.style, true, tile.selected),
+                Item::Chart(c) => svg_picking(c, 640.0, 400.0, tile.selected),
+                other => item(other, &self.style),
+            };
+            out.push_str(&format!("<div class=\"{class}\" data-item=\"{}\">{body}</div>\n", tile.id));
+        }
+        out.push_str("</div>\n");
+        out
+    }
+
     /// The whole Output as a standalone HTML page with `title` as its heading.
     pub fn to_html(&self, title: &str) -> String {
         let body: String = self.items.iter().map(|i| format!("<section>{}</section>\n", item(i, &self.style))).collect();

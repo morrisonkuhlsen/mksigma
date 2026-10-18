@@ -152,7 +152,14 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   after every step; Data View edits aren't syntax and are left out, with a note. Tiles are half a row or,
   with Wide (`DASHBOARD /TILES=(n m WIDE)`), a whole row, on screen and in the export. To do:
   free placement and heights, interactive export (below).
-- **Publish as a self-contained interactive page** (HTML + WASM): no server, no account
+- **Publish as a self-contained interactive page — done:** Export Dashboard (and
+  `mksigma-cli --dashboard board.html`) writes one HTML file with the engine compiled to
+  WebAssembly (about 840 KB, 1.1 MB as base64), the data as a system file and the dashboard's
+  syntax. In any browser, offline, clicking a bar or a table value cross-filters and the slicers
+  can be changed: the same engine runs the analyses again. It shows the dashboard as exported
+  before the engine starts, or if it can't. The page holds every case of every variable.
+  `crates/web/build.rs` builds the WebAssembly (`rustup target add wasm32-unknown-unknown`);
+  without that target the export is the static page. To do: adding slicers in the page.
 - MCP server, so agents can run analyses and build dashboards
 
 ## Later

@@ -1,0 +1,17 @@
+[package]
+name = "mksigma-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MK Sigma dashboards that stay interactive in a browser: the engine as WebAssembly in one HTML file"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Not the workspace's lints: WebAssembly exports need `#[unsafe(no_mangle)]`, which `forbid` can't
+# allow. `deny` with `allow` on those attributes alone; there is no unsafe block in this crate.
+[lints.rust]
+unsafe_code = "deny"
+
+[dependencies]
+mksigma-engine = { workspace = true }

@@ -224,10 +224,24 @@ impl SigmaApp {
     /// Writes the dashboard as a self-contained web page: its tiles in a grid, as filtered now.
     pub fn export_dashboard(&mut self, path: &Path) {
         let title = self.file_name.as_deref().map_or_else(|| "MK Sigma Dashboard".to_string(), |f| format!("{f} — Dashboard"));
-        let (board, wide) = self.session.dashboard_output();
-        let html = board.to_dashboard_html(&title, self.session.filter_description().as_deref(), &wide);
+        // Interactive when the engine was built for WebAssembly: slicers and cross-filtering
+        // work in the page, which holds the data. Otherwise the cards as they are now.
+        let interactive = !mksigma_web::ENGINE.is_empty();
+        let html = if interactive {
+            match mksigma_web::page(&self.session, &title, mksigma_web::ENGINE) {
+                Ok(html) => html,
+                Err(e) => {
+                    self.status = Some(Status::Error(e));
+                    return;
+                }
+            }
+        } else {
+            let (board, wide) = self.session.dashboard_output();
+            board.to_dashboard_html(&title, self.session.filter_description().as_deref(), &wide)
+        };
+        let what = if interactive { "an interactive dashboard (it holds the data)" } else { "the dashboard" };
         match std::fs::write(path, html) {
-            Ok(()) => self.status = Some(Status::Info(format!("Exported the dashboard to {}", path.display()))),
+            Ok(()) => self.status = Some(Status::Info(format!("Exported {what} to {}", path.display()))),
             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
         }
     }

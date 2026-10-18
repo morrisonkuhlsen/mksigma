@@ -356,6 +356,18 @@ use crate::html::escape;
 
 /// The chart as a standalone SVG element (colours via CSS classes, so a page can theme it).
 pub fn svg(chart: &Chart, width: f64, height: f64) -> String {
+    svg_marked(chart, width, height, false, None)
+}
+
+/// The chart as SVG whose bins, bars and boxes can be picked: each carries `data-part` (its
+/// index) and the `pick` class; with `selected` among its categories, that one is `sel` and the
+/// others `dim`.
+pub fn svg_picking(chart: &Chart, width: f64, height: f64, selected: Option<&Category>) -> String {
+    svg_marked(chart, width, height, true, selected)
+}
+
+fn svg_marked(chart: &Chart, width: f64, height: f64, picking: bool, selected: Option<&Category>) -> String {
+    let shown = selected.filter(|s| (0..).map_while(|p| chart.category(p)).any(|c| c == *s));
     let mut s = format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" class="chart" viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img"><title>{}</title>"#,
         escape(chart.title())
@@ -371,8 +383,20 @@ pub fn svg(chart: &Chart, width: f64, height: f64) -> String {
                 };
                 s.push_str(&format!(r#"<line class="{class}" x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}"/>"#, from.0, from.1, to.0, to.1));
             }
-            Shape::Rect { x, y, width, height, .. } => {
-                s.push_str(&format!(r#"<rect class="bar" x="{x:.1}" y="{y:.1}" width="{width:.1}" height="{height:.1}"/>"#))
+            Shape::Rect { x, y, width, height, part } => {
+                let category = part.and_then(|p| chart.category(p));
+                let (class, data) = match (picking, part, category) {
+                    (true, Some(p), Some(c)) => {
+                        let state = match shown {
+                            Some(sel) if sel == c => " sel",
+                            Some(_) => " dim",
+                            None => "",
+                        };
+                        (format!("bar pick{state}"), format!(r#" data-part="{p}""#))
+                    }
+                    _ => ("bar".to_string(), String::new()),
+                };
+                s.push_str(&format!(r#"<rect class="{class}"{data} x="{x:.1}" y="{y:.1}" width="{width:.1}" height="{height:.1}"/>"#))
             }
             Shape::Circle { x, y, radius } => s.push_str(&format!(r#"<circle class="point" cx="{x:.1}" cy="{y:.1}" r="{radius}"/>"#)),
             Shape::Path { points } => {

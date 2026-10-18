@@ -12,7 +12,7 @@ use std::process::ExitCode;
 
 use mksigma_engine::Session;
 
-const USAGE: &str = "usage: mksigma-cli run [--in data.sav] [--out result.sav] [--html report.html] [--pdf report.pdf] [--tex report.tex] '<syntax>'";
+const USAGE: &str = "usage: mksigma-cli run [--in data.sav] [--out result.sav] [--html report.html] [--pdf report.pdf] [--tex report.tex] [--dashboard board.html] '<syntax>'";
 
 struct Args {
     input: Option<String>,
@@ -20,6 +20,7 @@ struct Args {
     html: Option<String>,
     pdf: Option<String>,
     tex: Option<String>,
+    dashboard: Option<String>,
     syntax: String,
 }
 
@@ -29,6 +30,7 @@ fn parse_args() -> Option<Args> {
         return None;
     }
     let (mut input, mut output, mut html, mut pdf, mut tex, mut syntax) = (None, None, None, None, None, None);
+    let mut dashboard = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--in" => input = Some(args.next()?),
@@ -36,11 +38,12 @@ fn parse_args() -> Option<Args> {
             "--html" => html = Some(args.next()?),
             "--pdf" => pdf = Some(args.next()?),
             "--tex" => tex = Some(args.next()?),
+            "--dashboard" => dashboard = Some(args.next()?),
             _ if syntax.is_none() => syntax = Some(arg),
             _ => return None,
         }
     }
-    Some(Args { input, output, html, pdf, tex, syntax: syntax? })
+    Some(Args { input, output, html, pdf, tex, dashboard, syntax: syntax? })
 }
 
 /// Seconds since 1970 for the file header's creation time.
@@ -79,6 +82,15 @@ fn run(args: &Args) -> Result<(), String> {
     }
     if let Some(path) = &args.pdf {
         std::fs::write(path, session.output.to_pdf(&title)).map_err(|e| format!("{path}: {e}"))?;
+    }
+    if let Some(path) = &args.dashboard {
+        // The tiles come from DASHBOARD /TILES in the syntax.
+        if mksigma_web::ENGINE.is_empty() {
+            return Err("this build has no WebAssembly engine (rustup target add wasm32-unknown-unknown, then build again)".into());
+        }
+        let board_title = if title.ends_with("— Output") { title.replace("— Output", "— Dashboard") } else { "MK Sigma Dashboard".to_string() };
+        let page = mksigma_web::page(&session, &board_title, mksigma_web::ENGINE)?;
+        std::fs::write(path, page).map_err(|e| format!("{path}: {e}"))?;
     }
     if let Some(path) = &args.tex {
         std::fs::write(path, session.output.to_latex(&title)).map_err(|e| format!("{path}: {e}"))?;
