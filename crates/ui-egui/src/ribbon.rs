@@ -139,8 +139,9 @@ pub(crate) fn title_bar(ui: &mut egui::Ui, state: &State) -> Option<Action> {
     row.spacing_mut().item_spacing.x = 2.0;
     match crate::logo::texture(row.ctx()) {
         Some(texture) => {
-            let size = texture.size_vec2() * (20.0 / texture.size_vec2().y.max(1.0));
-            row.add(egui::Image::new((texture.id(), size))).on_hover_text("MK Sigma");
+            let size = texture.size_vec2() * (22.0 / texture.size_vec2().y.max(1.0));
+            // In the accent, like every icon: the pale original disappears on a light window.
+            row.add(egui::Image::new((texture.id(), size)).tint(t.accent)).on_hover_text("MK Sigma");
         }
         None => {
             icons::show(&mut row, Icon::Sigma, 18.0).on_hover_text("MK Sigma");
@@ -204,6 +205,12 @@ pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, state: &State) -> Option<
     ui.horizontal(|ui| {
         ui.add_space(4.0);
         ui.spacing_mut().item_spacing.x = 16.0;
+        // Rows centre what they hold on the height known so far: make it the tabs' from the start.
+        ui.set_min_height(28.0);
+        // File reads as a tab, not a framed button.
+        let widgets = &mut ui.visuals_mut().widgets;
+        widgets.inactive.bg_stroke = egui::Stroke::NONE;
+        widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
         let file = egui::RichText::new("File").size(14.0).color(t.accent);
         ui.menu_button(file, |ui| {
             let mut item = |ui: &mut egui::Ui, icon: Icon, label: &str, enabled: bool, then: Action| {
