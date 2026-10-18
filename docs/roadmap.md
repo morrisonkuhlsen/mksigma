@@ -130,8 +130,14 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   Dashboard tab: cards in a grid (two columns when there is room; the dashboard takes the whole
   window body), the same slicers and cross-filtering, tiles moved earlier or later or unpinned,
   and Export Dashboard writes a self-contained web page of the cards as filtered. Tiles follow
-  their items when filters run the analyses again. To do: saved with the syntax that produced
-  it, sizes and free placement of tiles, interactive export (below).
+  their items when filters run the analyses again.
+- **Saved dashboards — done:** Save Dashboard writes syntax that rebuilds it: `GET FILE` or
+  `GET DATA` for the data, the applied steps not already in that file, every analysis, the
+  `SLICE`s and `DASHBOARD /TILES=(analysis item)...`. Opening the `.sps` (File > Open) runs it on
+  an empty Output and shows the dashboard. Also new: `GET FILE='x.sav'` (File > Open reads system
+  files through it), comments (`* ...` and `COMMENT ...`). Analyses rerun on the data as it is
+  after every step; Data View edits aren't syntax and are left out, with a note. To do: tile
+  sizes and free placement, interactive export (below).
 - **Publish as a self-contained interactive page** (HTML + WASM): no server, no account
 - MCP server, so agents can run analyses and build dashboards
 

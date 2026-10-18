@@ -1,6 +1,7 @@
 //! Splits a program into commands and each command into tokens. A command ends with a period
 //! followed by whitespace or the end of the input; periods inside numbers, names and quoted
-//! strings don't end it.
+//! strings don't end it. A command that starts with `*` or `COMMENT` is a comment, skipped up to
+//! its period (quotes in it don't matter).
 
 use crate::SyntaxError;
 
@@ -63,6 +64,17 @@ pub(crate) fn commands(src: &str) -> Result<Vec<Lexed>, SyntaxError> {
             continue;
         }
         let ends_command = |chars: &std::iter::Peekable<std::str::CharIndices>| chars.clone().peek().is_none_or(|(_, n)| n.is_whitespace());
+        let comment = start.is_none()
+            && (c == '*'
+                || src.get(i..i + 8).is_some_and(|w| w.len() == 8 && w[..7].eq_ignore_ascii_case("COMMENT") && w.ends_with(char::is_whitespace)));
+        if comment {
+            while let Some((_, n)) = chars.next() {
+                if n == '.' && ends_command(&chars) {
+                    break;
+                }
+            }
+            continue;
+        }
         if c == '.' && ends_command(&chars) {
             if let Some(s) = start.take() {
                 out.push(Lexed { tokens: std::mem::take(&mut tokens), source: src.get(s..=i).unwrap_or_default().to_string() });
@@ -231,6 +243,17 @@ mod tests {
         );
         assert_eq!(tokens("a*b/c"), [w("a"), Star, w("b"), Slash, w("c")]);
         assert_eq!(tokens("- x"), [Minus, w("x")]);
+    }
+
+    #[test]
+    fn comments_are_skipped() {
+        let c = commands("* A comment, with 'quotes and a 2.5 inside.\nDESC age.\nCOMMENT another\n  over lines.\n*.\nFREQ x.").unwrap();
+        let sources: Vec<&str> = c.iter().map(|c| c.source.as_str()).collect();
+        assert_eq!(sources, ["DESC age.", "FREQ x."]);
+        assert_eq!(
+            tokens("COMPUTE y = a * b."),
+            [Token::Word("COMPUTE".into()), Token::Word("y".into()), Token::Equals, Token::Word("a".into()), Token::Star, Token::Word("b".into())]
+        );
     }
 
     #[test]

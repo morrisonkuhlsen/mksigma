@@ -141,14 +141,62 @@ impl SigmaApp {
             self.after_run(result.map_err(|e| e.to_string()), None);
             return;
         }
-        match std::fs::read(path) {
-            Ok(bytes) => {
-                let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
-                if self.open_bytes(&name, &bytes) {
-                    self.file_path = Some(path.to_path_buf());
-                }
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("sps")) {
+            self.open_syntax(path);
+            return;
+        }
+        let syntax = format!("GET FILE={}.", mksigma_engine::quote(&path.display().to_string()));
+        let result = self.session.run_syntax(&syntax);
+        self.after_run(result.map_err(|e| e.to_string()), None);
+    }
+
+    /// Opens a syntax file into the editor. A saved dashboard (it has `DASHBOARD`) runs at once
+    /// on an empty Output and shows the dashboard; other syntax waits for Run.
+    pub fn open_syntax(&mut self, path: &Path) {
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(e) => {
+                self.status = Some(Status::Error(format!("{}: {e}", path.display())));
+                return;
             }
+        };
+        let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+        self.syntax = text.clone();
+        let is_dashboard = mksigma_engine::check_syntax(&text).is_ok() && text.to_ascii_uppercase().contains("DASHBOARD");
+        if !is_dashboard {
+            self.status = Some(Status::Info(format!("{name} is in the syntax editor: Run runs it")));
+            return;
+        }
+        self.session.clear_output();
+        self.output_state = OutputState::default();
+        let result = self.session.run_syntax(&text).map_err(|e| format!("{name}: {e}"));
+        let ok = result.is_ok();
+        self.after_run(result, None);
+        if ok {
+            self.output_state.dashboard = true;
+            self.status = Some(Status::Info(format!("Opened the dashboard {name}")));
+        }
+    }
+
+    /// Writes the dashboard as syntax that rebuilds it: the data's file, the steps, the
+    /// analyses, the slicers and the tiles.
+    pub fn save_dashboard(&mut self, path: &Path) {
+        let Some(syntax) = self.session.dashboard_syntax() else {
+            self.status = Some(Status::Error(
+                "The data didn't come from a file it could be read again from: open it with File > Open, or save it first".into(),
+            ));
+            return;
+        };
+        match std::fs::write(path, syntax) {
+            Ok(()) => self.status = Some(Status::Info(format!("Saved the dashboard to {}", path.display()))),
             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
+        }
+    }
+
+    fn save_dashboard_dialog(&mut self) {
+        let stem = self.file_name.as_deref().and_then(|f| f.rsplit_once('.').map(|(s, _)| s.to_string())).unwrap_or_else(|| "dashboard".to_string());
+        if let Some(path) = self.services.pick_export.as_ref().and_then(|pick| pick(&format!("{stem} dashboard.sps"))) {
+            self.save_dashboard(&path);
         }
     }
 
@@ -233,6 +281,7 @@ impl SigmaApp {
                     Some(if warnings.is_empty() { Status::Info(summary) } else { Status::Warning(format!("{summary}. {}", warnings.join("; "))) });
                 self.file_name = Some(name);
                 self.file_path = Some(path.to_path_buf());
+                self.session.saved_to(&path.display().to_string());
             }
             Err(e) => {
                 let _ = std::fs::remove_file(&temporary);
@@ -283,8 +332,8 @@ impl SigmaApp {
         if let Some(file) = self.session.take_loaded_file() {
             let path = Path::new(&file);
             self.file_name = Some(path.file_name().map_or_else(|| file.clone(), |n| n.to_string_lossy().into_owned()));
-            // Save writes a system file, never over the text.
-            self.file_path = None;
+            // Save writes a system file back, never over text.
+            self.file_path = (!is_text(path)).then(|| path.to_path_buf());
             self.editing = None;
             self.value_labels_dialog = None;
         }
@@ -544,6 +593,7 @@ impl SigmaApp {
                 let result = self.session.move_tile(tile, earlier);
                 self.report(result);
             }
+            output::OutputAction::SaveDashboard => self.save_dashboard_dialog(),
             output::OutputAction::ExportDashboard => {
                 let stem =
                     self.file_name.as_deref().and_then(|f| f.rsplit_once('.').map(|(s, _)| s.to_string())).unwrap_or_else(|| "dashboard".to_string());
@@ -593,6 +643,7 @@ impl SigmaApp {
             Action::View(view) => self.view = view,
             Action::Suggest(procedure) => self.paste(procedure),
             Action::Theme(preference) => ctx.set_theme(preference),
+            Action::SaveDashboard => self.save_dashboard_dialog(),
             Action::Search => self.search = if self.search.is_some() { None } else { Some(String::new()) },
             Action::ToggleAutoSave => {
                 if self.autosave {

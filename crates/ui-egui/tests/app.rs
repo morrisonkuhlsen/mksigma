@@ -658,3 +658,45 @@ fn pinned_items_make_the_dashboard_and_it_exports() {
     h.run_steps(3);
     assert_eq!(h.state().session.dashboard().len(), 1);
 }
+
+#[test]
+fn a_saved_dashboard_opens_again() {
+    let data = temp_path("loja.csv");
+    std::fs::write(&data, "regiao,vendas\nNorte,10\nSul,12\nNorte,8\nSul,15\n").unwrap();
+    let board = temp_path("loja dashboard.sps");
+    let picked = board.clone();
+    let services = Services { pick_export: Some(Box::new(move |_: &str| Some(picked.clone()))), ..Services::default() };
+    let mut app = SigmaApp::new(services);
+    app.open_path(&data);
+    app.session.run_syntax("GRAPH /BAR(SIMPLE)=MEAN(vendas) BY regiao /TITLE='Vendas'.\nDESCRIPTIVES vendas.").unwrap();
+    app.session.toggle_pin(0).unwrap();
+    app.session.toggle_pin(1).unwrap();
+    let mut h = harness(app);
+    h.get_by_label("Dashboard").click();
+    h.run_steps(3);
+    h.get_by_label("Save Dashboard").click();
+    h.run_steps(3);
+    assert!(matches!(&h.state().status, Some(Status::Info(s)) if s.starts_with("Saved the dashboard")), "{:?}", h.state().status);
+
+    let mut again = harness(SigmaApp::default());
+    again.state_mut().open_path(&board);
+    again.run_steps(3);
+    std::fs::remove_file(&board).unwrap();
+    std::fs::remove_file(&data).unwrap();
+    let app = again.state();
+    assert!(app.output_state.dashboard, "{:?}", app.status);
+    assert_eq!(app.session.dashboard().len(), 2);
+    assert_eq!(app.file_name.as_deref(), Some(data.file_name().unwrap().to_str().unwrap()));
+    assert!(shows(&again, "Vendas") && shows(&again, "Descriptive Statistics"));
+    assert!(app.syntax.contains("DASHBOARD /TILES=(1 1) (2 1)."), "the syntax is in the editor");
+}
+
+#[test]
+fn a_dashboard_needs_data_from_a_file() {
+    let mut app = SigmaApp::default();
+    app.session.run_syntax("DESCRIPTIVES age.").unwrap();
+    app.session.toggle_pin(0).unwrap();
+    app.save_dashboard(&temp_path("never.sps"));
+    assert!(matches!(&app.status, Some(Status::Error(s)) if s.contains("didn't come from a file")));
+    assert!(!temp_path("never.sps").exists());
+}

@@ -24,6 +24,10 @@ pub use transform::{RecodeFrom, RecodeGroup, RecodeSpec, RecodeTo};
 pub enum Command {
     /// `GET DATA /TYPE=TXT /FILE='...'`: a new active dataset from delimited text.
     GetData(GetData),
+    /// `GET FILE='...'`: a new active dataset from a system file.
+    GetFile(String),
+    /// `DASHBOARD /TILES=(analysis item)...`: the dashboard's tiles, counted from 1.
+    Dashboard(Vec<(usize, usize)>),
     /// `SLICE var (values)`, `SLICE var (low THRU high)`, `SLICE var OFF`; `None` is `SLICE OFF`.
     Slice(Option<(String, SliceSpec)>),
     /// `DESCRIPTIVES [VARIABLES=] var...`
@@ -257,6 +261,12 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     }
     if is_keyword(name, "GET") && second("DATA") {
         return data::get_data(rest.get(1..).unwrap_or_default());
+    }
+    if is_keyword(name, "GET") && second("FILE") {
+        return data::get_file(rest);
+    }
+    if is_keyword(name, "DASHBOARD") {
+        return data::dashboard(rest);
     }
     if is_keyword(name, "DISPLAY") {
         return match rest {

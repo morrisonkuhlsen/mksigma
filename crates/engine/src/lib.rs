@@ -72,6 +72,10 @@ pub struct Session {
     cross_filter: Option<CrossFilter>,
     /// One per variable at most, in the order they were set.
     slicers: Vec<Slicer>,
+    /// The `GET FILE` or `GET DATA` command that reads the data, if one can.
+    data_source: Option<String>,
+    /// How many of the first steps `data_source` already holds (a file saved after them).
+    steps_in_source: usize,
     /// The dashboard's tiles, in order: a run and the place of the item among the run's items,
     /// so a tile follows its item when filters run the analyses again.
     tiles: Vec<(usize, usize)>,
@@ -97,6 +101,9 @@ fn changes_data(command: &Command) -> bool {
             | Command::Graph { .. }
             | Command::Examine { .. }
             | Command::Slice(_)
+            | Command::Dashboard(_)
+            | Command::GetFile(_)
+            | Command::GetData(_)
     )
 }
 
@@ -145,6 +152,9 @@ impl Session {
 
     /// A new active dataset: the base of new applied steps, with nothing to undo.
     fn load(&mut self, dataset: Dataset) {
+        // Syntax that read it sets this again after loading.
+        self.data_source = None;
+        self.steps_in_source = 0;
         self.base = dataset.clone();
         self.dataset = dataset;
         self.steps.clear();
@@ -182,6 +192,81 @@ impl Session {
         Ok(())
     }
 
+    /// `GET FILE`: reads a system file into a new active dataset.
+    fn get_file(&mut self, path: &str) -> Result<(), EngineError> {
+        let bytes = std::fs::read(path).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        let warnings = self.open_sav(&bytes)?;
+        let ds = &self.dataset;
+        self.notes.push(format!("{path}: {} cases, {} variables", ds.n_cases(), ds.variables().len()));
+        self.notes.extend(warnings.iter().map(|w| format!("{path}: {w}")));
+        self.loaded_file = Some(path.to_string());
+        Ok(())
+    }
+
+    /// `DASHBOARD /TILES`: tiles by analysis and item, counted from 1.
+    fn set_tiles(&mut self, tiles: &[(usize, usize)]) -> Result<(), EngineError> {
+        let mut out = Vec::with_capacity(tiles.len());
+        for &(analysis, item) in tiles {
+            let (run, offset) = (analysis - 1, item - 1);
+            let count = self.run_of.iter().filter(|r| **r == run).count();
+            if offset >= count {
+                return Err(EngineError::Invalid(format!("analysis {analysis} has no output item {item}")));
+            }
+            out.push((run, offset));
+        }
+        self.tiles = out;
+        Ok(())
+    }
+
+    /// The session as syntax that rebuilds its dashboard: where the data came from, the applied
+    /// steps, every analysis with output, the slicers and the tiles. `None` when the data didn't
+    /// come from a file through `GET FILE` or `GET DATA` (nothing could read it again).
+    /// The data was written to the system file `path`: from now on it is where the data comes
+    /// from, with the steps so far in it.
+    pub fn saved_to(&mut self, path: &str) {
+        self.data_source = Some(format!("GET FILE={}.", mksigma_syntax::quote(path)));
+        self.steps_in_source = self.steps.len();
+    }
+
+    pub fn dashboard_syntax(&self) -> Option<String> {
+        let source = self.data_source.as_ref()?;
+        let mut out = String::from("* MK Sigma dashboard: run it to rebuild the analyses and the dashboard.\n");
+        out.push_str(source);
+        out.push('\n');
+        let mut skipped = 0;
+        for step in self.steps.iter().skip(self.steps_in_source).filter(|s| s.enabled) {
+            match step.syntax() {
+                Some(syntax) => {
+                    out.push_str(syntax);
+                    out.push('\n');
+                }
+                None => skipped += 1,
+            }
+        }
+        if skipped > 0 {
+            out.push_str(&format!("* {skipped} Data View edits are not syntax and were left out.\n"));
+        }
+        // Runs from a frame of the past (sources lost) can't be written; their numbers shift.
+        let written: Vec<usize> = (0..self.runs.len()).filter(|r| self.runs.get(*r).is_some_and(|run| !run.source.is_empty())).collect();
+        for r in &written {
+            if let Some(run) = self.runs.get(*r) {
+                out.push_str(&run.source);
+                out.push('\n');
+            }
+        }
+        for slicer in &self.slicers {
+            out.push_str(&slicer.syntax());
+            out.push('\n');
+        }
+        let tiles: Vec<String> = self
+            .tiles
+            .iter()
+            .filter_map(|(run, offset)| written.iter().position(|r| r == run).map(|n| format!("({} {})", n + 1, offset + 1)))
+            .collect();
+        out.push_str(&format!("DASHBOARD /TILES={}.\n", tiles.join(" ")));
+        Some(out)
+    }
+
     /// The file `GET DATA` last read, if it ran since the last call.
     pub fn take_loaded_file(&mut self) -> Option<String> {
         self.loaded_file.take()
@@ -206,13 +291,28 @@ impl Session {
     /// action.
     pub fn run_syntax(&mut self, src: &str) -> Result<(), EngineError> {
         for (command, source) in mksigma_syntax::parse_with_source(src)? {
-            if let Command::GetData(spec) = &command {
-                // A new dataset, not a step on the old one.
-                self.get_data(spec)?;
+            // New data, not a step on the old; and the dashboard's layout.
+            let special = match &command {
+                Command::GetData(spec) => Some(self.get_data(spec)),
+                Command::GetFile(path) => Some(self.get_file(path)),
+                Command::Dashboard(tiles) => Some(self.set_tiles(tiles)),
+                _ => None,
+            };
+            if let Some(result) = special {
+                result?;
+                if matches!(command, Command::GetData(_) | Command::GetFile(_)) {
+                    self.data_source = Some(source.clone());
+                }
                 self.journal.push(source);
                 continue;
             }
+            let runs = self.runs.len();
             let edits = self.apply(&command)?;
+            if self.runs.len() > runs
+                && let Some(run) = self.runs.last_mut()
+            {
+                run.source = source.clone();
+            }
             self.journal.push(source.clone());
             if changes_data(&command) {
                 let step = AppliedStep::new(StepKind::Syntax(source.clone()));
@@ -423,7 +523,7 @@ impl Session {
     }
 
     fn add_run(&mut self, command: Command, items: Vec<Item>) {
-        self.runs.push(Run { command, items });
+        self.runs.push(Run { command, source: String::new(), items });
         self.show_runs();
     }
 
@@ -546,6 +646,10 @@ impl Session {
 
     /// Sets the step list, replays it, and records the change for undo.
     fn change_steps(&mut self, label: String, after: Vec<AppliedStep>) {
+        // The saved file holds the old steps: no syntax can rebuild the new list from it.
+        if self.steps_in_source > 0 {
+            self.data_source = None;
+        }
         let before = std::mem::replace(&mut self.steps, after);
         self.replay();
         self.history.push(Entry::Steps { label, before, after: self.steps.clone() });
@@ -1417,6 +1521,56 @@ mod tests {
         assert_eq!(s.dashboard(), [descriptives]);
         s.clear_output();
         assert!(s.dashboard().is_empty());
+    }
+
+    #[test]
+    fn a_dashboard_saved_as_syntax_rebuilds_itself() {
+        let path = std::env::temp_dir().join(format!("mksigma-dash-{}.csv", std::process::id()));
+        std::fs::write(&path, "regiao,vendas,meta\nNorte,10,12\nSul,12,10\nNorte,8,9\nSul,15,11\nLeste,9,9\n").unwrap();
+        let file = quote(&path.display().to_string());
+        let mut s = Session::new();
+        assert_eq!(s.dashboard_syntax(), None, "no data from a file yet");
+        s.run_syntax(&format!(
+            "GET DATA /TYPE=TXT /FILE={file}.\nCOMPUTE folga = vendas - meta.\nGRAPH /BAR(SIMPLE)=MEAN(vendas) BY regiao.\n\
+             DESCRIPTIVES vendas meta folga.\nSLICE regiao ('Norte' 'Sul')."
+        ))
+        .unwrap();
+        s.toggle_pin(1).unwrap();
+        s.toggle_pin(0).unwrap();
+        let syntax = s.dashboard_syntax().unwrap();
+        assert!(syntax.starts_with("* MK Sigma dashboard"));
+        assert!(syntax.contains("COMPUTE folga = vendas - meta.\nGRAPH"), "{syntax}");
+        assert!(syntax.ends_with("SLICE regiao ('Norte' 'Sul').\nDASHBOARD /TILES=(2 1) (1 1).\n"), "{syntax}");
+
+        let mut again = Session::new();
+        again.run_syntax(&syntax).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(again.dashboard(), [1, 0]);
+        assert_eq!(again.dashboard_output().to_text(), s.dashboard_output().to_text(), "the same dashboard, filtered the same");
+        assert!(again.run_syntax("DASHBOARD /TILES=(9 1).").is_err());
+    }
+
+    #[test]
+    fn get_file_reads_a_system_file() {
+        let path = std::env::temp_dir().join(format!("mksigma-get-file-{}.sav", std::process::id()));
+        let mut s = Session::with_sample().unwrap();
+        let (bytes, _) = s.save_sav(mksigma_sav::timestamp(0)).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+        let mut t = Session::new();
+        t.run_syntax(&format!("GET FILE={}.\nDESCRIPTIVES age.", quote(&path.display().to_string()))).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(t.dataset.n_cases(), 8);
+        assert!(t.take_notes()[0].ends_with("8 cases, 3 variables"));
+        assert!(t.dashboard_syntax().is_some_and(|d| d.contains("GET FILE=")));
+        assert!(matches!(t.run_syntax("GET FILE='/nonexistent.sav'."), Err(EngineError::File(_))));
+        // A file saved after steps holds them: the dashboard reads it and adds only later steps.
+        t.run_syntax("COMPUTE x = age + 1.").unwrap();
+        t.saved_to("/dados/com_x.sav");
+        t.run_syntax("COMPUTE y = x * 2.").unwrap();
+        let syntax = t.dashboard_syntax().unwrap();
+        assert!(syntax.contains("GET FILE='/dados/com_x.sav'.\nCOMPUTE y = x * 2.\n") && !syntax.contains("COMPUTE x"), "{syntax}");
+        t.set_step_enabled(0, false).unwrap();
+        assert_eq!(t.dashboard_syntax(), None, "the saved file has the step that is now off");
     }
 
     #[test]

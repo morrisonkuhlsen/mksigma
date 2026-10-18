@@ -37,6 +37,7 @@ pub(crate) enum OutputAction {
     /// Move a dashboard tile earlier (`true`) or later.
     MoveTile(usize, bool),
     ExportDashboard,
+    SaveDashboard,
 }
 
 /// What the Output is exported as.
@@ -90,6 +91,10 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
                     .clicked()
                 {
                     action = OutputAction::ExportDashboard;
+                }
+                let tip = "Save it as syntax that rebuilds it from the data: open the .sps to see it again";
+                if ui.add_enabled(!tiles.is_empty(), egui::Button::new("Save Dashboard").small()).on_hover_text(tip).clicked() {
+                    action = OutputAction::SaveDashboard;
                 }
             } else if !output.items.is_empty() && ui.small_button("Clear").on_hover_text("Remove every item from the Output").clicked() {
                 state.transposed.clear();

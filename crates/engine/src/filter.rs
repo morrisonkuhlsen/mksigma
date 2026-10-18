@@ -17,6 +17,8 @@ use crate::EngineError;
 #[derive(Debug, Clone)]
 pub(crate) struct Run {
     pub command: Command,
+    /// The command as written, for a saved dashboard.
+    pub source: String,
     pub items: Vec<Item>,
 }
 

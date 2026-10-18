@@ -47,6 +47,7 @@ pub(crate) enum Action {
     Theme(egui::ThemePreference),
     ToggleAutoSave,
     Search,
+    SaveDashboard,
 }
 
 /// What the buttons show: what can be undone, whether there is Output, the current view.
@@ -228,6 +229,7 @@ pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, state: &State) -> Option<
             item(ui, Icon::Open, "Open…", true, Action::Open);
             item(ui, Icon::Save, "Save", true, Action::Save);
             item(ui, Icon::Save, "Save As…", true, Action::SaveAs);
+            item(ui, Icon::Grid, "Save Dashboard…", true, Action::SaveDashboard);
             ui.separator();
             item(ui, Icon::Web, "Export Output as HTML…", state.has_output, Action::Export(ExportFormat::Html));
             item(ui, Icon::Pdf, "Export Output as PDF…", state.has_output, Action::Export(ExportFormat::Pdf));
@@ -343,6 +345,7 @@ pub(crate) fn commands() -> Vec<(&'static str, Action)> {
         ("Open…", Action::Open),
         ("Save", Action::Save),
         ("Save As…", Action::SaveAs),
+        ("Save Dashboard…", Action::SaveDashboard),
         ("Undo", Action::Undo),
         ("Redo", Action::Redo),
         ("Run Syntax", Action::Run),

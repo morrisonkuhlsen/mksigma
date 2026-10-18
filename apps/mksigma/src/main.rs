@@ -23,7 +23,7 @@ fn main() -> eframe::Result {
     let services = Services {
         pick_open: Some(Box::new(|| {
             rfd::FileDialog::new()
-                .add_filter("Data files (.sav, .csv, .tsv, .txt)", &["sav", "zsav", "csv", "tsv", "txt", "dat"])
+                .add_filter("Data and dashboards (.sav, .csv, .tsv, .txt, .sps)", &["sav", "zsav", "csv", "tsv", "txt", "dat", "sps"])
                 .add_filter("SPSS Statistics data (.sav, .zsav)", &["sav", "zsav"])
                 .add_filter("Delimited text (.csv, .tsv, .txt)", &["csv", "tsv", "txt", "dat"])
                 .add_filter("All files", &["*"])
@@ -37,6 +37,8 @@ fn main() -> eframe::Result {
             let dialog = rfd::FileDialog::new().set_file_name(suggested);
             let dialog = if suggested.ends_with(".pdf") {
                 dialog.add_filter("PDF document (.pdf)", &["pdf"])
+            } else if suggested.ends_with(".sps") {
+                dialog.add_filter("MK Sigma dashboard syntax (.sps)", &["sps"])
             } else {
                 dialog.add_filter("Web page (.html)", &["html", "htm"])
             };
