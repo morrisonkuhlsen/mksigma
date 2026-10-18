@@ -26,6 +26,9 @@ encoding_rs = "0.8"
 # Distribution functions (chi-square, t, F) for significance levels. MIT, pure Rust.
 statrs = { version = "0.19", default-features = false }
 
+# The app's logo (a PNG) decoded for the window icon and the title row. MIT/Apache, pure Rust.
+png = "0.18"
+
 # ui
 egui = "0.36"
 eframe = { version = "0.36", default-features = false }

@@ -41,6 +41,11 @@ pub enum EngineError {
     Invalid(String),
 }
 
+/// Parses a syntax program without running it.
+pub fn check_syntax(src: &str) -> Result<(), EngineError> {
+    mksigma_syntax::parse(src).map(drop).map_err(EngineError::from)
+}
+
 #[derive(Debug, Default)]
 pub struct Session {
     pub dataset: Dataset,

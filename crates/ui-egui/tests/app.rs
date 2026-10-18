@@ -81,13 +81,13 @@ fn variable_view_lists_the_dictionary() {
 fn run_puts_tables_in_the_output() {
     let mut h = harness(SigmaApp::default());
     h.state_mut().syntax = "DESCRIPTIVES VARIABLES=age.".into();
-    h.get_by_label("▶ Run").click();
+    h.get_by_label("Run").click();
     h.run_steps(3);
     assert!(shows(&h, "Descriptive Statistics"));
     assert_eq!(h.state().status, None);
 
     h.state_mut().syntax = "DESCRIPTIVES VARIABLES=nope.".into();
-    h.get_by_label("▶ Run").click();
+    h.get_by_label("Run").click();
     h.run_steps(3);
     assert!(matches!(h.state().status, Some(Status::Error(_))));
 }
@@ -249,7 +249,7 @@ fn the_steps_panel_lists_data_changes_only() {
 #[test]
 fn switching_a_step_off_and_on_replays_the_data() {
     let mut h = with_steps();
-    // The first checkbox is Data View's "Value labels"; the steps' follow in order.
+    // The first checkbox is the title row's AutoSave switch; the steps' follow in order.
     let filter = || egui::accesskit::Role::CheckBox;
     h.query_all_by_role(filter()).nth(3).unwrap().click();
     h.run_steps(3);
@@ -321,9 +321,8 @@ fn save_as_writes_a_file_that_reopens_the_same() {
     h.state_mut().run_edit("VARIABLE LABELS age 'Idade'.");
     h.run_steps(2);
     assert!(h.state().session.modified);
-    h.get_by_label("File").click();
-    h.run_steps(3);
-    h.get_by_label("Save").click();
+    // The title row's Save, the first of the window's.
+    h.get_all_by_label("Save").next().unwrap().click();
     h.run_steps(3);
 
     let app = h.state();
@@ -393,8 +392,7 @@ fn edit_menu_names_what_it_undoes() {
     let mut h = harness(SigmaApp::default());
     h.state_mut().session.set_cell(0, 0, "30").unwrap();
     h.run_steps(2);
-    h.get_by_label("Edit").click();
-    h.run_steps(3);
+    // The title row's Undo names what it undoes.
     h.get_by_label("Undo cell edit").click();
     h.run_steps(3);
     assert_eq!(h.state().session.dataset.column(0).unwrap()[0], mksigma_engine::core::Value::Num(23.0));
@@ -517,4 +515,63 @@ fn clicking_a_category_cross_filters_the_other_items() {
     let html = std::fs::read_to_string(&path).unwrap();
     std::fs::remove_file(&path).unwrap();
     assert!(html.contains("<h1>MK Sigma Output (filtered by grupo = Adulto)</h1>"), "an export says it is filtered");
+}
+
+#[test]
+fn the_analyze_tab_runs_a_procedure_and_pastes_its_syntax() {
+    let mut h = harness(SigmaApp::default());
+    h.get_by_label("Analyze").click();
+    h.run_steps(3);
+    h.get_by_label("Descriptives").click();
+    h.run_steps(3);
+    assert!(shows(&h, "Descriptive Statistics"));
+    assert!(h.state().syntax.ends_with("\nDESCRIPTIVES VARIABLES=age income score."));
+    // The sample has no categorical variable: Crosstabs is a template to complete, not run.
+    h.get_by_label("Crosstabs").click();
+    h.run_steps(3);
+    assert!(h.state().syntax.ends_with("CROSSTABS /TABLES=row BY column /CELLS=COUNT ROW /STATISTICS=CHISQ."));
+    assert!(matches!(&h.state().status, Some(Status::Info(s)) if s.contains("placeholder")));
+    h.get_by_label("Variable View").click();
+    h.run_steps(3);
+    assert_eq!(h.state().view, View::Variables);
+}
+
+#[test]
+fn autosave_saves_each_change_to_the_file() {
+    let path = temp_path("autosave.sav");
+    let picked = path.clone();
+    let services = Services { pick_save: Some(Box::new(move |_: &str| Some(picked.clone()))), ..Services::default() };
+    let mut h = harness(SigmaApp::new(services));
+    // The sample has no file yet: switching AutoSave on asks where to save first.
+    h.query_all_by_role(egui::accesskit::Role::CheckBox).next().unwrap().click();
+    h.run_steps(3);
+    assert!(h.state().autosave && !h.state().session.modified);
+    h.state_mut().run_edit("VARIABLE LABELS age 'Idade'.");
+    h.run_steps(2);
+    assert!(!h.state().session.modified, "saved without asking");
+    assert_eq!(h.state().status, Some(Status::Info("VARIABLE LABELS age 'Idade'.".into())), "quietly");
+    let mut again = SigmaApp::default();
+    again.open_path(&path);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(again.session.dataset.variables()[0].label.as_deref(), Some("Idade"));
+}
+
+#[test]
+fn search_finds_commands_and_zoom_steps() {
+    let mut h = harness(SigmaApp::default());
+    h.get_by_label("Search commands and variables (Ctrl+F)").click();
+    h.run_steps(3);
+    h.state_mut().search = Some("descri".into());
+    h.run_steps(3);
+    h.get_by_label("Descriptives").click();
+    h.run_steps(3);
+    assert!(h.state().search.is_none());
+    assert!(shows(&h, "Descriptive Statistics"));
+
+    h.get_by_label("Zoom In").click();
+    h.run_steps(3);
+    assert_eq!(h.state().zoom, 110);
+    h.get_by_label("110%").click();
+    h.run_steps(3);
+    assert_eq!(h.state().zoom, 100);
 }

@@ -19,7 +19,6 @@ pub struct OutputState {
 /// What the user asked for in the viewer this frame.
 pub(crate) enum OutputAction {
     None,
-    Export(ExportFormat),
     Clear,
     /// A category of an item was clicked.
     Select(usize, Category),
@@ -36,19 +35,17 @@ pub enum ExportFormat {
 pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut OutputState) -> OutputAction {
     let mut action = OutputAction::None;
     let output = &session.output;
+    let t = crate::theme::Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
-        ui.strong("Output");
+        crate::icons::show(ui, crate::icons::Icon::Table, 14.0);
+        ui.label(egui::RichText::new("Output").strong());
         if !output.items.is_empty() {
-            if ui.small_button("Clear").clicked() {
-                state.transposed.clear();
-                action = OutputAction::Clear;
-            }
-            if ui.small_button("Export HTML").on_hover_text("Save the Output as a web page").clicked() {
-                action = OutputAction::Export(ExportFormat::Html);
-            }
-            if ui.small_button("Export PDF").on_hover_text("Save the Output as a PDF document").clicked() {
-                action = OutputAction::Export(ExportFormat::Pdf);
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("Clear").on_hover_text("Remove every item from the Output").clicked() {
+                    state.transposed.clear();
+                    action = OutputAction::Clear;
+                }
+            });
         }
     });
     let selected = session.cross_filter();
@@ -58,6 +55,16 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
             if ui.small_button("Clear filter").on_hover_text("Show every item on all the cases").clicked() {
                 action = OutputAction::ClearFilter;
             }
+        });
+    }
+    ui.add_space(4.0);
+    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), egui::Stroke::new(1.0, t.border));
+    ui.add_space(8.0);
+    if output.items.is_empty() {
+        ui.add_space(40.0);
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new("No output yet").color(t.text_dim).size(15.0));
+            ui.label(egui::RichText::new("Pick a procedure on the Analyze or Graphs tab, or run syntax.").color(t.text_dim));
         });
     }
     egui::ScrollArea::vertical().id_salt("output").stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
@@ -189,7 +196,7 @@ fn draw_chart(ui: &mut egui::Ui, c: &Chart, selected: Option<&Category>) -> Opti
     let text_color = visuals.text_color();
     let weak = visuals.weak_text_color();
     let grid = visuals.widgets.noninteractive.bg_stroke.color;
-    let bar = visuals.selection.bg_fill;
+    let bar = crate::theme::Tokens::get(ui.ctx()).accent;
     let curve = egui::Color32::from_rgb(234, 112, 40);
     let at = |x: f64, y: f64| rect.min + egui::vec2(x as f32, y as f32);
     for shape in shapes.iter().cloned() {
@@ -207,8 +214,8 @@ fn draw_chart(ui: &mut egui::Ui, c: &Chart, selected: Option<&Category>) -> Opti
                 let r = egui::Rect::from_min_size(at(x, y), egui::vec2(width as f32, height as f32));
                 let category = part.and_then(|p| c.category(p));
                 let fill = match dim {
-                    Some(selected) if category != Some(selected) => bar.gamma_multiply(0.3),
-                    _ if part.is_some() && part == hovered => bar.gamma_multiply(1.25),
+                    Some(selected) if category != Some(selected) => bar.gamma_multiply(0.25),
+                    _ if part.is_some() && part == hovered => bar.gamma_multiply(0.8),
                     _ => bar,
                 };
                 painter.rect_filled(r, 0.0, fill);

@@ -5,6 +5,21 @@ use mksigma_engine::core::{Dataset, Measure, Value, VarType, Variable};
 
 use crate::ROW_HEIGHT;
 use crate::edit::{Commit, Editing, Field, Target, editable, missing_text};
+use crate::theme::Tokens;
+
+/// Lines between the cells of a row starting at `min`: under the row, after the case number
+/// and after each column.
+fn row_lines(ui: &egui::Ui, t: &Tokens, min: egui::Pos2, height: f32, first: f32, widths: &[f32]) {
+    let painter = ui.painter();
+    let right = min.x + first + widths.iter().sum::<f32>();
+    painter.hline(min.x..=right, min.y + height - 0.5, egui::Stroke::new(1.0, t.gridline));
+    let mut x = min.x + first;
+    painter.vline(x - 0.5, min.y..=min.y + height, egui::Stroke::new(1.0, t.header_line));
+    for w in widths {
+        x += w;
+        painter.vline(x - 0.5, min.y..=min.y + height, egui::Stroke::new(1.0, t.gridline));
+    }
+}
 
 /// A cell as Data View shows it: the value label when asked and one exists, else the value in
 /// the variable's format.
@@ -44,24 +59,34 @@ pub(crate) fn data_view(
     let n = ds.n_cases();
     let case_width = column_width(ui, &n.to_string()).max(48.0);
     let widths: Vec<f32> = vars.iter().map(|v| column_width(ui, &v.name).max(80.0)).collect();
+    let t = Tokens::get(ui.ctx());
     egui::ScrollArea::horizontal().id_salt("data-h").auto_shrink([false, false]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+        let header_height = ROW_HEIGHT + 4.0;
+        let top = ui.cursor().min;
+        let header = egui::Rect::from_min_size(top, egui::vec2(ui.available_width().max(case_width + widths.iter().sum::<f32>()), header_height));
+        ui.painter().rect_filled(header, 0.0, t.header_bg);
         ui.horizontal(|ui| {
-            ui.add_sized([case_width, ROW_HEIGHT], egui::Label::new(""));
+            ui.add_sized([case_width, header_height], egui::Label::new(""));
             for (v, w) in vars.iter().zip(&widths) {
-                ui.add_sized([*w, ROW_HEIGHT], egui::Label::new(egui::RichText::new(&v.name).strong())).on_hover_text(v.display_name());
+                let name = egui::RichText::new(&v.name).color(t.header_text);
+                ui.add_sized([*w, header_height], egui::Label::new(name)).on_hover_text(v.display_name());
             }
         });
-        ui.separator();
+        row_lines(ui, &t, top, header_height, case_width, &widths);
+        ui.painter().hline(header.x_range(), header.bottom() - 0.5, egui::Stroke::new(1.0, t.header_line));
         // Only the visible rows are laid out, so large files stay fast.
         let rows_shown = if vars.is_empty() { 0 } else { n + 1 };
         egui::ScrollArea::vertical().id_salt("data-v").auto_shrink([false, false]).show_rows(ui, ROW_HEIGHT, rows_shown, |ui, rows| {
             for case in rows {
+                let min = ui.cursor().min;
+                ui.painter().rect_filled(egui::Rect::from_min_size(min, egui::vec2(case_width, ROW_HEIGHT)), 0.0, t.header_bg);
                 ui.horizontal(|ui| {
                     if case == n {
                         ui.add_sized([case_width, ROW_HEIGHT], egui::Label::new(egui::RichText::new("+").weak()))
                             .on_hover_text("Type here to add a case");
                     } else {
-                        let number = egui::Label::new(egui::RichText::new((case + 1).to_string()).weak()).sense(egui::Sense::click());
+                        let number = egui::Label::new(egui::RichText::new((case + 1).to_string()).color(t.header_text)).sense(egui::Sense::click());
                         ui.add_sized([case_width, ROW_HEIGHT], number).context_menu(|ui| {
                             if ui.button("Insert case above").clicked() {
                                 commits.push(Commit::InsertCase(case));
@@ -88,6 +113,7 @@ pub(crate) fn data_view(
                         editable(ui, editing, edits, Target::Cell { case, var: i }, rich, || edit_text(value), *w, ROW_HEIGHT, right);
                     }
                 });
+                row_lines(ui, &t, min, ROW_HEIGHT, case_width, &widths);
             }
         });
     });

@@ -82,6 +82,7 @@ pub(crate) fn editable(
     let response = ui
         .allocate_ui_with_layout(egui::vec2(width, height), layout, |ui| {
             ui.set_min_size(egui::vec2(width, height));
+            ui.add_space(6.0);
             ui.add(egui::Label::new(display).truncate().sense(egui::Sense::click()))
         })
         .inner;

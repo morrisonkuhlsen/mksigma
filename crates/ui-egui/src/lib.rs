@@ -9,12 +9,25 @@ use std::path::{Path, PathBuf};
 use mksigma_engine::Session;
 
 mod edit;
+mod icons;
+pub mod logo;
 mod output;
+mod ribbon;
+mod suggest;
+mod theme;
 mod views;
 
 pub use edit::{Editing, Field, Target};
 pub use output::{ExportFormat, OutputState};
+pub use ribbon::Tab;
+pub use suggest::Procedure;
 pub use views::ValueLabelsDialog;
+
+use icons::Icon;
+use theme::Tokens;
+
+const SHEET_TABS_HEIGHT: f32 = 30.0;
+const STATUS_HEIGHT: f32 = 24.0;
 
 use edit::{Commit, syntax_for, value_labels_syntax};
 use views::DialogOutcome;
@@ -67,8 +80,17 @@ pub struct SigmaApp {
     pub value_labels_dialog: Option<ValueLabelsDialog>,
     /// Which Output tables are pivoted.
     pub output_state: OutputState,
+    /// The ribbon tab shown.
+    pub tab: Tab,
+    /// Save to the file after every change (only when the data has a file).
+    pub autosave: bool,
+    /// The search box's text, while it is open.
+    pub search: Option<String>,
+    /// The window's zoom, in percent.
+    pub zoom: u32,
     services: Services,
     title: String,
+    themed: bool,
 }
 
 impl Default for SigmaApp {
@@ -78,15 +100,6 @@ impl Default for SigmaApp {
 }
 
 pub(crate) const ROW_HEIGHT: f32 = 20.0;
-
-/// An undo label short enough for a menu.
-fn short(label: &str) -> String {
-    let mut s: String = label.chars().take(40).collect();
-    if label.chars().count() > 40 {
-        s.push('…');
-    }
-    s
-}
 
 impl SigmaApp {
     pub fn new(services: Services) -> Self {
@@ -105,8 +118,13 @@ impl SigmaApp {
             editing: None,
             value_labels_dialog: None,
             output_state: OutputState::default(),
+            tab: Tab::default(),
+            autosave: false,
+            search: None,
+            zoom: 100,
             services,
             title: String::new(),
+            themed: false,
         }
     }
 
@@ -297,68 +315,47 @@ impl SigmaApp {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        if !self.themed {
+            theme::apply(ui.ctx());
+            self.themed = true;
+        }
         self.handle_input(ui.ctx());
         let title = format!("{}{} — MK Sigma", if self.session.modified { "• " } else { "" }, self.file_name.as_deref().unwrap_or("Untitled"));
         if title != self.title {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.title = title;
         }
+        let t = Tokens::get(ui.ctx());
+        // The window's own background: a bare root Ui (as eframe gives) paints none.
+        ui.painter().rect_filled(ui.max_rect().expand(8.0), 0.0, t.window);
+        ui.spacing_mut().item_spacing.y = 0.0;
 
-        ui.horizontal(|ui| {
-            ui.menu_button("File", |ui| {
-                if ui.button("Open…").clicked() {
-                    ui.close();
-                    self.open_dialog();
-                }
-                if ui.button("Save").clicked() {
-                    ui.close();
-                    self.save();
-                }
-                if ui.button("Save As…").clicked() {
-                    ui.close();
-                    self.save_as();
-                }
-                ui.separator();
-                let has_output = !self.session.output.items.is_empty();
-                if ui.add_enabled(has_output, egui::Button::new("Export Output as HTML…")).clicked() {
-                    ui.close();
-                    self.export_dialog(ExportFormat::Html);
-                }
-                if ui.add_enabled(has_output, egui::Button::new("Export Output as PDF…")).clicked() {
-                    ui.close();
-                    self.export_dialog(ExportFormat::Pdf);
-                }
-            });
-            ui.menu_button("Edit", |ui| {
-                let undo = self.session.undo_label().map(|l| format!("Undo {}", short(l)));
-                if ui.add_enabled(undo.is_some(), egui::Button::new(undo.as_deref().unwrap_or("Undo"))).clicked() {
-                    ui.close();
-                    self.undo();
-                }
-                let redo = self.session.redo_label().map(|l| format!("Redo {}", short(l)));
-                if ui.add_enabled(redo.is_some(), egui::Button::new(redo.as_deref().unwrap_or("Redo"))).clicked() {
-                    ui.close();
-                    self.redo();
-                }
-            });
-            ui.separator();
-            ui.selectable_value(&mut self.view, View::Data, "Data View");
-            ui.selectable_value(&mut self.view, View::Variables, "Variable View");
-            if self.view == View::Data {
-                ui.separator();
-                ui.checkbox(&mut self.value_labels, "Value labels");
-            }
-        });
-        ui.separator();
+        let document = format!("{}{}", if self.session.modified { "• " } else { "" }, self.file_name.as_deref().unwrap_or("Untitled"));
+        let state = ribbon::State {
+            title: &document,
+            undo: self.session.undo_label(),
+            redo: self.session.redo_label(),
+            has_output: !self.session.output.items.is_empty(),
+            value_labels: self.value_labels,
+            view: self.view,
+            autosave: self.autosave,
+        };
+        let mut actions = Vec::new();
+        actions.extend(ribbon::title_bar(ui, &state));
+        actions.extend(ribbon::ribbon(ui, &mut self.tab, &state));
+        for action in actions {
+            self.act(ui.ctx(), action);
+        }
 
-        let status_height = 28.0;
-        let body = (ui.available_height() - status_height).max(100.0);
-        // Data and Variable View get 65% of the width, the Output Viewer the rest.
-        let gap = 12.0;
-        let left_width = ((ui.available_width() - gap) * 0.65).floor();
+        let bottom = SHEET_TABS_HEIGHT + STATUS_HEIGHT;
+        let body = (ui.available_height() - bottom - 8.0).max(100.0);
+        ui.add_space(6.0);
+        // Data and Variable View get 62% of the width, the Output Viewer the rest.
+        let gap = 6.0;
+        let left_width = ((ui.available_width() - gap) * 0.62).floor();
         let right_width = ui.available_width() - gap - left_width;
         ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = gap;
+            ui.spacing_mut().item_spacing = egui::vec2(gap, 0.0);
             let top_down = egui::Layout::top_down(egui::Align::Min);
             ui.allocate_ui_with_layout(egui::vec2(left_width, body), top_down, |ui| {
                 ui.set_width(left_width);
@@ -368,26 +365,206 @@ impl SigmaApp {
             ui.allocate_ui_with_layout(egui::vec2(right_width, body), top_down, |ui| {
                 ui.set_width(right_width);
                 ui.set_height(body);
-                match output::output_view(ui, &self.session, &mut self.output_state) {
-                    output::OutputAction::None => {}
-                    output::OutputAction::Export(format) => self.export_dialog(format),
-                    output::OutputAction::Clear => self.session.clear_output(),
-                    output::OutputAction::Select(item, category) => {
-                        // Filtering changes which items there are, so pivots by index would land on others.
-                        self.output_state.transposed.clear();
-                        if let Err(e) = self.session.select_category(item, category) {
-                            self.status = Some(Status::Error(e.to_string()));
-                        }
+                theme::card(&t).fill(t.paper).show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    let action = output::output_view(ui, &self.session, &mut self.output_state);
+                    self.output_action(action);
+                });
+            });
+        });
+        ui.add_space(2.0);
+        self.sheet_tabs(ui);
+        self.status_line(ui);
+        self.dialogs(ui.ctx());
+        self.search_box(ui.ctx());
+        let zoom = self.zoom as f32 / 100.0;
+        if (ui.ctx().zoom_factor() - zoom).abs() > 0.001 {
+            ui.ctx().set_zoom_factor(zoom);
+        }
+        // AutoSave waits for an edit in progress to finish.
+        if self.autosave
+            && self.session.modified
+            && self.editing.is_none()
+            && let Some(path) = self.file_path.clone()
+        {
+            let before = self.status.clone();
+            self.save_to(&path);
+            // A save that worked says nothing, so it doesn't hide what the last command said.
+            if matches!(self.status, Some(Status::Info(_)) | Some(Status::Warning(_))) && !self.session.modified {
+                self.status = before;
+            }
+        }
+    }
+
+    /// The search box under the title row: type to find a command or a variable, Enter or a
+    /// click picks it, Escape closes.
+    fn search_box(&mut self, ctx: &egui::Context) {
+        let Some(mut query) = self.search.take() else { return };
+        let t = Tokens::get(ctx);
+        let needle = query.trim().to_lowercase();
+        let mut results: Vec<(String, ribbon::Action)> =
+            ribbon::commands().into_iter().filter(|(name, _)| name.to_lowercase().contains(&needle)).map(|(n, a)| (n.to_string(), a)).collect();
+        for var in self.session.dataset.variables() {
+            if !needle.is_empty()
+                && (var.name.to_lowercase().contains(&needle) || var.label.as_deref().is_some_and(|l| l.to_lowercase().contains(&needle)))
+            {
+                let label = var.label.as_deref().map_or_else(|| var.name.clone(), |l| format!("{} — {l}", var.name));
+                results.push((format!("Variable: {label}"), ribbon::Action::View(View::Variables)));
+            }
+        }
+        results.truncate(10);
+        let mut picked = None;
+        let mut open = true;
+        let width = 380.0;
+        let at = egui::pos2(ctx.content_rect().right() - width - 12.0, ribbon::TITLE_HEIGHT);
+        egui::Area::new(egui::Id::new("search")).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| {
+            theme::card(&t).shadow(ui.visuals().popup_shadow).show(ui, |ui| {
+                ui.set_width(width);
+                ui.horizontal(|ui| {
+                    icons::show(ui, Icon::Search, 16.0);
+                    let edit = ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search commands and variables").desired_width(f32::INFINITY));
+                    if !edit.has_focus() && !edit.lost_focus() {
+                        edit.request_focus();
                     }
-                    output::OutputAction::ClearFilter => {
-                        self.output_state.transposed.clear();
-                        self.session.clear_cross_filter();
+                    if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        picked = results.first().map(|(_, a)| a.clone());
                     }
+                });
+                ui.add_space(4.0);
+                for (name, action) in &results {
+                    if ui.add(egui::Button::new(name.as_str()).frame(false).min_size(egui::vec2(width, 22.0))).clicked() {
+                        picked = Some(action.clone());
+                    }
+                }
+                if results.is_empty() {
+                    ui.label(egui::RichText::new("Nothing found").color(t.text_dim));
                 }
             });
         });
-        self.status_line(ui);
-        self.dialogs(ui.ctx());
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            open = false;
+        }
+        if let Some(action) = picked {
+            open = false;
+            self.act(ctx, action);
+        }
+        if open {
+            self.search = Some(query);
+        }
+    }
+
+    fn output_action(&mut self, action: output::OutputAction) {
+        match action {
+            output::OutputAction::None => {}
+            output::OutputAction::Clear => self.session.clear_output(),
+            output::OutputAction::Select(item, category) => {
+                // Filtering changes which items there are, so pivots by index would land on others.
+                self.output_state.transposed.clear();
+                if let Err(e) = self.session.select_category(item, category) {
+                    self.status = Some(Status::Error(e.to_string()));
+                }
+            }
+            output::OutputAction::ClearFilter => {
+                self.output_state.transposed.clear();
+                self.session.clear_cross_filter();
+            }
+        }
+    }
+
+    /// Does what a ribbon or title-row button asked for.
+    fn act(&mut self, ctx: &egui::Context, action: ribbon::Action) {
+        use ribbon::Action;
+        match action {
+            Action::Open => self.open_dialog(),
+            Action::Save => self.save(),
+            Action::SaveAs => self.save_as(),
+            Action::Undo => self.undo(),
+            Action::Redo => self.redo(),
+            Action::Run => self.run_syntax(),
+            Action::Export(format) => self.export_dialog(format),
+            Action::ClearOutput => {
+                self.output_state.transposed.clear();
+                self.session.clear_output();
+            }
+            Action::InsertCase => {
+                let n = self.session.dataset.n_cases();
+                let result = self.session.insert_case(n);
+                self.report(result);
+            }
+            Action::InsertVariable => {
+                // The first free VAR00001-style name, as SPSS names new variables.
+                let name = (1..100_000).map(|i| format!("VAR{i:05}")).find(|n| self.session.dataset.variable(n).is_none());
+                if let Some(name) = name {
+                    self.run_edit(&format!("NUMERIC {name}."));
+                }
+            }
+            Action::ToggleLabels => self.value_labels = !self.value_labels,
+            Action::View(view) => self.view = view,
+            Action::Suggest(procedure) => self.paste(procedure),
+            Action::Theme(preference) => ctx.set_theme(preference),
+            Action::Search => self.search = if self.search.is_some() { None } else { Some(String::new()) },
+            Action::ToggleAutoSave => {
+                if self.autosave {
+                    self.autosave = false;
+                } else {
+                    // AutoSave needs a file: ask for one first.
+                    if self.file_path.is_none() {
+                        self.save_as();
+                    }
+                    self.autosave = self.file_path.is_some();
+                }
+            }
+        }
+    }
+
+    /// Adds a procedure's syntax to the editor, and runs it when it needs nothing completed.
+    pub fn paste(&mut self, procedure: suggest::Procedure) {
+        let suggestion = suggest::suggest(procedure, &self.session.dataset);
+        if !self.syntax.is_empty() && !self.syntax.ends_with('\n') {
+            self.syntax.push('\n');
+        }
+        self.syntax.push_str(&suggestion.syntax);
+        self.status = Some(if suggestion.ready {
+            match self.session.run_syntax(&suggestion.syntax) {
+                Ok(()) => Status::Info(suggestion.syntax),
+                Err(e) => Status::Error(format!("{e} ({})", suggestion.syntax)),
+            }
+        } else {
+            Status::Info("Added a command to the syntax editor: replace the placeholder names, then Run.".to_string())
+        });
+    }
+
+    /// Data View and Variable View as tabs under the grid, like a workbook's sheets.
+    fn sheet_tabs(&mut self, ui: &mut egui::Ui) {
+        let t = Tokens::get(ui.ctx());
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), SHEET_TABS_HEIGHT), egui::Sense::hover());
+        ui.painter().hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, t.border));
+        let mut row =
+            ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(8.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Min)));
+        row.spacing_mut().item_spacing.x = 2.0;
+        for (view, icon, name) in [(View::Data, Icon::Grid, "Data View"), (View::Variables, Icon::List, "Variable View")] {
+            let on = self.view == view;
+            let galley = row.painter().layout_no_wrap(name.to_string(), egui::FontId::proportional(13.0), if on { t.accent } else { t.text_dim });
+            let size = egui::vec2(galley.size().x + 40.0, SHEET_TABS_HEIGHT - 4.0);
+            let (tab, response) = row.allocate_exact_size(size, egui::Sense::click());
+            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, name));
+            let painter = row.painter();
+            if on {
+                painter.rect_filled(tab, egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, t.ribbon);
+                painter.rect_filled(
+                    egui::Rect::from_min_max(tab.left_bottom() - egui::vec2(-10.0, 3.0), tab.right_bottom() - egui::vec2(10.0, 0.0)),
+                    1.5,
+                    t.accent,
+                );
+            } else if response.hovered() {
+                painter.rect_filled(tab, 6.0, t.hover);
+            }
+            icons::paint(painter, egui::Rect::from_center_size(egui::pos2(tab.left() + 16.0, tab.center().y), egui::vec2(14.0, 14.0)), icon, &t);
+            painter.galley(egui::pos2(tab.left() + 28.0, tab.center().y - galley.size().y / 2.0), galley, t.text);
+            if response.clicked() {
+                self.view = view;
+            }
+        }
     }
 
     fn handle_input(&mut self, ctx: &egui::Context) {
@@ -400,6 +577,9 @@ impl SigmaApp {
         }
         if shortcut(egui::Modifiers::COMMAND, egui::Key::O) {
             self.open_dialog();
+        }
+        if shortcut(egui::Modifiers::COMMAND, egui::Key::F) {
+            self.search = Some(String::new());
         }
         // Undo and redo the data only when no text box has the keyboard (they undo their own text).
         if ctx.memory(|m| m.focused().is_none()) {
@@ -423,13 +603,21 @@ impl SigmaApp {
     }
 
     fn left_pane(&mut self, ui: &mut egui::Ui) {
+        let t = Tokens::get(ui.ctx());
         let syntax_height = 300.0;
         let table_height = (ui.available_height() - syntax_height).max(120.0);
         let mut edits = Vec::new();
         let mut commits = Vec::new();
-        ui.allocate_ui(egui::vec2(ui.available_width(), table_height), |ui| match self.view {
-            View::Data => views::data_view(ui, &self.session.dataset, self.value_labels, &mut self.editing, &mut edits, &mut commits),
-            View::Variables => views::variable_view(ui, &self.session.dataset, &mut self.editing, &mut edits, &mut commits),
+        let grid = egui::Frame::new().fill(t.grid_bg).stroke(egui::Stroke::new(1.0, t.border)).corner_radius(8).inner_margin(egui::Margin::same(1));
+        grid.show(ui, |ui| {
+            let size = egui::vec2(ui.available_width(), table_height - 2.0);
+            ui.allocate_ui(size, |ui| {
+                ui.set_min_size(size);
+                match self.view {
+                    View::Data => views::data_view(ui, &self.session.dataset, self.value_labels, &mut self.editing, &mut edits, &mut commits),
+                    View::Variables => views::variable_view(ui, &self.session.dataset, &mut self.editing, &mut edits, &mut commits),
+                }
+            });
         });
         for (target, text) in edits {
             self.apply_edit(target, &text);
@@ -438,15 +626,22 @@ impl SigmaApp {
             self.apply_commit(commit);
         }
 
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.strong("Syntax");
-            if ui.button("▶ Run").clicked() {
-                self.run_syntax();
-            }
+        ui.add_space(6.0);
+        theme::card(&t).show(ui, |ui| {
+            ui.set_min_size(ui.available_size());
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.horizontal(|ui| {
+                icons::show(ui, Icon::List, 14.0);
+                ui.label(egui::RichText::new("Syntax").strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ribbon::accent_button(ui, Icon::Run, "Run").on_hover_text("Run every command in the editor").clicked() {
+                        self.run_syntax();
+                    }
+                });
+            });
+            ui.add(egui::TextEdit::multiline(&mut self.syntax).code_editor().desired_rows(5).desired_width(f32::INFINITY));
+            self.steps_panel(ui);
         });
-        ui.add(egui::TextEdit::multiline(&mut self.syntax).code_editor().desired_rows(4).desired_width(f32::INFINITY));
-        self.steps_panel(ui);
     }
 
     fn apply_commit(&mut self, commit: Commit) {
@@ -558,21 +753,62 @@ impl SigmaApp {
         }
     }
 
-    fn status_line(&self, ui: &mut egui::Ui) {
-        ui.separator();
-        match &self.status {
-            Some(Status::Info(s)) => {
-                ui.label(s);
-            }
-            Some(Status::Warning(s)) => {
-                ui.colored_label(ui.visuals().warn_fg_color, s);
-            }
-            Some(Status::Error(s)) => {
-                ui.colored_label(ui.visuals().error_fg_color, s);
-            }
-            None => {
-                ui.label("");
-            }
+    /// The last message on the left; the data's size, weight and filter on the right.
+    fn status_line(&mut self, ui: &mut egui::Ui) {
+        let t = Tokens::get(ui.ctx());
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), STATUS_HEIGHT), egui::Sense::hover());
+        ui.painter().hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, t.border));
+        let mut row = ui
+            .new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let (text, color) = match &self.status {
+            Some(Status::Info(s)) => (s.as_str(), t.text_dim),
+            Some(Status::Warning(s)) => (s.as_str(), t.warn),
+            Some(Status::Error(s)) => (s.as_str(), t.danger),
+            None => ("Ready", t.text_dim),
+        };
+        let ds = &self.session.dataset;
+        let mut facts = vec![format!("{} cases", ds.n_cases()), format!("{} variables", ds.variables().len())];
+        if let Some(w) = ds.weight.and_then(|w| ds.variables().get(w)) {
+            facts.push(format!("Weighted by {}", w.name));
         }
+        let mut zoom = self.zoom;
+        row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            // Zoom: − slider + and the percentage (click it for 100%).
+            let percent = ui.add(egui::Label::new(egui::RichText::new(format!("{zoom}%")).color(t.text_dim).size(12.0)).sense(egui::Sense::click()));
+            if percent.on_hover_text("Zoom to 100%").clicked() {
+                zoom = 100;
+            }
+            if zoom_button(ui, Icon::Plus, "Zoom In") {
+                zoom = (zoom / 10 * 10 + 10).min(200);
+            }
+            ui.spacing_mut().slider_width = 110.0;
+            ui.add(egui::Slider::new(&mut zoom, 50..=200).show_value(false)).on_hover_text("Zoom");
+            if zoom_button(ui, Icon::Minus, "Zoom Out") {
+                zoom = (zoom.div_ceil(10) * 10).saturating_sub(10).max(50);
+            }
+            ui.add_space(16.0);
+            ui.label(egui::RichText::new(facts.join("   ·   ")).color(t.text_dim).size(12.0));
+            if let Some(category) = self.session.cross_filter() {
+                ui.add_space(12.0);
+                ui.label(egui::RichText::new(format!("Filtered by {}", category.label)).color(t.accent).size(12.0));
+            }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(egui::RichText::new(text).color(color).size(12.0)).truncate());
+            });
+        });
+        self.zoom = zoom;
     }
+}
+
+/// A small icon button for the status bar.
+fn zoom_button(ui: &mut egui::Ui, icon: Icon, name: &str) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 3.0, t.hover);
+    }
+    icons::paint(ui.painter(), rect.shrink(4.0), icon, &t);
+    response.on_hover_text(name).clicked()
 }

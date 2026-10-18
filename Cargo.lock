@@ -1814,6 +1814,7 @@ dependencies = [
  "egui_kittest",
  "mksigma-engine",
  "mksigma-output",
+ "png",
 ]
 
 [[package]]

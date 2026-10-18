@@ -40,6 +40,12 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
 - Desktop app: File ▸ Open (native dialog, Ctrl+O), drag and drop, opening a file given on the
   command line, Data View (virtualized rows, value-labels toggle, missing values dimmed) and a
   Variable View — **done**.
+- Window layout — **done**: an office-suite layout (title row with quick-access Save, Undo and
+  Redo; File menu and tabs Home, Data, Transform, Analyze, Graphs, View over a ribbon of large
+  buttons with icons drawn in code; Data View as a grid with headers and gridlines; Data View and
+  Variable View as tabs at the bottom; a status bar with the data's size, weight and filter),
+  light and dark, indigo accented. Analyze and Graphs buttons paste the procedure's syntax for
+  suggested variables into the editor and run it; when no variable fits they paste a template.
 - Editing — **done**: Variable View (name, label, value labels dialog, missing values,
   measurement level, format) turns every edit into syntax (`RENAME VARIABLES`, `VARIABLE LABELS`,
   `VALUE LABELS`, `MISSING VALUES`, `VARIABLE LEVEL`, `FORMATS`), which runs through the engine

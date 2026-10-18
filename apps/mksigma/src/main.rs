@@ -48,6 +48,10 @@ fn main() -> eframe::Result {
         .with_inner_size([1280.0, 800.0])
         .with_min_inner_size([720.0, 480.0])
         .with_drag_and_drop(true);
+    let viewport = match mksigma_ui_egui::logo::icon() {
+        Some(icon) => viewport.with_icon(icon),
+        None => viewport,
+    };
     let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native("MK Sigma", options, Box::new(|_cc| Ok(Box::new(App(app)))))
 }
