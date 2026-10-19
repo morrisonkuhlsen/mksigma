@@ -458,7 +458,7 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                     equals(vec![row(vec![g1.mean.clone(), text("−"), g2.mean.clone()]), row(vec![n(m1), text("−"), n(m2)]), approx(d)]),
                 ));
                 sections.push((heading("the groups"), steps));
-                sections.push((heading("Levene's test of equal variances"), levene_steps(&groups, [m1, m2], w, full)));
+                sections.push((heading("Levene's test of equal variances"), levene_steps(&groups, &[m1, m2], w, full, true)));
 
                 // Equal variances: one variance for both, pooled.
                 let mut steps = Vec::new();
@@ -604,12 +604,13 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
 
 /// Levene's test, based on the mean: a one-way analysis of variance on each value's distance
 /// from its group's mean.
-fn levene_steps(groups: &[Vec<(f64, f64)>; 2], means: [f64; 2], w: bool, full: bool) -> Vec<Step> {
+/// `t_test` says which row of its table to read.
+fn levene_steps(groups: &[Vec<(f64, f64)>], means: &[f64], w: bool, full: bool, t_test: bool) -> Vec<Step> {
     let mut steps =
         vec![say("Levene's test asks whether the groups' variances differ: an analysis of variance on each value's distance from its group's mean.")];
-    let z_of: Vec<Vec<(f64, f64)>> = groups.iter().zip(means).map(|(g, m)| g.iter().map(|(x, wi)| ((x - m).abs(), *wi)).collect()).collect();
+    let z_of: Vec<Vec<(f64, f64)>> = groups.iter().zip(means).map(|(g, &m)| g.iter().map(|(x, wi)| ((x - m).abs(), *wi)).collect()).collect();
     let mut z_means = Vec::new();
-    for (k, ((g, z), m)) in groups.iter().zip(&z_of).zip(means).enumerate() {
+    for (k, ((g, z), &m)) in groups.iter().zip(&z_of).zip(means).enumerate() {
         let tag = (k + 1).to_string();
         let size: f64 = z.iter().map(|(_, w)| w).sum();
         let total: f64 = z.iter().map(|(z, w)| z * w).sum();
@@ -647,34 +648,298 @@ fn levene_steps(groups: &[Vec<(f64, f64)>; 2], means: [f64; 2], w: bool, full: b
         "Within the groups: each distance's deviation from its group's mean distance, squared:",
         equals(vec![sub(var("SS"), text("within")), terms(within_terms, full), n(within)]),
     ));
-    let df2 = big_n - 2.0;
-    if df2 <= 0.0 || within <= 0.0 {
+    let df1 = z_means.len() as f64 - 1.0;
+    let df2 = big_n - z_means.len() as f64;
+    if df1 <= 0.0 || df2 <= 0.0 || within <= 0.0 {
         steps.push(say("With no spread within the groups F is undefined."));
         return steps;
     }
-    let f = between / (within / df2);
+    let f = (between / df1) / (within / df2);
     steps.push(step(
-        "F divides the mean squares, with 1 and N − 2 degrees of freedom:",
+        "F divides the mean squares, with k − 1 and N − k degrees of freedom (k groups):",
         equals(vec![
             var("F"),
             frac(
-                row(vec![sub(var("SS"), text("between")), text("/"), text("1")]),
-                row(vec![sub(var("SS"), text("within")), text("/"), paren(row(vec![var("N"), text("−"), text("2")]))]),
+                row(vec![sub(var("SS"), text("between")), text("/"), paren(row(vec![var("k"), text("−"), text("1")]))]),
+                row(vec![sub(var("SS"), text("within")), text("/"), paren(row(vec![var("N"), text("−"), var("k")]))]),
             ),
-            frac(n(between), row(vec![n(within), text("/"), n(df2)])),
+            frac(row(vec![n(between), text("/"), n(df1)]), row(vec![n(within), text("/"), n(df2)])),
             approx(f),
         ]),
     ));
-    if let Some(p) = dist::f_sig(f, 1.0, df2) {
+    if let Some(p) = dist::f_sig(f, df1, df2) {
         steps.push(step(
-            &format!("Its significance, from the F distribution with 1 and {} degrees of freedom:", number_text(df2)),
+            &format!("Its significance, from the F distribution with {} and {} degrees of freedom:", number_text(df1), number_text(df2)),
             equals(vec![var("p"), approx(p)]),
         ));
+        if !t_test {
+            return steps;
+        }
         steps.push(say(if p > 0.05 {
             "Above 0.05: no reason to doubt equal variances, so the row with equal variances assumed is the one to read."
         } else {
             "0.05 or below: the variances differ, so the row with equal variances not assumed is the one to read."
         }));
+    }
+    steps
+}
+
+/// `ONEWAY`: for each dependent variable, each group's mean and variance (with its interval
+/// when Descriptives are asked for), Levene's test when asked for, the analysis of variance,
+/// and each post hoc test's comparisons.
+pub fn oneway(ds: &Dataset, options: &crate::OnewayOptions, full: bool) -> Result<Explanation, StatsError> {
+    let (fi, fvar) = numeric(ds, &options.factor)?;
+    let w = weighted(ds);
+    let alpha = if options.alpha > 0.0 && options.alpha < 1.0 { options.alpha } else { 0.05 };
+    let mut sections = Vec::new();
+    for name in &options.dependents {
+        let (i, variable) = numeric(ds, name)?;
+        // Groups by factor value, ascending, as the tables.
+        let mut groups: Vec<(f64, Vec<(f64, f64)>)> = Vec::new();
+        for case in 0..ds.n_cases() {
+            let weight = ds.case_weight(case);
+            let (Some(level), Some(x)) = (valid(ds, fi, case), valid(ds, i, case)) else { continue };
+            if weight <= 0.0 {
+                continue;
+            }
+            match groups.iter_mut().find(|(l, _)| *l == level) {
+                Some((_, g)) => g.push((x, weight)),
+                None => groups.push((level, vec![(x, weight)])),
+            }
+        }
+        groups.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let heading = |part: &str| format!("{} by {}: {part}", variable.display_name(), fvar.display_name());
+        let mut steps = Vec::new();
+        let mut stats: Vec<(f64, f64, f64)> = Vec::new();
+        for (k, (level, values)) in groups.iter().enumerate() {
+            let tag = (k + 1).to_string();
+            steps.push(say(&format!("Group {tag}: {} = {}.", fvar.display_name(), value_text(fvar, &mksigma_core::Value::Num(*level)))));
+            let names = Names::of("x", &tag);
+            if let Some(Sample { n: size, mean, variance }) = sample(&mut steps, values, &names, w, full) {
+                let variance = variance.unwrap_or(0.0);
+                if options.descriptives && size > 1.0 {
+                    interval_steps(&mut steps, &names, size, mean, variance);
+                    steps.extend(extremes(values));
+                }
+                stats.push((size, mean, variance));
+            }
+        }
+        if options.descriptives {
+            let all: Vec<(f64, f64)> = groups.iter().flat_map(|(_, g)| g.iter().copied()).collect();
+            steps.push(say("All the groups together (the Total row):"));
+            let names = Names::of("x", "");
+            if let Some(Sample { n: size, mean, variance: Some(variance) }) = sample(&mut steps, &all, &names, w, full) {
+                interval_steps(&mut steps, &names, size, mean, variance);
+                steps.extend(extremes(&all));
+            }
+        }
+        sections.push((heading("the groups"), steps));
+        let k = stats.len() as f64;
+        let big_n: f64 = stats.iter().map(|(s, _, _)| s).sum();
+        if k < 2.0 || big_n <= k {
+            sections.push((heading("the analysis of variance"), vec![say("It needs two groups or more, and more cases than groups.")]));
+            continue;
+        }
+        if options.homogeneity {
+            let values: Vec<Vec<(f64, f64)>> = groups.iter().map(|(_, g)| g.clone()).collect();
+            let means: Vec<f64> = stats.iter().map(|(_, m, _)| *m).collect();
+            sections.push((heading("Levene's test of equal variances"), levene_steps(&values, &means, w, full, false)));
+        }
+
+        let mut steps = Vec::new();
+        let grand = stats.iter().map(|(s, m, _)| s * m).sum::<f64>() / big_n;
+        let group_mean = |k: usize| sub(bar(var("x")), text(&(k + 1).to_string()));
+        let group_n = |k: usize| sub(var("n"), text(&(k + 1).to_string()));
+        steps.push(step(
+            "The grand mean weighs each group's mean by its size:",
+            equals(vec![
+                bar(var("x")),
+                frac(plus((0..stats.len()).map(|k| row(vec![group_n(k), group_mean(k)])).collect()), var("N")),
+                frac(plus(stats.iter().map(|(s, m, _)| row(vec![n(*s), text("·"), n(*m)])).collect()), n(big_n)),
+                n(grand),
+            ]),
+        ));
+        let between: f64 = stats.iter().map(|(s, m, _)| s * (m - grand).powi(2)).sum();
+        steps.push(step(
+            "Between the groups: each group's mean against the grand mean, squared and weighed by its size:",
+            equals(vec![
+                sub(var("SS"), text("between")),
+                sum(
+                    None,
+                    None,
+                    row(vec![indexed("n", "k"), sup(paren(row(vec![sub(bar(var("x")), var("k")), text("−"), bar(var("x"))])), text("2"))]),
+                ),
+                plus(stats.iter().map(|(s, m, _)| row(vec![n(*s), text("·"), dev_sq(*m, grand)])).collect()),
+                approx(between),
+            ]),
+        ));
+        let within: f64 = stats.iter().map(|(s, _, v)| (s - 1.0) * v).sum();
+        steps.push(step(
+            "Within the groups: each group's squared deviations from its own mean, which are its variance times its size minus 1:",
+            equals(vec![
+                sub(var("SS"), text("within")),
+                sum(None, None, row(vec![paren(row(vec![indexed("n", "k"), text("−"), text("1")])), sup(indexed("s", "k"), text("2"))])),
+                plus(stats.iter().map(|(s, _, v)| row(vec![paren(row(vec![n(*s), text("−"), text("1")])), text("·"), n(*v)])).collect()),
+                approx(within),
+            ]),
+        ));
+        steps.push(step(
+            "The total sum of squares is the two together:",
+            equals(vec![sub(var("SS"), text("total")), row(vec![n(between), text("+"), n(within)]), approx(between + within)]),
+        ));
+        let (df1, df2) = (k - 1.0, big_n - k);
+        steps.extend(several(
+            "The degrees of freedom, with k groups and N cases:",
+            vec![
+                equals(vec![sub(var("df"), text("between")), row(vec![var("k"), text("−"), text("1")]), n(df1)]),
+                equals(vec![sub(var("df"), text("within")), row(vec![var("N"), text("−"), var("k")]), row(vec![n(big_n), text("−"), n(k)]), n(df2)]),
+            ],
+        ));
+        let (ms_b, ms_w) = (between / df1, within / df2);
+        steps.extend(several(
+            "Each mean square divides its sum of squares by its degrees of freedom:",
+            vec![
+                equals(vec![sub(var("MS"), text("between")), frac(n(between), n(df1)), approx(ms_b)]),
+                equals(vec![sub(var("MS"), text("within")), frac(n(within), n(df2)), approx(ms_w)]),
+            ],
+        ));
+        let f = ms_b / ms_w;
+        steps.push(step(
+            "F compares them:",
+            equals(vec![var("F"), frac(sub(var("MS"), text("between")), sub(var("MS"), text("within"))), frac(n(ms_b), n(ms_w)), approx(f)]),
+        ));
+        if let Some(p) = dist::f_sig(f, df1, df2) {
+            steps.push(step(
+                &format!("Its significance, from the F distribution with {} and {} degrees of freedom:", number_text(df1), number_text(df2)),
+                equals(vec![var("p"), approx(p)]),
+            ));
+        }
+        sections.push((heading("the analysis of variance"), steps));
+
+        for test in &options.posthoc {
+            sections.push((
+                heading(match test {
+                    crate::PostHoc::Tukey => "Tukey HSD",
+                    crate::PostHoc::Bonferroni => "Bonferroni",
+                }),
+                posthoc_steps(*test, &stats, ms_w, df2, alpha),
+            ));
+        }
+    }
+    Ok(Explanation { title: "Oneway".into(), sections })
+}
+
+/// The smallest and largest of the values.
+fn extremes(values: &[(f64, f64)]) -> Vec<Step> {
+    let (lo, hi) = values.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (x, _)| (a.min(*x), b.max(*x)));
+    several("The smallest and largest values:", vec![equals(vec![text("Minimum"), n(lo)]), equals(vec![text("Maximum"), n(hi)])])
+}
+
+/// A group's standard error and the 95% interval of its mean, as ONEWAY's Descriptives show.
+fn interval_steps(steps: &mut Vec<Step>, names: &Names, size: f64, mean: f64, variance: f64) {
+    let se = (variance / size).sqrt();
+    steps.push(step(
+        "Its standard error:",
+        equals(vec![var("SE"), frac(names.s.clone(), sqrt(names.n.clone())), frac(n(variance.sqrt()), sqrt(n(size))), approx(se)]),
+    ));
+    if let Some(critical) = dist::t_quantile(0.975, size - 1.0) {
+        let half = critical * se;
+        steps.extend(several(
+            &format!("The 95% interval of the mean, with the t that leaves 2.5% in each tail at {} degrees of freedom:", number_text(size - 1.0)),
+            vec![
+                equals(vec![sub(var("t"), text("0.975")), approx(critical)]),
+                equals(vec![text("Lower"), row(vec![n(mean), text("−"), n(critical), text("·"), n(se)]), approx(mean - half)]),
+                equals(vec![text("Upper"), row(vec![n(mean), text("+"), n(critical), text("·"), n(se)]), approx(mean + half)]),
+            ],
+        ));
+    }
+}
+
+/// One post hoc test over every pair of groups (I < J; the table also lists J − I, the same
+/// with the signs turned): the difference, its standard error, significance and interval.
+fn posthoc_steps(test: crate::PostHoc, stats: &[(f64, f64, f64)], mse: f64, df: f64, alpha: f64) -> Vec<Step> {
+    let k = stats.len() as f64;
+    let m = k * (k - 1.0) / 2.0;
+    let mut steps = Vec::new();
+    let critical = match test {
+        crate::PostHoc::Tukey => {
+            let q = crate::range::quantile(1.0 - alpha, k, df);
+            if let Some(q) = q {
+                steps.push(step(
+                    &format!(
+                        "Tukey compares each pair with the studentized range distribution of {} groups and {} degrees of freedom, whose q leaves {} above it; divided by √2, it gives the intervals:",
+                        number_text(k),
+                        number_text(df),
+                        number_text(alpha)
+                    ),
+                    equals(vec![sub(var("q"), text(&number_text(1.0 - alpha))), approx(q)]),
+                ));
+            }
+            q.map(|q| q / std::f64::consts::SQRT_2)
+        }
+        crate::PostHoc::Bonferroni => {
+            let t = dist::t_quantile(1.0 - alpha / (2.0 * m), df);
+            steps.push(step(
+                &format!("Bonferroni makes {} comparisons, so each t test's significance is multiplied by {}, and the intervals use the t that leaves {} / (2 · {}) in each tail:", number_text(m), number_text(m), number_text(alpha), number_text(m)),
+                equals(vec![var("m"), frac(row(vec![var("k"), paren(row(vec![var("k"), text("−"), text("1")]))]), text("2")), n(m)]),
+            ));
+            if let Some(t) = t {
+                steps.push(step("That t:", equals(vec![sub(var("t"), text("crit")), approx(t)])));
+            }
+            t
+        }
+    };
+    steps.push(step(
+        "Every comparison uses the mean square within the groups:",
+        equals(vec![
+            var("SE"),
+            sqrt(row(vec![
+                sub(var("MS"), text("within")),
+                paren(row(vec![frac(text("1"), sub(var("n"), var("I"))), text("+"), frac(text("1"), sub(var("n"), var("J")))])),
+            ])),
+        ]),
+    ));
+    for (i, (ni, mi, _)) in stats.iter().enumerate() {
+        for (j, (nj, mj, _)) in stats.iter().enumerate().skip(i + 1) {
+            let diff = mi - mj;
+            let se = (mse * (1.0 / ni + 1.0 / nj)).sqrt();
+            let mut maths = vec![
+                equals(vec![
+                    row(vec![sub(bar(var("x")), text(&(i + 1).to_string())), text("−"), sub(bar(var("x")), text(&(j + 1).to_string()))]),
+                    row(vec![n(*mi), text("−"), n(*mj)]),
+                    approx(diff),
+                ]),
+                equals(vec![
+                    var("SE"),
+                    sqrt(row(vec![n(mse), text("·"), paren(row(vec![frac(text("1"), n(*ni)), text("+"), frac(text("1"), n(*nj))]))])),
+                    approx(se),
+                ]),
+            ];
+            match test {
+                crate::PostHoc::Tukey => {
+                    let q = diff.abs() / se * std::f64::consts::SQRT_2;
+                    maths.push(equals(vec![var("q"), frac(row(vec![text("|"), n(diff), text("|"), text("·"), sqrt(text("2"))]), n(se)), approx(q)]));
+                    if let Some(p) = crate::range::cdf(q, k, df).map(|p| 1.0 - p) {
+                        maths.push(equals(vec![var("p"), approx(p)]));
+                    }
+                }
+                crate::PostHoc::Bonferroni => {
+                    let t = diff / se;
+                    maths.push(equals(vec![var("t"), frac(n(diff), n(se)), approx(t)]));
+                    if let Some(p) = dist::t_sig(t, df) {
+                        // A probability: at most 1.
+                        let times = row(vec![n(m), text("·"), n(p)]);
+                        let times = if p * m > 1.0 { row(vec![text("min"), paren(row(vec![text("1"), text(","), times]))]) } else { times };
+                        maths.push(equals(vec![var("p"), times, approx((p * m).min(1.0))]));
+                    }
+                }
+            }
+            if let Some(c) = critical {
+                maths.push(equals(vec![text("Lower"), row(vec![n(diff), text("−"), n(c), text("·"), n(se)]), approx(diff - c * se)]));
+                maths.push(equals(vec![text("Upper"), row(vec![n(diff), text("+"), n(c), text("·"), n(se)]), approx(diff + c * se)]));
+            }
+            steps.extend(several(&format!("Groups {} and {}:", i + 1, j + 1), maths));
+        }
     }
     steps
 }
@@ -1404,6 +1669,51 @@ mod tests {
         assert!(tex.contains("\\frac{15 \\cdot 17}{30} = 8.5"), "{tex}");
         assert!(tex.contains("\\left| 12 \\cdot 10 - 3 \\cdot 5 \\right|") || tex.contains("| 12 \\cdot 10 - 3 \\cdot 5 |"), "{tex}");
         assert!(tex.contains("\\frac{15 ! \\cdot 15 ! \\cdot 17 ! \\cdot 13 !}{30 ! \\cdot 12 ! \\cdot 3 ! \\cdot 5 ! \\cdot 10 !}"), "{tex}");
+    }
+
+    #[test]
+    fn oneway_by_hand_agrees_with_the_tables() {
+        let mut ds = Dataset::new();
+        ds.add_variable(Variable::numeric("y")).unwrap();
+        ds.add_variable(Variable::numeric("g")).unwrap();
+        // Groups 1: 2 3 4 (mean 3), 2: 6 7 8 (mean 7), 3: 4 5 6 (mean 5); grand mean 5.
+        for (g, ys) in [(1.0, [2.0, 3.0, 4.0]), (2.0, [6.0, 7.0, 8.0]), (3.0, [4.0, 5.0, 6.0])] {
+            for y in ys {
+                ds.push_case(vec![Value::Num(y), Value::Num(g)]).unwrap();
+            }
+        }
+        let options = crate::OnewayOptions {
+            dependents: vec!["y".into()],
+            factor: "g".into(),
+            descriptives: true,
+            homogeneity: true,
+            posthoc: vec![crate::PostHoc::Tukey, crate::PostHoc::Bonferroni],
+            alpha: 0.05,
+        };
+        let tex = latex(&oneway(&ds, &options, false).unwrap());
+        let items = crate::oneway(&ds, &options).unwrap();
+        // Every number in every table, the post hoc ones with either sign (the table lists both
+        // orders of each pair).
+        for t in tables(&items) {
+            for (_, cells) in &t.rows {
+                for cell in cells {
+                    let x = match cell {
+                        Cell::Num { value, .. } => *value,
+                        Cell::Text(s) if s.ends_with('*') => s.trim_end_matches('*').parse().unwrap(),
+                        Cell::Int(k) => *k as f64,
+                        _ => continue,
+                    };
+                    let found = [x, -x].iter().any(|x| {
+                        let shown = number(*x, 3);
+                        tex.contains(&format!("\\approx {shown}")) || tex.contains(&format!("= {shown}"))
+                    });
+                    assert!(found, "{x} of {} in {tex}", t.title);
+                }
+            }
+        }
+        // SSB = 3 · (4 + 4 + 0) = 24, SSW = 2 + 2 + 2 = 6, F = (24 / 2) / (6 / 6) = 12.
+        assert!(tex.contains("= 24\n") || tex.contains("= 24"), "{tex}");
+        assert!(tex.contains("\\frac{12}{1} = 12"), "{tex}");
     }
 
     #[test]

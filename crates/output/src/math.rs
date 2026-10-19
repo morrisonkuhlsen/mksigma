@@ -124,6 +124,12 @@ fn latex_text(s: &str) -> String {
             '≥' => out.push_str("$\\ge$"),
             '±' => out.push_str("$\\pm$"),
             'μ' => out.push_str("$\\mu$"),
+            'σ' => out.push_str("$\\sigma$"),
+            'χ' => out.push_str("$\\chi$"),
+            'α' => out.push_str("$\\alpha$"),
+            '√' => out.push_str("$\\surd$"),
+            '–' => out.push_str("--"),
+            '—' => out.push_str("---"),
             '…' | '⋯' => out.push_str("\\ldots{}"),
             c => out.push(c),
         }
@@ -240,6 +246,9 @@ mod tests {
         assert_eq!(mean.to_latex(), "\\bar{x} = \\frac{1}{n} = \\sum_{i = 1}^{n} {x}_{i}");
         assert_eq!(sqrt(sup(var("s"), num(2.0, 0))).to_latex(), "\\sqrt{{s}^{2}}");
         assert_eq!(row(vec![sub(var("μ"), text("0")), text("±"), text("|")]).to_latex(), "{\\mu}_{0} \\pm |");
+        // The symbols the explanations write in their sentences: none left for pdflatex to refuse.
+        let words = latex_text("N − 1, ≈ · × ≤ ≥ … ± μ σ χ α √2 Welch–Satterthwaite");
+        assert!(words.is_ascii(), "{words}");
         assert_eq!(row(vec![var("score"), text("≈"), text("Test & score")]).to_latex(), "\\mathit{score} \\approx \\text{Test \\& score}");
         let e = Explanation {
             title: "Descriptive Statistics".into(),

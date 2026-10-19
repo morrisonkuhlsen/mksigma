@@ -203,7 +203,12 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   distances from the group means, the pooled version and Welch's with Satterthwaite's degrees
   of freedom; paired samples with the differences case by case and the pair's correlation.
   t's significance and the interval's critical t are the only figures from a distribution.
-- **Next:** the FREQUENCIES Statistics table, CROSSTABS' chi-square, ONEWAY; then the charts (a
+- **FREQUENCIES' Statistics, CROSSTABS' chi-square, ONEWAY — done:** the statistics from the
+  frequencies (Σ f·x); the expected counts, Pearson's chi-square, the likelihood ratio, Yates'
+  correction, Fisher's exact test as every table with the same totals in factorials, the
+  linear-by-linear association; each group's mean and variance, the sums of squares, F,
+  Levene's test for k groups, Tukey's q and Bonferroni's multiplied t for every pair.
+- **Next:** REGRESSION, EXAMINE, NPAR TESTS, LOGISTIC REGRESSION; then the charts (a
   histogram's bins, a bar's mean).
 
 ## Later

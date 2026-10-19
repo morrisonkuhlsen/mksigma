@@ -663,6 +663,7 @@ impl Session {
             Command::TTest { .. } => Some((run, None)),
             // With its chi-square tests: the crosstabulations and the tests, not the summary.
             Command::Crosstabs { chisq: true, .. } if table.title != "Case Processing Summary" => Some((run, None)),
+            Command::Oneway { .. } => Some((run, None)),
             _ => None,
         }
     }
@@ -708,6 +709,10 @@ impl Session {
             }
             Command::TTest { test, ci } => explain::t_test(&ds, &t_test_of(test), *ci, full)?,
             Command::Crosstabs { rows, columns, .. } => explain::crosstabs(&ds, rows, columns, full)?,
+            Command::Oneway { .. } => match oneway_options(&command) {
+                Some(options) => explain::oneway(&ds, &options, full)?,
+                None => return Err(EngineError::Invalid("this item has no calculation by hand".into())),
+            },
             _ => return Err(EngineError::Invalid("this item has no calculation by hand".into())),
         };
         let mut explanation = explanation;
@@ -936,6 +941,24 @@ impl Session {
     }
 }
 
+fn oneway_options(command: &Command) -> Option<mksigma_stats::OnewayOptions> {
+    let Command::Oneway { dependents, factor, descriptives, homogeneity, posthoc, alpha } = command else { return None };
+    Some(mksigma_stats::OnewayOptions {
+        dependents: dependents.clone(),
+        factor: factor.clone(),
+        descriptives: *descriptives,
+        homogeneity: *homogeneity,
+        posthoc: posthoc
+            .iter()
+            .map(|p| match p {
+                mksigma_syntax::PostHocTest::Tukey => mksigma_stats::PostHoc::Tukey,
+                mksigma_syntax::PostHocTest::Bonferroni => mksigma_stats::PostHoc::Bonferroni,
+            })
+            .collect(),
+        alpha: *alpha,
+    })
+}
+
 fn freq_statistics(statistics: &[mksigma_syntax::FreqStatistic]) -> Vec<mksigma_stats::FrequenciesStatistic> {
     use mksigma_stats::FrequenciesStatistic as S;
     use mksigma_syntax::FreqStatistic;
@@ -1097,22 +1120,10 @@ fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
             let options = mksigma_stats::RegressionOptions { dependent: dependent.clone(), predictors: predictors.clone(), ci: *ci };
             items.extend(mksigma_stats::regression(ds, &options)?);
         }
-        Command::Oneway { dependents, factor, descriptives, homogeneity, posthoc, alpha } => {
-            let options = mksigma_stats::OnewayOptions {
-                dependents: dependents.clone(),
-                factor: factor.clone(),
-                descriptives: *descriptives,
-                homogeneity: *homogeneity,
-                posthoc: posthoc
-                    .iter()
-                    .map(|p| match p {
-                        mksigma_syntax::PostHocTest::Tukey => mksigma_stats::PostHoc::Tukey,
-                        mksigma_syntax::PostHocTest::Bonferroni => mksigma_stats::PostHoc::Bonferroni,
-                    })
-                    .collect(),
-                alpha: *alpha,
-            };
-            items.extend(mksigma_stats::oneway(ds, &options)?);
+        Command::Oneway { .. } => {
+            if let Some(options) = oneway_options(command) {
+                items.extend(mksigma_stats::oneway(ds, &options)?);
+            }
         }
         _ => {}
     }
@@ -1183,6 +1194,18 @@ mod tests {
         // The summary has none, nor a crosstabulation without the tests.
         assert_eq!(can.iter().filter(|(_, c)| *c).count(), 2, "{can:?}");
         assert!(can.iter().all(|(t, c)| !(t == "Case Processing Summary" && *c)));
+    }
+
+    #[test]
+    fn explains_every_table_of_oneway() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("COMPUTE band = TRUNC(age / 15).\nONEWAY score BY band /STATISTICS=DESCRIPTIVES HOMOGENEITY /POSTHOC=TUKEY.").unwrap();
+        for i in 0..s.output.items.len() {
+            if matches!(s.output.items[i], Item::Table(_)) {
+                let e = s.explain(i, false).unwrap();
+                assert!(e.sections.iter().any(|(h, _)| h.ends_with("Tukey HSD")), "{:?}", e.sections);
+            }
+        }
     }
 
     #[test]
