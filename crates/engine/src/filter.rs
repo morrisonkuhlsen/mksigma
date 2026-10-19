@@ -20,6 +20,8 @@ pub(crate) struct Run {
     /// The command as written, for a saved dashboard.
     pub source: String,
     pub items: Vec<Item>,
+    /// `Session::version` when it ran: its items are on the data of then.
+    pub version: u64,
 }
 
 /// The active cross-filter.

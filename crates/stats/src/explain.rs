@@ -255,13 +255,14 @@ fn number_text(x: f64) -> String {
     mksigma_output::math::number(x, PLACES)
 }
 
-/// `FREQUENCIES`: each value's percent, valid percent and cumulative percent.
-pub fn frequencies(ds: &Dataset, variables: &[String], full: bool) -> Result<Explanation, StatsError> {
+/// `FREQUENCIES`: each value's percent, valid percent and cumulative percent, in the table's
+/// `order`.
+pub fn frequencies(ds: &Dataset, variables: &[String], order: Order, full: bool) -> Result<Explanation, StatsError> {
     let weights: Vec<f64> = (0..ds.n_cases()).map(|c| ds.case_weight(c)).collect();
     let mut sections = Vec::new();
     for name in variables {
         let (index, variable) = ds.variable(name).ok_or_else(|| StatsError::UnknownVariable(name.clone()))?;
-        let counts = count(variable, ds.column(index).unwrap_or_default(), &weights, Order::AscendingValue);
+        let counts = count(variable, ds.column(index).unwrap_or_default(), &weights, order);
         let (valid_n, missing) = (counts.valid_total(), counts.missing_total());
         let total = valid_n + missing;
         let mut steps = Vec::new();
@@ -398,7 +399,7 @@ mod tests {
         for x in [1.0, 1.0, 2.0, 9.0] {
             ds.push_case(vec![Value::Num(x)]).unwrap();
         }
-        let tex = latex(&frequencies(&ds, &["g".into()], false).unwrap());
+        let tex = latex(&frequencies(&ds, &["g".into()], Order::AscendingValue, false).unwrap());
         // Two 1s of four cases (50%), of three valid (66.7%).
         assert!(tex.contains("\\frac{2}{4} \\cdot 100 = 50") && tex.contains("\\frac{2}{3} \\cdot 100 = 66.7"), "{tex}");
         assert!(tex.contains("\\frac{3}{3} \\cdot 100 = 100"), "cumulative ends at 100: {tex}");

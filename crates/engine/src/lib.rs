@@ -84,6 +84,8 @@ pub struct Session {
     /// What loading data had to say (sizes, reader warnings), until `take_notes`.
     notes: Vec<String>,
     loaded_file: Option<String>,
+    /// Counts the changes to the data, so a run knows whether its items are still on it.
+    version: u64,
 }
 
 /// Whether a command changes the data (and so is an applied step) rather than analysing it.
@@ -160,6 +162,7 @@ impl Session {
         self.steps_in_source = 0;
         self.base = dataset.clone();
         self.dataset = dataset;
+        self.version += 1;
         self.steps.clear();
         self.modified = false;
         self.history.clear();
@@ -360,6 +363,7 @@ impl Session {
 
     /// Filtered items follow the data; the unfiltered ones stay as they were produced.
     fn data_changed(&mut self) {
+        self.version += 1;
         if self.cross_filter.is_some() || !self.slicers.is_empty() {
             self.show_runs();
         }
@@ -592,23 +596,14 @@ impl Session {
     }
 
     fn add_run(&mut self, command: Command, items: Vec<Item>) {
-        self.runs.push(Run { command, source: String::new(), items });
+        self.runs.push(Run { command, source: String::new(), items, version: self.version });
         self.show_runs();
     }
 
     /// Rebuilds the Output from the runs: each on all the cases, or, under a filter, run again
     /// on the filtered cases (except the one the selection came from).
     fn show_runs(&mut self) {
-        // Slicers first, for every run; then the cross-filter, for all but the selected one.
-        let sliced = (!self.slicers.is_empty()).then(|| filter::slice(&self.dataset, &self.slicers));
-        let crossed = self.cross_filter.as_ref().map(|f| {
-            let ds = match &sliced {
-                Some(Ok(ds)) => filter::subset(ds, &f.category),
-                Some(Err(e)) => Err(EngineError::Invalid(e.to_string())),
-                None => filter::subset(&self.dataset, &f.category),
-            };
-            (f.source, ds)
-        });
+        let (sliced, crossed) = self.filtered();
         let run_on = |ds: &Result<Dataset, EngineError>, command: &Command| match ds {
             Ok(ds) => analyse(ds, command).unwrap_or_else(|e| vec![Item::Warning(format!("Filtered: {e}"))]),
             Err(e) => vec![Item::Warning(format!("Filtered: {e}"))],
@@ -626,6 +621,76 @@ impl Session {
         }
         self.output.items = items;
         self.run_of = run_of;
+    }
+
+    /// The cases under the filters: the slicers', for every run (`None` without slicers); then
+    /// the cross-filter's, with the run it came from, which isn't filtered by it.
+    #[allow(clippy::type_complexity)]
+    fn filtered(&self) -> (Option<Result<Dataset, EngineError>>, Option<(usize, Result<Dataset, EngineError>)>) {
+        let sliced = (!self.slicers.is_empty()).then(|| filter::slice(&self.dataset, &self.slicers));
+        let crossed = self.cross_filter.as_ref().map(|f| {
+            let ds = match &sliced {
+                Some(Ok(ds)) => filter::subset(ds, &f.category),
+                Some(Err(e)) => Err(EngineError::Invalid(e.to_string())),
+                None => filter::subset(&self.dataset, &f.category),
+            };
+            (f.source, ds)
+        });
+        (sliced, crossed)
+    }
+
+    /// Whether Output item `item` has its calculation by hand (the Σ beside it).
+    pub fn can_explain(&self, item: usize) -> bool {
+        self.explained(item).is_some()
+    }
+
+    /// The run of Output item `item`, if it has a calculation by hand, and the variable of its
+    /// table when the table is one variable's (a frequency table).
+    fn explained(&self, item: usize) -> Option<(usize, Option<String>)> {
+        let (run, place) = self.locate(item)?;
+        let Item::Table(table) = self.output.items.get(item)? else { return None };
+        match &self.runs.get(run)?.command {
+            Command::Descriptives { .. } | Command::Correlations { .. } if place == 0 => Some((run, None)),
+            Command::Frequencies { .. } if table.title != "Statistics" => Some((run, Some(table.title.clone()))),
+            _ => None,
+        }
+    }
+
+    /// The calculation behind Output item `item`, by hand, on the same cases as the item: under
+    /// the slicers and the cross-filter as it is shown. `full` writes every term of each sum.
+    pub fn explain(&self, item: usize, full: bool) -> Result<mksigma_output::math::Explanation, EngineError> {
+        use mksigma_stats::explain;
+        let (run, title) = self.explained(item).ok_or_else(|| EngineError::Invalid("this item has no calculation by hand".into()))?;
+        let Some(r) = self.runs.get(run) else { return Err(EngineError::Invalid(format!("there is no output item {}", item + 1))) };
+        // As `show_runs` chose the cases of this run's items.
+        let (sliced, crossed) = self.filtered();
+        let ds = match (crossed, sliced) {
+            (Some((source, ds)), _) if source != run => ds?,
+            (_, Some(ds)) => ds?,
+            _ if r.version != self.version => {
+                return Err(EngineError::Invalid("the data changed after this table was made: run it again to see its calculation".into()));
+            }
+            _ => self.dataset.clone(),
+        };
+        let command = lists::expand(&ds, &r.command)?;
+        let explanation = match &command {
+            Command::Descriptives { variables } => explain::descriptives(&ds, variables, full)?,
+            Command::Correlations { variables, with, one_tailed, listwise, .. } => {
+                explain::correlations(&ds, variables, with, *listwise, *one_tailed, full)?
+            }
+            Command::Frequencies { variables, order, .. } => {
+                // The table's own variable: its title is the variable's name or label.
+                let own: Vec<String> = variables
+                    .iter()
+                    .filter(|v| ds.variable(v).is_some_and(|(_, var)| Some(var.display_name()) == title.as_deref()))
+                    .take(1)
+                    .cloned()
+                    .collect();
+                explain::frequencies(&ds, if own.is_empty() { variables } else { &own }, freq_order(order), full)?
+            }
+            _ => return Err(EngineError::Invalid("this item has no calculation by hand".into())),
+        };
+        Ok(explanation)
     }
 
     /// Edits one cell from typed text (Data View); the row after the last case adds a case. Not
@@ -847,6 +912,17 @@ impl Session {
     }
 }
 
+fn freq_order(order: &mksigma_syntax::FreqOrder) -> mksigma_stats::FrequenciesOrder {
+    use mksigma_stats::FrequenciesOrder as O;
+    use mksigma_syntax::FreqOrder;
+    match order {
+        FreqOrder::AscendingValue => O::AscendingValue,
+        FreqOrder::DescendingValue => O::DescendingValue,
+        FreqOrder::AscendingFrequency => O::AscendingFrequency,
+        FreqOrder::DescendingFrequency => O::DescendingFrequency,
+    }
+}
+
 /// The output of an analysis command on `ds`; nothing for commands that change the data.
 fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
     let command = &lists::expand(ds, command)?;
@@ -857,17 +933,12 @@ fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
             items.push(Item::Table(table));
         }
         Command::Frequencies { variables, table, order, statistics, histogram, barchart } => {
-            use mksigma_stats::{FrequenciesOrder as O, FrequenciesStatistic as S};
-            use mksigma_syntax::{FreqOrder, FreqStatistic};
+            use mksigma_stats::FrequenciesStatistic as S;
+            use mksigma_syntax::FreqStatistic;
             let options = mksigma_stats::FrequenciesOptions {
                 variables: variables.clone(),
                 table: *table,
-                order: match order {
-                    FreqOrder::AscendingValue => O::AscendingValue,
-                    FreqOrder::DescendingValue => O::DescendingValue,
-                    FreqOrder::AscendingFrequency => O::AscendingFrequency,
-                    FreqOrder::DescendingFrequency => O::DescendingFrequency,
-                },
+                order: freq_order(order),
                 statistics: statistics
                     .iter()
                     .map(|s| match s {
@@ -1035,6 +1106,41 @@ mod tests {
         let text = s.output.to_text();
         assert!(text.starts_with("Descriptive Statistics\n"), "{text}");
         assert!(text.contains("Valid N (listwise)  8"), "{text}");
+    }
+
+    #[test]
+    fn explains_a_table_on_the_cases_it_shows() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("DESCRIPTIVES age.\nFREQUENCIES score income /STATISTICS=MEAN.\nGRAPH /HISTOGRAM=age.").unwrap();
+        let tex = |s: &Session, item| s.explain(item, false).unwrap().to_latex();
+        // Ages 23 35 41 29 52 47 31 26.
+        assert!(tex(&s, 0).contains("\\frac{284}{8} = 35.5"));
+        // The Statistics table and the chart have none; each frequency table, its own variable.
+        let titles: Vec<String> = s
+            .output
+            .items
+            .iter()
+            .map(|i| match i {
+                Item::Table(t) => t.title.clone(),
+                _ => String::new(),
+            })
+            .collect();
+        let income = titles.iter().position(|t| t == "Monthly income").unwrap();
+        assert!(!s.can_explain(titles.iter().position(|t| t == "Statistics").unwrap()));
+        assert!(!s.can_explain(s.output.items.len() - 1));
+        let e = s.explain(income, false).unwrap();
+        assert_eq!(e.sections.len(), 1);
+        assert_eq!(e.sections[0].0, "Monthly income");
+        // A slicer: the ages from 20 to 40 are 23 35 29 31 26.
+        s.run_syntax("SLICE age (20 THRU 40).").unwrap();
+        assert!(tex(&s, 0).contains("\\frac{144}{5} = 28.8"), "{}", tex(&s, 0));
+        // Without filters the table stays as it was made; once the data change, it is refused.
+        s.run_syntax("SLICE OFF.").unwrap();
+        s.set_cell(0, 0, "24").unwrap();
+        assert!(s.explain(0, false).is_err());
+        s.run_syntax("DESCRIPTIVES age.").unwrap();
+        let last = s.output.items.len() - 1;
+        assert!(tex(&s, last).contains("\\frac{285}{8} = 35.625"));
     }
 
     #[test]
