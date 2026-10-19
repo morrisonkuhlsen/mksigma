@@ -115,6 +115,41 @@ pub(crate) enum Outcome {
     Run(String),
     /// Put this syntax in the editor.
     Paste(String),
+    /// Show this Learn article.
+    Learn(&'static str),
+}
+
+impl Kind {
+    /// A dialog by its name in Learn's links (`ttest`, `descriptives`…).
+    pub(crate) fn named(name: &str) -> Option<Kind> {
+        Some(match name {
+            "descriptives" => Kind::Descriptives,
+            "frequencies" => Kind::Frequencies,
+            "explore" => Kind::Explore,
+            "crosstabs" => Kind::Crosstabs,
+            "ttest" => Kind::TTest,
+            "oneway" => Kind::Oneway,
+            "correlations" => Kind::Correlations,
+            "regression" => Kind::Regression,
+            "logistic" => Kind::Logistic,
+            "nonparametric" => Kind::Nonparametric,
+            "histogram" => Kind::Histogram,
+            "bar" => Kind::Bar,
+            "scatter" => Kind::Scatter,
+            "boxplot" => Kind::Boxplot,
+            _ => return None,
+        })
+    }
+
+    /// Its Learn article, if one is written.
+    fn article(self) -> Option<&'static str> {
+        mksigma_learn::for_command(match self {
+            Kind::Descriptives => "DESCRIPTIVES",
+            Kind::TTest => "T-TEST",
+            Kind::Crosstabs => "CROSSTABS",
+            _ => return None,
+        })
+    }
 }
 
 impl Dialog {
@@ -580,6 +615,11 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                         }
                     }
                 });
+                if let Some(id) = dialog.kind.article()
+                    && ui.button("?").on_hover_text(tr!("learn-about-tip")).clicked()
+                {
+                    outcome = Outcome::Learn(id);
+                }
                 if ui.button(tr!("dlg-reset")).clicked() {
                     *dialog = Dialog::new(dialog.kind);
                 }

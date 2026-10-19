@@ -1,0 +1,16 @@
+[package]
+name = "mksigma-learn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MK Sigma's Learn section: articles on procedures and statistical concepts, in each language"
+
+[lints]
+workspace = true
+
+[dependencies]
+mksigma-i18n = { workspace = true }
+mksigma-output = { workspace = true }
+
+[dev-dependencies]
+mksigma-engine = { workspace = true }

@@ -44,6 +44,8 @@ pub(crate) enum OutputAction {
     Wide(usize, bool),
     /// Open the calculation behind an item, by hand.
     Explain(usize),
+    /// Show a Learn article.
+    Learn(&'static str),
 }
 
 /// What the Output is exported as.
@@ -253,7 +255,8 @@ fn show_item(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, i: u
     match item {
         Item::Table(t) => {
             let flipped = state.transposed.contains(&i);
-            let clicked = table(ui, i, t, flipped, shown, pin, session.can_explain(i), &session.output.style);
+            let article = session.command_of(i).and_then(mksigma_learn::for_command);
+            let clicked = table(ui, i, t, flipped, shown, pin, session.can_explain(i), article.is_some(), &session.output.style);
             if clicked.pivot {
                 if flipped {
                     state.transposed.remove(&i);
@@ -266,6 +269,11 @@ fn show_item(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, i: u
             }
             if clicked.explain {
                 action = Some(OutputAction::Explain(i));
+            }
+            if clicked.learn
+                && let Some(id) = article
+            {
+                action = Some(OutputAction::Learn(id));
             }
             if let Some(category) = clicked.select {
                 action = Some(OutputAction::Select(i, category));
@@ -422,6 +430,7 @@ struct TableClick {
     pivot: bool,
     pin: bool,
     explain: bool,
+    learn: bool,
     select: Option<Category>,
 }
 
@@ -436,15 +445,19 @@ fn table(
     selected: Option<&Category>,
     pin: Option<bool>,
     explain: bool,
+    learn: bool,
     style: &Style,
 ) -> TableClick {
-    let mut click = TableClick { pivot: false, pin: false, explain: false, select: None };
+    let mut click = TableClick { pivot: false, pin: false, explain: false, learn: false, select: None };
     ui.horizontal(|ui| {
         let title = ui.add(egui::Label::new(egui::RichText::new(&t.title).strong()).sense(egui::Sense::click()));
         copy_as_latex(&title, &Item::Table(t.clone()), style);
         click.pivot = ui.small_button(tr!("out-pivot")).on_hover_text(tr!("out-pivot-tip")).clicked();
         if explain {
             click.explain = ui.small_button("Σ").on_hover_text(tr!("out-sigma-tip")).clicked();
+        }
+        if learn {
+            click.learn = ui.small_button("?").on_hover_text(tr!("learn-about-tip")).clicked();
         }
         if let Some(pinned) = pin {
             click.pin = pin_button(ui, pinned);

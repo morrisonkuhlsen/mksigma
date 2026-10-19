@@ -140,6 +140,9 @@ fn latex_text(s: &str) -> String {
             'σ' => out.push_str("$\\sigma$"),
             'χ' => out.push_str("$\\chi$"),
             'α' => out.push_str("$\\alpha$"),
+            'β' => out.push_str("$\\beta$"),
+            'ρ' => out.push_str("$\\rho$"),
+            '≠' => out.push_str("$\\ne$"),
             '√' => out.push_str("$\\surd$"),
             '→' => out.push_str("$\\to$"),
             '₁' => out.push_str("$_1$"),
@@ -175,6 +178,8 @@ impl Math {
                     "ν" => Some("\\nu"),
                     "α" => Some("\\alpha"),
                     "χ" => Some("\\chi"),
+                    "β" => Some("\\beta"),
+                    "ρ" => Some("\\rho"),
                     _ => None,
                 };
                 if let Some(g) = greek {
@@ -195,6 +200,7 @@ impl Math {
                 "≥" => "\\ge".into(),
                 "±" => "\\pm".into(),
                 "→" => "\\to".into(),
+                "≠" => "\\ne".into(),
                 "|" | "!" => s.clone(),
                 // The decimal comma in braces, so TeX doesn't space it as punctuation.
                 s if s.parse::<f64>().is_ok() => mksigma_i18n::decimal(s).replace(',', "{,}"),

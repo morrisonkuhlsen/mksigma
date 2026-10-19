@@ -660,6 +660,26 @@ impl Session {
         self.version
     }
 
+    /// The name of the command Output item `item` came from (`DESCRIPTIVES`, `T-TEST`…).
+    pub fn command_of(&self, item: usize) -> Option<&'static str> {
+        let run = *self.run_of.get(item)?;
+        Some(match &self.runs.get(run)?.command {
+            Command::Descriptives { .. } => "DESCRIPTIVES",
+            Command::Frequencies { .. } => "FREQUENCIES",
+            Command::Crosstabs { .. } => "CROSSTABS",
+            Command::TTest { .. } => "T-TEST",
+            Command::Oneway { .. } => "ONEWAY",
+            Command::Correlations { .. } => "CORRELATIONS",
+            Command::Regression { .. } => "REGRESSION",
+            Command::Logistic { .. } => "LOGISTIC REGRESSION",
+            Command::NparTests(_) => "NPAR TESTS",
+            Command::Examine { .. } => "EXAMINE",
+            Command::Graph { .. } => "GRAPH",
+            Command::DisplayDictionary => "DISPLAY DICTIONARY",
+            _ => return None,
+        })
+    }
+
     /// Whether Output item `item` has its calculation by hand (the Σ beside it).
     pub fn can_explain(&self, item: usize) -> bool {
         self.explained(item).is_some()

@@ -15,6 +15,7 @@ mod explain;
 mod icons;
 pub mod logo;
 pub use mksigma_i18n as i18n;
+mod learn;
 mod math;
 mod output;
 mod procedure;
@@ -127,6 +128,8 @@ pub struct SigmaApp {
     services: Services,
     title: String,
     themed: bool,
+    /// The Learn article shown in the backstage, or its list.
+    pub article: Option<String>,
     /// The Σ window: an Output item's calculation by hand.
     pub explain: Option<explain::ExplainView>,
 }
@@ -173,6 +176,7 @@ impl SigmaApp {
             title: String::new(),
             themed: false,
             explain: None,
+            article: None,
         }
     }
 
@@ -332,6 +336,37 @@ impl SigmaApp {
             A::SaveDashboard => {
                 self.backstage = None;
                 self.save_dashboard_dialog();
+            }
+            A::Learn(action) => self.learn_act(action),
+        }
+    }
+
+    /// Shows Learn's article `id` (or its list) in the backstage.
+    pub fn show_article(&mut self, id: Option<&str>) {
+        self.article = id.map(str::to_string);
+        self.backstage = Some(BackstagePage::Learn);
+    }
+
+    fn learn_act(&mut self, action: learn::Action) {
+        match action {
+            learn::Action::Show(id) => self.show_article(id.as_deref()),
+            learn::Action::Dialog(name) => {
+                if let Some(kind) = procedure::Kind::named(&name) {
+                    self.backstage = None;
+                    self.procedure_dialog = Some(procedure::Dialog::new(kind));
+                }
+            }
+            learn::Action::Run(syntax) => {
+                self.backstage = None;
+                self.run_edit(&syntax);
+            }
+            learn::Action::Paste(syntax) => {
+                self.backstage = None;
+                if !self.syntax.is_empty() && !self.syntax.ends_with('\n') {
+                    self.syntax.push('\n');
+                }
+                self.syntax.push_str(&syntax);
+                self.status = Some(Status::Info(tr!("status-pasted")));
             }
         }
     }
@@ -655,6 +690,7 @@ impl SigmaApp {
                 has_output: !self.session.output.items.is_empty(),
                 has_dashboard: !self.session.dashboard().is_empty(),
                 confirm_close: self.pending.is_some(),
+                article: self.article.as_deref(),
             };
             if let Some(action) = backstage::show(ui, &view) {
                 self.backstage_act(action);
@@ -807,6 +843,7 @@ impl SigmaApp {
                 self.run_edit(&syntax);
             }
             output::OutputAction::Explain(item) => self.explain = Some(explain::ExplainView::new(&self.session, item)),
+            output::OutputAction::Learn(id) => self.show_article(Some(id)),
             output::OutputAction::ClearFilter => {
                 self.output_state.transposed.clear();
                 self.session.clear_cross_filter();
@@ -1116,6 +1153,10 @@ impl SigmaApp {
                 procedure::Outcome::Run(syntax) => {
                     self.procedure_dialog = None;
                     self.run_edit(&syntax);
+                }
+                procedure::Outcome::Learn(id) => {
+                    self.procedure_dialog = None;
+                    self.show_article(Some(id));
                 }
                 procedure::Outcome::Paste(syntax) => {
                     self.procedure_dialog = None;

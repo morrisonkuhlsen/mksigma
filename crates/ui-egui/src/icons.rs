@@ -54,6 +54,8 @@ pub enum Icon {
     Ordinal,
     Nominal,
     Info,
+    /// An open book: Learn.
+    Book,
     Close,
     /// The LaTeX name typeset as LaTeX sets it (raised A, lowered E): the name, not the
     /// LaTeX Project's logo artwork, whose terms don't allow it as a program's icon.
@@ -326,6 +328,26 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, t: &Tokens) {
             painter.circle_stroke(p(8.0, 8.0), 6.3 * s, Stroke::new(w, ink.color));
             line((8.0, 7.0), (8.0, 11.5), Stroke::new(w * 1.2, ink.color));
             painter.circle_filled(p(8.0, 4.8), 0.9 * s, ink.color);
+        }
+        Icon::Book => {
+            // Two pages open from the spine.
+            poly(
+                &[
+                    (8.0, 4.8),
+                    (5.0, 3.6),
+                    (1.8, 3.8),
+                    (1.8, 12.2),
+                    (5.0, 12.0),
+                    (8.0, 13.2),
+                    (11.0, 12.0),
+                    (14.2, 12.2),
+                    (14.2, 3.8),
+                    (11.0, 3.6),
+                    (8.0, 4.8),
+                ],
+                Stroke::new(w, ink.color),
+            );
+            line((8.0, 4.8), (8.0, 13.2), Stroke::new(w, ink.color));
         }
         Icon::Close => {
             line((3.5, 3.5), (12.5, 12.5), Stroke::new(w * 1.2, ink.color));

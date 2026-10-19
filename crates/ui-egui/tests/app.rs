@@ -912,3 +912,33 @@ fn sigma_shows_the_calculation_by_hand_and_exports_it() {
     h.run_steps(3);
     assert!(h.state().explain.is_none());
 }
+
+#[test]
+fn learn_shows_articles_runs_their_examples_and_opens_from_a_table() {
+    let mut app = SigmaApp::new(Services::default());
+    app.session.run_syntax("DESCRIPTIVES age.").unwrap();
+    // Tall, so a whole article is on screen.
+    let mut h = Harness::builder().with_size(egui::vec2(1600.0, 2400.0)).build_ui_state(|ui, app: &mut SigmaApp| app.ui(ui), app);
+    h.run_steps(3);
+    // The ? beside the Descriptives table opens its article.
+    h.get_by_label("?").click();
+    h.run_steps(3);
+    assert_eq!(h.state().article.as_deref(), Some("descriptives"));
+    assert!(h.query_by_label_contains("Descriptives summarizes each Scale variable").is_some(), "the article");
+    // Back to the list, then another article, and its example.
+    h.get_by_label("‹ All articles").click();
+    h.run_steps(3);
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Independent-samples t test").click();
+    h.run_steps(3);
+    assert_eq!(h.state().article.as_deref(), Some("t-test"));
+    h.get_by_label("Run this example").click();
+    h.run_steps(3);
+    assert!(h.state().backstage.is_none(), "back to the data");
+    assert!(h.state().session.journal.iter().any(|c| c.starts_with("T-TEST GROUPS=older")), "{:?}", h.state().session.journal);
+    // A link to a dialog opens it.
+    h.state_mut().show_article(Some("which-test"));
+    h.run_steps(3);
+    h.get_by_label("Open Crosstabs").click();
+    h.run_steps(3);
+    assert!(h.state().backstage.is_none() && h.state().procedure_dialog.is_some());
+}

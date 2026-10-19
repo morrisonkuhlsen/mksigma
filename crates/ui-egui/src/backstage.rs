@@ -18,6 +18,8 @@ pub enum Page {
     Open,
     Info,
     Export,
+    /// Learn: its articles.
+    Learn,
 }
 
 /// What was asked for in the backstage this frame.
@@ -41,6 +43,7 @@ pub(crate) enum Action {
     Export(ExportFormat),
     ExportDashboard,
     SaveDashboard,
+    Learn(crate::learn::Action),
 }
 
 /// What the pages show.
@@ -58,6 +61,8 @@ pub(crate) struct View<'a> {
     pub has_dashboard: bool,
     /// Replacing the data was asked for with unsaved changes: Info asks what to do.
     pub confirm_close: bool,
+    /// The article Learn shows, or its list.
+    pub article: Option<&'a str>,
 }
 
 const COLUMN: f32 = 248.0;
@@ -106,6 +111,44 @@ fn caption(ui: &mut egui::Ui, text: &str) {
     );
 }
 
+/// The house's spiral staircase along the right of a wide window, fading into the page from
+/// its left edge. Its rectangle, when there is room for it.
+fn artwork(ui: &egui::Ui, area: egui::Rect, page: egui::Color32) -> Option<egui::Rect> {
+    let width = (area.width() - COLUMN) * 0.36;
+    if area.width() < 1100.0 || width < 280.0 {
+        return None;
+    }
+    let texture = crate::logo::spiral(ui.ctx())?;
+    let rect = egui::Rect::from_min_max(egui::pos2(area.right() - width, area.top()), area.max);
+    // Cover the rectangle: crop the image to its shape, around the spiral's centre.
+    let image = texture.size_vec2();
+    let (wanted, have) = (rect.width() / rect.height(), image.x / image.y.max(1.0));
+    let uv = if wanted < have {
+        let w = wanted / have;
+        egui::Rect::from_min_max(egui::pos2(0.5 - w / 2.0, 0.0), egui::pos2(0.5 + w / 2.0, 1.0))
+    } else {
+        let h = have / wanted;
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.5 - h / 2.0), egui::pos2(1.0, 0.5 + h / 2.0))
+    };
+    let painter = ui.painter();
+    painter.image(texture.id(), rect, uv, egui::Color32::WHITE);
+    // The page's colour over its left part, solid at the edge and gone by the middle.
+    let fade = egui::Rect::from_min_max(rect.min, egui::pos2(rect.left() + rect.width() * 0.55, rect.bottom()));
+    let clear = egui::Color32::from_rgba_unmultiplied(page.r(), page.g(), page.b(), 0);
+    let mut mesh = egui::Mesh::default();
+    let white = egui::epaint::WHITE_UV;
+    mesh.vertices.extend([
+        egui::epaint::Vertex { pos: fade.left_top(), uv: white, color: page },
+        egui::epaint::Vertex { pos: fade.right_top(), uv: white, color: clear },
+        egui::epaint::Vertex { pos: fade.left_bottom(), uv: white, color: page },
+        egui::epaint::Vertex { pos: fade.right_bottom(), uv: white, color: clear },
+    ]);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(1, 3, 2);
+    painter.add(mesh);
+    Some(rect)
+}
+
 pub(crate) fn show(ui: &mut egui::Ui, view: &View) -> Option<Action> {
     let t = Tokens::get(ui.ctx());
     let mut action = None;
@@ -114,8 +157,9 @@ pub(crate) fn show(ui: &mut egui::Ui, view: &View) -> Option<Action> {
     }
     let area = ui.available_rect_before_wrap();
     let column = egui::Rect::from_min_size(area.min, egui::vec2(COLUMN, area.height()));
-    ui.painter().rect_filled(column, egui::CornerRadius { nw: 0, ne: 12, sw: 0, se: 12 }, INK);
+    ui.painter().rect_filled(column, 0.0, INK);
     ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(column.right(), area.top()), area.max), 0.0, t.window);
+    let art = artwork(ui, area, t.window);
 
     let mut col = ui.new_child(egui::UiBuilder::new().max_rect(column).layout(egui::Layout::top_down(egui::Align::Min)));
     col.spacing_mut().item_spacing.y = 0.0;
@@ -149,6 +193,7 @@ pub(crate) fn show(ui: &mut egui::Ui, view: &View) -> Option<Action> {
     go(&mut col, Icon::House, &tr!("bs-home"), view.page == Page::Home, Action::Page(Page::Home));
     go(&mut col, Icon::Page, &tr!("bs-new"), view.page == Page::New, Action::Page(Page::New));
     go(&mut col, Icon::Open, &tr!("open"), view.page == Page::Open, Action::Page(Page::Open));
+    go(&mut col, Icon::Book, &tr!("bs-learn"), view.page == Page::Learn, Action::Page(Page::Learn));
     col.add_space(10.0);
     caption(&mut col, &tr!("bs-this-data"));
     go(&mut col, Icon::Info, &tr!("bs-info"), view.page == Page::Info, Action::Page(Page::Info));
@@ -161,7 +206,9 @@ pub(crate) fn show(ui: &mut egui::Ui, view: &View) -> Option<Action> {
     col.painter().text(foot, egui::Align2::LEFT_BOTTOM, tr!("mk-project"), egui::FontId::proportional(11.5), ON_INK_SOFT);
     col.painter().text(foot + egui::vec2(0.0, 15.0), egui::Align2::LEFT_BOTTOM, "morrisonkuhlsen.com", egui::FontId::proportional(11.5), ON_INK);
 
-    let content = egui::Rect::from_min_max(egui::pos2(column.right() + 48.0, area.top() + 30.0), egui::pos2(area.right() - 28.0, area.bottom()));
+    // The page stops before the artwork, when there is one.
+    let right = art.map_or(area.right(), |a| a.left() + a.width() * 0.25);
+    let content = egui::Rect::from_min_max(egui::pos2(column.right() + 48.0, area.top() + 30.0), egui::pos2(right - 28.0, area.bottom()));
     let mut page = ui.new_child(egui::UiBuilder::new().max_rect(content).layout(egui::Layout::top_down(egui::Align::Min)));
     page.set_clip_rect(content.expand2(egui::vec2(8.0, 0.0)));
     // Back to the data, in the page's corner.
@@ -193,6 +240,11 @@ fn pages(ui: &mut egui::Ui, view: &View) -> Option<Action> {
     let t = Tokens::get(ui.ctx());
     let mut action = None;
     match view.page {
+        Page::Learn => {
+            if let Some(a) = crate::learn::page(ui, view.article) {
+                action = Some(Action::Learn(a));
+            }
+        }
         Page::Home | Page::New => {
             if view.page == Page::Home {
                 heading(ui, &tr!("bs-welcome"), &tr!("bs-welcome-sub"));

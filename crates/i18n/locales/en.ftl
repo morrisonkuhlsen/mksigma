@@ -951,3 +951,17 @@ phrase-a-number-and-a-format-such-as-f8-2 = a number and a format such as F8.2
 phrase-numbers = numbers
 phrase-strings = strings
 err-at-least-numbers = at least { $n } numbers
+
+## Learn
+bs-learn = Learn
+learn-title = Learn
+learn-sub = What each procedure answers, how to read its tables, and the ideas behind them.
+learn-start = WHERE TO START
+learn-procedures = PROCEDURES
+learn-concepts = CONCEPTS
+learn-all = ‹ All articles
+learn-run = Run this example
+learn-run-tip = Runs it on the data that is open: the sample dataset has these variables
+learn-paste = Paste into syntax
+learn-paste-tip = Put it in the syntax editor, to change it before running
+learn-about-tip = What this procedure does and how to read it

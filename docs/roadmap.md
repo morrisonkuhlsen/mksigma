@@ -229,18 +229,19 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
 - **Next:** Español; Data View with the decimal comma (typing it too); the interactive
   dashboard's page in the exporting language.
 
-## Next: Learn, the study section
-- A Learn page (in the File backstage and beside every table and dialog) with an article per
-  procedure and per concept: what it answers, its assumptions, how to read its table, the
-  formulas, and a worked example on the sample data with a button that runs it. Concepts:
-  variables and levels of measurement, distributions, sampling, the p-value, confidence
-  intervals, effect sizes, power, assumptions and what to do when they fail; and a "Which
-  test?" guide from the question and the data's levels to the procedure.
-- Σ shows the calculation on the user's own data; Learn explains the idea. Each links to the
-  other.
-- Written for MK Sigma (never copied from SPSS's or any manual), in both languages, as
-  Markdown in the repository with formulas in the same notation as Σ; the same articles in
-  the exported web pages. Sources cited per article.
+## Learn, the study section — first part done
+- A Learn page in the File backstage, and a "?" beside every table and in every dialog that
+  has an article. Articles in English and Portuguese, Markdown under `crates/learn/articles/`,
+  read by `mksigma-learn`: headings, lists, notes, emphasis, links to articles or to a
+  procedure's dialog, formulas in a subset of LaTeX drawn as the Σ draws them, and syntax
+  examples with Run and Paste. Tests read every article in both languages, check every link,
+  that both languages give the same examples, and that every example runs on the sample data.
+- Written so far: "Which test?", Descriptives, the independent-samples t test, Crosstabs and
+  chi-square, the p-value. Written for MK Sigma, never copied from a manual.
+- **Next:** an article for every procedure (Frequencies, Explore, ANOVA, correlation,
+  regression, logistic regression, the nonparametric tests, the charts) and for the concepts
+  (levels of measurement, distributions, sampling, confidence intervals, effect sizes, power,
+  assumptions); sources cited per article; the articles in the exported web pages.
 
 ## Later
 - Multiple related tables (star-schema data model) and measures
