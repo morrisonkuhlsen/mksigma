@@ -4,6 +4,7 @@
 use mksigma_engine::Session;
 use mksigma_engine::output::Category;
 use mksigma_engine::output::math::Explanation;
+use mksigma_i18n::tr;
 
 /// Size of the mathematics, in points.
 const MATH_SIZE: f32 = 16.0;
@@ -71,12 +72,12 @@ pub(crate) fn show(ctx: &egui::Context, view: &mut ExplainView, session: &Sessio
     view.refresh(session);
     let title = match &view.explanation {
         Ok(e) => e.title.clone(),
-        Err(_) => "Calculation".to_string(),
+        Err(_) => tr!("ex-calculation"),
     };
     let mut open = true;
     let mut outcome = Outcome::Open;
     let width = (ctx.content_rect().width() - 40.0).clamp(320.0, 760.0);
-    egui::Window::new(format!("Σ  {title}, by hand"))
+    egui::Window::new(tr!("ex-window-title", title = title))
         .id(egui::Id::new("explain"))
         .open(&mut open)
         .collapsible(false)
@@ -90,13 +91,13 @@ pub(crate) fn show(ctx: &egui::Context, view: &mut ExplainView, session: &Sessio
         .max_height(ctx.content_rect().height() - 60.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.checkbox(&mut view.full, "Show every term").on_hover_text("Write out every term of each sum, not the first and the last few");
+                ui.checkbox(&mut view.full, tr!("ex-every-term")).on_hover_text(tr!("ex-every-term-tip"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Ok(e) = &view.explanation {
-                        if ui.button("Export .tex…").on_hover_text("A LaTeX document with the whole calculation").clicked() {
+                        if ui.button(tr!("ex-export-tex")).on_hover_text(tr!("ex-export-tex-tip")).clicked() {
                             outcome = Outcome::Export(e.to_latex(), format!("{}.tex", e.title));
                         }
-                        if ui.button("Copy LaTeX").on_hover_text("The whole calculation as a LaTeX document").clicked() {
+                        if ui.button(tr!("ex-copy-latex")).on_hover_text(tr!("ex-copy-latex-tip")).clicked() {
                             ui.ctx().copy_text(e.to_latex());
                         }
                     }

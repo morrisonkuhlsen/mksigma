@@ -5,26 +5,27 @@
 //! or Esc closes it sooner.
 
 use crate::backstage::{BRAND, INK, ON_INK, ON_INK_SOFT};
+use mksigma_i18n::tr;
 
 /// The window's size, in points.
 pub const SIZE: [f32; 2] = [680.0, 400.0];
 /// Seconds it stays.
 const HOLD: f64 = 5.0;
 
-/// The program's components, named in turn as the bar fills.
+/// The program's components, named in turn as the bar fills (their messages).
 const COMPONENTS: [&str; 12] = [
-    "the syntax parser",
-    "the SPSS data reader and writer",
-    "the delimited text reader",
-    "descriptive statistics and frequencies",
-    "crosstabs and chi-square tests",
-    "t tests, ANOVA and post hoc tests",
-    "correlations and regression",
-    "nonparametric tests",
-    "charts",
-    "the Output Viewer and its exports",
-    "slicers, cross-filtering and dashboards",
-    "the calculations by hand (Σ)",
+    "splash-c1",
+    "splash-c2",
+    "splash-c3",
+    "splash-c4",
+    "splash-c5",
+    "splash-c6",
+    "splash-c7",
+    "splash-c8",
+    "splash-c9",
+    "splash-c10",
+    "splash-c11",
+    "splash-c12",
 ];
 
 #[derive(Debug, Default)]
@@ -91,18 +92,13 @@ fn paint(painter: &egui::Painter, ctx: &egui::Context, rect: egui::Rect, progres
         egui::FontId::proportional(15.0),
         ON_INK_SOFT,
     );
-    let tagline = painter.layout(
-        "Statistics, open and auditable: every figure with its calculation.".to_string(),
-        egui::FontId::proportional(12.5),
-        ON_INK_SOFT,
-        width,
-    );
+    let tagline = painter.layout(tr!("splash-tagline"), egui::FontId::proportional(12.5), ON_INK_SOFT, width);
     let below = words.top() + 152.0 + tagline.size().y;
     painter.galley(egui::pos2(left, words.top() + 152.0), tagline, ON_INK_SOFT);
     painter.text(
         egui::pos2(left, below + 10.0),
         egui::Align2::LEFT_TOP,
-        format!("Version {}", env!("CARGO_PKG_VERSION")),
+        tr!("splash-version", version = env!("CARGO_PKG_VERSION")),
         egui::FontId::proportional(12.5),
         ON_INK_SOFT,
     );
@@ -110,7 +106,7 @@ fn paint(painter: &egui::Painter, ctx: &egui::Context, rect: egui::Rect, progres
     // The component loading, over the progress bar.
     let bar = egui::Rect::from_min_size(egui::pos2(left, words.bottom() - 96.0), egui::vec2(width, 3.0));
     let shown = ((progress * COMPONENTS.len() as f32) as usize).min(COMPONENTS.len() - 1);
-    let status = COMPONENTS.get(shown).map_or_else(String::new, |c| format!("Loading {c}…"));
+    let status = COMPONENTS.get(shown).map_or_else(String::new, |c| tr!("splash-loading", component = mksigma_i18n::message(c, &[])));
     painter.text(bar.left_top() - egui::vec2(0.0, 10.0), egui::Align2::LEFT_BOTTOM, status, egui::FontId::proportional(12.0), ON_INK_SOFT);
     painter.rect_filled(bar, 1.5, egui::Color32::from_white_alpha(28));
     painter.rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * progress, bar.height())), 1.5, BRAND);
@@ -122,11 +118,5 @@ fn paint(painter: &egui::Painter, ctx: &egui::Context, rect: egui::Rect, progres
         let size = egui::vec2(logo_width, logo_width * texture.size_vec2().y / texture.size_vec2().x.max(1.0));
         painter.image(texture.id(), egui::Rect::from_min_size(egui::pos2(left, foot - size.y), size), uv, ON_INK);
     }
-    painter.text(
-        egui::pos2(left + width, foot - 4.0),
-        egui::Align2::RIGHT_BOTTOM,
-        "A Morrison Kühlsen project",
-        egui::FontId::proportional(11.0),
-        ON_INK_SOFT,
-    );
+    painter.text(egui::pos2(left + width, foot - 4.0), egui::Align2::RIGHT_BOTTOM, tr!("mk-project"), egui::FontId::proportional(11.0), ON_INK_SOFT);
 }

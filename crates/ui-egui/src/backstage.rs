@@ -3,6 +3,7 @@
 //! New, Open; This data: Info, Save, Save As, Export, Close). On the right, the place's page,
 //! with a Back button in its corner; Esc goes back too. Buttons only report what was asked for.
 
+use mksigma_i18n::tr;
 use std::path::{Path, PathBuf};
 
 use crate::icons::{self, Icon};
@@ -144,20 +145,20 @@ pub(crate) fn show(ui: &mut egui::Ui, view: &View) -> Option<Action> {
             action = Some(then);
         }
     };
-    caption(&mut col, "START");
-    go(&mut col, Icon::House, "Home", view.page == Page::Home, Action::Page(Page::Home));
-    go(&mut col, Icon::Page, "New", view.page == Page::New, Action::Page(Page::New));
-    go(&mut col, Icon::Open, "Open", view.page == Page::Open, Action::Page(Page::Open));
+    caption(&mut col, &tr!("bs-start"));
+    go(&mut col, Icon::House, &tr!("bs-home"), view.page == Page::Home, Action::Page(Page::Home));
+    go(&mut col, Icon::Page, &tr!("bs-new"), view.page == Page::New, Action::Page(Page::New));
+    go(&mut col, Icon::Open, &tr!("open"), view.page == Page::Open, Action::Page(Page::Open));
     col.add_space(10.0);
-    caption(&mut col, "THIS DATA");
-    go(&mut col, Icon::Info, "Info", view.page == Page::Info, Action::Page(Page::Info));
-    go(&mut col, Icon::Save, "Save", false, Action::Save);
-    go(&mut col, Icon::Save, "Save As", false, Action::SaveAs);
-    go(&mut col, Icon::Share, "Export", view.page == Page::Export, Action::Page(Page::Export));
-    go(&mut col, Icon::Close, "Close", false, Action::Close);
+    caption(&mut col, &tr!("bs-this-data"));
+    go(&mut col, Icon::Info, &tr!("bs-info"), view.page == Page::Info, Action::Page(Page::Info));
+    go(&mut col, Icon::Save, &tr!("save"), false, Action::Save);
+    go(&mut col, Icon::Save, &tr!("bs-save-as"), false, Action::SaveAs);
+    go(&mut col, Icon::Share, &tr!("bs-export"), view.page == Page::Export, Action::Page(Page::Export));
+    go(&mut col, Icon::Close, &tr!("bs-close"), false, Action::Close);
     // The house's line at the column's foot.
     let foot = egui::pos2(column.left() + 30.0, column.bottom() - 22.0);
-    col.painter().text(foot, egui::Align2::LEFT_BOTTOM, "A Morrison Kühlsen project", egui::FontId::proportional(11.5), ON_INK_SOFT);
+    col.painter().text(foot, egui::Align2::LEFT_BOTTOM, tr!("mk-project"), egui::FontId::proportional(11.5), ON_INK_SOFT);
     col.painter().text(foot + egui::vec2(0.0, 15.0), egui::Align2::LEFT_BOTTOM, "morrisonkuhlsen.com", egui::FontId::proportional(11.5), ON_INK);
 
     let content = egui::Rect::from_min_max(egui::pos2(column.right() + 48.0, area.top() + 30.0), egui::pos2(area.right() - 28.0, area.bottom()));
@@ -166,7 +167,7 @@ pub(crate) fn show(ui: &mut egui::Ui, view: &View) -> Option<Action> {
     // Back to the data, in the page's corner.
     let corner = egui::Rect::from_min_size(egui::pos2(content.right() - 200.0, content.top() - 6.0), egui::vec2(200.0, 32.0));
     let mut back = ui.new_child(egui::UiBuilder::new().max_rect(corner).layout(egui::Layout::right_to_left(egui::Align::Center)));
-    let button = back.add(egui::Button::new(egui::RichText::new("Back to the data").size(13.5)).min_size(egui::vec2(0.0, 30.0)).corner_radius(15));
+    let button = back.add(egui::Button::new(egui::RichText::new(tr!("bs-back")).size(13.5)).min_size(egui::vec2(0.0, 30.0)).corner_radius(15));
     if button.on_hover_text("Esc").clicked() {
         action = Some(Action::Back);
     }
@@ -194,36 +195,36 @@ fn pages(ui: &mut egui::Ui, view: &View) -> Option<Action> {
     match view.page {
         Page::Home | Page::New => {
             if view.page == Page::Home {
-                heading(ui, "Welcome to MK Sigma", "Statistics, from data in to a dashboard out, every step as syntax.");
+                heading(ui, &tr!("bs-welcome"), &tr!("bs-welcome-sub"));
             } else {
-                heading(ui, "New", "Start from nothing, or from data to try things on.");
+                heading(ui, &tr!("bs-new"), &tr!("bs-new-sub"));
             }
-            section(ui, "START");
+            section(ui, &tr!("bs-start"));
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(16.0, 16.0);
-                if start_card(ui, Icon::Page, "Blank dataset", "Define variables in Variable View, then type or paste the cases.") {
+                if start_card(ui, Icon::Page, &tr!("bs-blank"), &tr!("bs-blank-sub")) {
                     action = Some(Action::Blank);
                 }
-                if start_card(ui, Icon::Table, "Sample dataset", "Eight cases of age, income and score, to try every procedure.") {
+                if start_card(ui, Icon::Table, &tr!("bs-sample"), &tr!("bs-sample-sub")) {
                     action = Some(Action::Sample);
                 }
-                if start_card(ui, Icon::Open, "Open a file", "SPSS data (.sav), delimited text (.csv, .tsv) or a dashboard (.sps).") {
+                if start_card(ui, Icon::Open, &tr!("bs-open-file"), &tr!("bs-open-file-sub")) {
                     action = Some(Action::Browse);
                 }
             });
             if view.page == Page::Home {
                 ui.add_space(30.0);
-                section(ui, "RECENT");
+                section(ui, &tr!("bs-recent"));
                 if let Some(a) = recent(ui, view.recent) {
                     action = Some(a);
                 }
             }
         }
         Page::Open => {
-            heading(ui, "Open", "SPSS data (.sav), delimited text (.csv, .tsv, .txt) or a saved dashboard (.sps).");
+            heading(ui, &tr!("open"), &tr!("bs-open-sub"));
             if ui
                 .add(
-                    egui::Button::new(egui::RichText::new("Browse…").size(14.0).color(ON_INK))
+                    egui::Button::new(egui::RichText::new(tr!("bs-browse")).size(14.0).color(ON_INK))
                         .fill(BRAND)
                         .min_size(egui::vec2(130.0, 34.0))
                         .corner_radius(17),
@@ -234,17 +235,13 @@ fn pages(ui: &mut egui::Ui, view: &View) -> Option<Action> {
                 action = Some(Action::Browse);
             }
             ui.add_space(28.0);
-            section(ui, "RECENT");
+            section(ui, &tr!("bs-recent"));
             if let Some(a) = recent(ui, view.recent) {
                 action = Some(a);
             }
         }
         Page::Info => {
-            heading(
-                ui,
-                view.file_name.unwrap_or("Untitled"),
-                &view.file_path.map_or_else(|| "Not saved to a file yet".to_string(), |p| p.display().to_string()),
-            );
+            heading(ui, view.file_name.unwrap_or(&tr!("untitled")), &view.file_path.map_or_else(|| tr!("bs-not-saved"), |p| p.display().to_string()));
             if view.confirm_close {
                 egui::Frame::new()
                     .fill(t.accent_soft)
@@ -252,13 +249,13 @@ fn pages(ui: &mut egui::Ui, view: &View) -> Option<Action> {
                     .corner_radius(12)
                     .inner_margin(egui::Margin::same(14))
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new("The data has changes that aren't saved.").strong());
+                        ui.label(egui::RichText::new(tr!("bs-unsaved")).strong());
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if ui.add(egui::Button::new(egui::RichText::new("Save").color(ON_INK)).fill(BRAND).corner_radius(14)).clicked() {
+                            if ui.add(egui::Button::new(egui::RichText::new(tr!("save")).color(ON_INK)).fill(BRAND).corner_radius(14)).clicked() {
                                 action = Some(Action::Save);
                             }
-                            if ui.add(egui::Button::new("Close without saving").corner_radius(14)).clicked() {
+                            if ui.add(egui::Button::new(tr!("bs-close-without")).corner_radius(14)).clicked() {
                                 action = Some(Action::Discard);
                             }
                         });
@@ -267,15 +264,15 @@ fn pages(ui: &mut egui::Ui, view: &View) -> Option<Action> {
             }
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(14.0, 14.0);
-                fact(ui, "Cases", &view.cases.to_string());
-                fact(ui, "Variables", &view.variables.to_string());
-                fact(ui, "Weighted by", view.weight.unwrap_or("nothing"));
-                fact(ui, "Applied steps", &view.steps.to_string());
-                fact(ui, "Saved", if view.modified { "Not yet" } else { "Yes" });
+                fact(ui, &tr!("bs-cases"), &view.cases.to_string());
+                fact(ui, &tr!("bs-variables"), &view.variables.to_string());
+                fact(ui, &tr!("bs-weighted-by"), view.weight.unwrap_or(&tr!("bs-nothing")));
+                fact(ui, &tr!("bs-applied-steps"), &view.steps.to_string());
+                fact(ui, &tr!("bs-saved"), &if view.modified { tr!("bs-not-yet") } else { tr!("bs-yes") });
             });
         }
         Page::Export => {
-            heading(ui, "Export", "The Output for reading and printing, the dashboard for sharing.");
+            heading(ui, &tr!("bs-export"), &tr!("bs-export-sub"));
             let output = view.has_output;
             let board = view.has_dashboard;
             ui.horizontal_wrapped(|ui| {
@@ -285,18 +282,11 @@ fn pages(ui: &mut egui::Ui, view: &View) -> Option<Action> {
                         action = Some(then);
                     }
                 };
-                card(ui, Icon::Web, "Web page", "The Output as one HTML file, light and dark.", output, Action::Export(ExportFormat::Html));
-                card(ui, Icon::Pdf, "PDF", "A4 pages; tables split with their headers repeated.", output, Action::Export(ExportFormat::Pdf));
-                card(ui, Icon::Latex, "LaTeX", "booktabs tables and pgfplots charts that compile.", output, Action::Export(ExportFormat::Latex));
-                card(
-                    ui,
-                    Icon::Grid,
-                    "Interactive dashboard",
-                    "One HTML file that filters in any browser. It holds the data.",
-                    board,
-                    Action::ExportDashboard,
-                );
-                card(ui, Icon::List, "Dashboard as syntax", "A .sps that rebuilds the dashboard from the data's file.", board, Action::SaveDashboard);
+                card(ui, Icon::Web, &tr!("bs-web-page"), &tr!("bs-web-page-sub"), output, Action::Export(ExportFormat::Html));
+                card(ui, Icon::Pdf, "PDF", &tr!("bs-pdf-sub"), output, Action::Export(ExportFormat::Pdf));
+                card(ui, Icon::Latex, "LaTeX", &tr!("bs-latex-sub"), output, Action::Export(ExportFormat::Latex));
+                card(ui, Icon::Grid, &tr!("bs-interactive"), &tr!("bs-interactive-sub"), board, Action::ExportDashboard);
+                card(ui, Icon::List, &tr!("bs-dashboard-syntax"), &tr!("bs-dashboard-syntax-sub"), board, Action::SaveDashboard);
             });
         }
     }
@@ -344,11 +334,11 @@ fn fact(ui: &mut egui::Ui, name: &str, value: &str) {
 /// How long ago, in words: "just now", "5 min ago", "3 h ago", "2 days ago".
 fn ago(seconds: u64) -> String {
     match seconds {
-        0..60 => "just now".to_string(),
-        60..3600 => format!("{} min ago", seconds / 60),
-        3600..86_400 => format!("{} h ago", seconds / 3600),
-        86_400..172_800 => "yesterday".to_string(),
-        _ => format!("{} days ago", seconds / 86_400),
+        0..60 => tr!("ago-now"),
+        60..3600 => tr!("ago-min", n = (seconds / 60) as usize),
+        3600..86_400 => tr!("ago-h", n = (seconds / 3600) as usize),
+        86_400..172_800 => tr!("ago-yesterday"),
+        _ => tr!("ago-days", n = (seconds / 86_400) as usize),
     }
 }
 
@@ -357,7 +347,7 @@ fn ago(seconds: u64) -> String {
 fn recent(ui: &mut egui::Ui, files: &[PathBuf]) -> Option<Action> {
     let t = Tokens::get(ui.ctx());
     if files.is_empty() {
-        ui.label(egui::RichText::new("Files you open or save show here.").color(t.text_dim));
+        ui.label(egui::RichText::new(tr!("bs-recent-empty")).color(t.text_dim));
         return None;
     }
     let mut action = None;
@@ -373,9 +363,9 @@ fn recent(ui: &mut egui::Ui, files: &[PathBuf]) -> Option<Action> {
             ui.painter().rect_filled(rect, 10.0, t.hover);
         }
         let kind = match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
-            Some("sps") => (Icon::Grid, "Dashboard"),
-            Some("csv" | "tsv" | "txt" | "dat") => (Icon::List, "Text data"),
-            _ => (Icon::Table, "SPSS data"),
+            Some("sps") => (Icon::Grid, &tr!("bs-kind-dashboard")),
+            Some("csv" | "tsv" | "txt" | "dat") => (Icon::List, &tr!("bs-kind-text")),
+            _ => (Icon::Table, &tr!("bs-kind-spss")),
         };
         let mut painter = ui.painter().clone();
         if !exists {
@@ -396,7 +386,7 @@ fn recent(ui: &mut egui::Ui, files: &[PathBuf]) -> Option<Action> {
             egui::FontId::proportional(11.5),
             t.text_dim,
         );
-        let right = format!("{}  ·  {}", kind.1, changed.as_deref().unwrap_or("not found"));
+        let right = format!("{}  ·  {}", kind.1, changed.as_deref().unwrap_or(&tr!("bs-not-found")));
         painter.text(
             egui::pos2(rect.right() - 14.0, rect.center().y),
             egui::Align2::RIGHT_CENTER,

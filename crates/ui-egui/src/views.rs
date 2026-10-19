@@ -2,6 +2,7 @@
 //! pairs and `Commit`s for the app to apply once the frame's layout is done.
 
 use mksigma_engine::core::{Dataset, Measure, Value, VarType, Variable};
+use mksigma_i18n::tr;
 
 use crate::ROW_HEIGHT;
 use crate::edit::{Commit, Editing, Field, Target, editable, missing_text};
@@ -84,15 +85,15 @@ pub(crate) fn data_view(
                 ui.horizontal(|ui| {
                     if case == n {
                         ui.add_sized([case_width, ROW_HEIGHT], egui::Label::new(egui::RichText::new("+").weak()))
-                            .on_hover_text("Type here to add a case");
+                            .on_hover_text(tr!("vw-type-to-add-case"));
                     } else {
                         let number = egui::Label::new(egui::RichText::new((case + 1).to_string()).color(t.header_text)).sense(egui::Sense::click());
                         ui.add_sized([case_width, ROW_HEIGHT], number).context_menu(|ui| {
-                            if ui.button("Insert case above").clicked() {
+                            if ui.button(tr!("vw-insert-case-above")).clicked() {
                                 commits.push(Commit::InsertCase(case));
                                 ui.close();
                             }
-                            if ui.button("Delete case").clicked() {
+                            if ui.button(tr!("vw-delete-case")).clicked() {
                                 commits.push(Commit::DeleteCase(case));
                                 ui.close();
                             }
@@ -121,7 +122,7 @@ pub(crate) fn data_view(
 
 fn values_text(var: &Variable) -> String {
     match var.value_labels.as_slice() {
-        [] => "None".to_string(),
+        [] => tr!("vw-none"),
         [(v, label), rest @ ..] => {
             let first = format!("{{{}, {label}}}", var.format.render(v));
             if rest.is_empty() { first } else { format!("{first}…") }
@@ -129,8 +130,16 @@ fn values_text(var: &Variable) -> String {
     }
 }
 
-const MEASURES: [(Measure, &str, &str); 3] =
-    [(Measure::Nominal, "Nominal", "NOMINAL"), (Measure::Ordinal, "Ordinal", "ORDINAL"), (Measure::Scale, "Scale", "SCALE")];
+const MEASURES: [(Measure, &str); 3] = [(Measure::Nominal, "NOMINAL"), (Measure::Ordinal, "ORDINAL"), (Measure::Scale, "SCALE")];
+
+/// A level of measurement's name in the interface's language.
+fn measure_name(measure: Measure) -> String {
+    match measure {
+        Measure::Nominal => tr!("vw-nominal"),
+        Measure::Ordinal => tr!("vw-ordinal"),
+        Measure::Scale => tr!("vw-scale"),
+    }
+}
 
 pub(crate) fn variable_view(
     ui: &mut egui::Ui,
@@ -142,14 +151,23 @@ pub(crate) fn variable_view(
     const H: f32 = 22.0;
     egui::ScrollArea::both().id_salt("variables").auto_shrink([false, false]).show(ui, |ui| {
         egui::Grid::new("variable-view").striped(true).num_columns(8).spacing([8.0, 2.0]).show(ui, |ui| {
-            for h in ["", "Name", "Type", "Label", "Values", "Missing", "Measure", "Format"] {
+            for h in [
+                String::new(),
+                tr!("vw-name"),
+                tr!("vw-type"),
+                tr!("vw-label"),
+                tr!("vw-values"),
+                tr!("vw-missing"),
+                tr!("vw-measure"),
+                tr!("vw-format"),
+            ] {
                 ui.strong(h);
             }
             ui.end_row();
             for (i, var) in ds.variables().iter().enumerate() {
                 let number = ui.add(egui::Label::new(egui::RichText::new((i + 1).to_string()).weak()).sense(egui::Sense::click()));
                 number.context_menu(|ui| {
-                    if ui.button(format!("Delete {}", var.name)).clicked() {
+                    if ui.button(tr!("vw-delete-variable", name = var.name.as_str())).clicked() {
                         commits.push(Commit::Syntax(format!("DELETE VARIABLES {}.", var.name)));
                         ui.close();
                     }
@@ -157,24 +175,25 @@ pub(crate) fn variable_view(
                 let name = egui::RichText::new(&var.name);
                 editable(ui, editing, edits, Target::Variable(i, Field::Name), name, || var.name.clone(), 110.0, H, false);
                 ui.label(match var.var_type {
-                    VarType::Numeric => "Numeric".to_string(),
-                    VarType::String(w) => format!("String ({w})"),
+                    VarType::Numeric => tr!("vw-numeric"),
+                    VarType::String(w) => tr!("vw-string", width = usize::from(w)),
                 });
                 let label = egui::RichText::new(var.label.as_deref().unwrap_or(""));
                 editable(ui, editing, edits, Target::Variable(i, Field::Label), label, || var.label.clone().unwrap_or_default(), 160.0, H, false);
 
-                let values = ui.add_sized([120.0, H], egui::Button::new(values_text(var)).truncate()).on_hover_text("Edit value labels");
+                let values = ui.add_sized([120.0, H], egui::Button::new(values_text(var)).truncate()).on_hover_text(tr!("vw-edit-value-labels"));
                 if values.clicked() {
                     commits.push(Commit::OpenValueLabels(i));
                 }
 
                 let missing = missing_text(var);
-                let shown = egui::RichText::new(if missing.is_empty() { "None".to_string() } else { missing.clone() });
+                let shown = egui::RichText::new(if missing.is_empty() { tr!("vw-none") } else { missing.clone() });
                 editable(ui, editing, edits, Target::Variable(i, Field::Missing), shown, || missing, 95.0, H, false);
 
-                let current = MEASURES.iter().find(|(m, _, _)| *m == var.measure).map_or("", |(_, label, _)| label);
+                let current = measure_name(var.measure);
                 egui::ComboBox::from_id_salt(("measure", i)).selected_text(current).width(80.0).show_ui(ui, |ui| {
-                    for (measure, label, keyword) in MEASURES {
+                    for (measure, keyword) in MEASURES {
+                        let label = measure_name(measure);
                         // Strings can't be Scale.
                         if measure == Measure::Scale && var.var_type != VarType::Numeric {
                             continue;
@@ -195,7 +214,7 @@ pub(crate) fn variable_view(
             }
             // Typing a name in the blank last row adds a numeric variable.
             let next = ds.variables().len();
-            ui.label(egui::RichText::new("+").weak()).on_hover_text("Type a name to add a variable");
+            ui.label(egui::RichText::new("+").weak()).on_hover_text(tr!("vw-type-to-add-variable"));
             editable(ui, editing, edits, Target::Variable(next, Field::Name), egui::RichText::new(""), String::new, 110.0, H, false);
             ui.end_row();
         });
@@ -235,16 +254,16 @@ pub(crate) enum DialogOutcome {
 
 pub(crate) fn value_labels_dialog(ctx: &egui::Context, dialog: &mut ValueLabelsDialog, name: &str) -> DialogOutcome {
     let mut outcome = DialogOutcome::Open;
-    egui::Window::new(format!("Value Labels: {name}")).collapsible(false).resizable(false).show(ctx, |ui| {
+    egui::Window::new(tr!("vw-value-labels-title", name = name)).collapsible(false).resizable(false).show(ctx, |ui| {
         egui::Grid::new("value-labels").num_columns(3).show(ui, |ui| {
-            ui.strong("Value");
-            ui.strong("Label");
+            ui.strong(tr!("vw-value"));
+            ui.strong(tr!("vw-label"));
             ui.end_row();
             let mut remove = None;
             for (i, (value, label)) in dialog.rows.iter_mut().enumerate() {
-                ui.add(egui::TextEdit::singleline(value).desired_width(80.0).hint_text("value"));
-                ui.add(egui::TextEdit::singleline(label).desired_width(220.0).hint_text("label"));
-                if ui.small_button("remove").clicked() {
+                ui.add(egui::TextEdit::singleline(value).desired_width(80.0).hint_text(tr!("vw-value-hint")));
+                ui.add(egui::TextEdit::singleline(label).desired_width(220.0).hint_text(tr!("vw-label-hint")));
+                if ui.small_button(tr!("step-remove")).clicked() {
                     remove = Some(i);
                 }
                 ui.end_row();
@@ -253,7 +272,7 @@ pub(crate) fn value_labels_dialog(ctx: &egui::Context, dialog: &mut ValueLabelsD
                 dialog.rows.remove(i);
             }
         });
-        if ui.button("Add").clicked() {
+        if ui.button(tr!("vw-add")).clicked() {
             dialog.rows.push((String::new(), String::new()));
         }
         ui.separator();
@@ -261,7 +280,7 @@ pub(crate) fn value_labels_dialog(ctx: &egui::Context, dialog: &mut ValueLabelsD
             if ui.button("OK").clicked() {
                 outcome = DialogOutcome::Ok;
             }
-            if ui.button("Cancel").clicked() {
+            if ui.button(tr!("dlg-cancel")).clicked() {
                 outcome = DialogOutcome::Cancel;
             }
         });

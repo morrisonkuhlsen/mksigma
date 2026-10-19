@@ -3,6 +3,7 @@
 //! HTML export uses, so both look alike. Bars, bins, boxes and the value of a frequency table's
 //! row can be clicked to cross-filter the other items; the engine runs them again.
 
+use mksigma_i18n::tr;
 use std::collections::{HashMap, HashSet};
 
 use mksigma_engine::core::{Measure, Value, VarType};
@@ -56,7 +57,7 @@ pub enum ExportFormat {
 /// Right-click on an item: copy it as LaTeX, ready to paste into a document.
 fn copy_as_latex(response: &egui::Response, item: &Item, style: &Style) {
     response.context_menu(|ui| {
-        if ui.button("Copy as LaTeX").on_hover_text("booktabs tables, pgfplots charts").clicked() {
+        if ui.button(tr!("out-copy-latex")).on_hover_text(tr!("out-copy-latex-tip")).clicked() {
             ui.ctx().copy_text(mksigma_engine::output::latex::item_to_latex(item, style));
             ui.close();
         }
@@ -92,27 +93,27 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
     let tiles = session.dashboard();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 14.0;
-        if pane_tab(ui, !state.dashboard, crate::icons::Icon::Table, "Output", "Every result, in order") {
+        if pane_tab(ui, !state.dashboard, crate::icons::Icon::Table, &tr!("out-output"), &tr!("out-output-tip")) {
             state.dashboard = false;
         }
-        let tip = format!("The pinned tables and charts ({})", tiles.len());
-        if pane_tab(ui, state.dashboard, crate::icons::Icon::Grid, "Dashboard", &tip) {
+        let tip = tr!("out-dashboard-tip", n = tiles.len());
+        if pane_tab(ui, state.dashboard, crate::icons::Icon::Grid, &tr!("out-dashboard"), &tip) {
             state.dashboard = true;
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if state.dashboard {
                 if ui
-                    .add_enabled(!tiles.is_empty(), egui::Button::new("Export Dashboard").small())
-                    .on_hover_text("Save the dashboard as a web page")
+                    .add_enabled(!tiles.is_empty(), egui::Button::new(tr!("out-export-dashboard")).small())
+                    .on_hover_text(tr!("out-export-dashboard-tip"))
                     .clicked()
                 {
                     action = OutputAction::ExportDashboard;
                 }
-                let tip = "Save it as syntax that rebuilds it from the data: open the .sps to see it again";
-                if ui.add_enabled(!tiles.is_empty(), egui::Button::new("Save Dashboard").small()).on_hover_text(tip).clicked() {
+                let tip = tr!("out-save-dashboard-tip");
+                if ui.add_enabled(!tiles.is_empty(), egui::Button::new(tr!("out-save-dashboard")).small()).on_hover_text(tip).clicked() {
                     action = OutputAction::SaveDashboard;
                 }
-            } else if !output.items.is_empty() && ui.small_button("Clear").on_hover_text("Remove every item from the Output").clicked() {
+            } else if !output.items.is_empty() && ui.small_button(tr!("out-clear")).on_hover_text(tr!("clear-output-tip")).clicked() {
                 state.transposed.clear();
                 action = OutputAction::Clear;
             }
@@ -124,8 +125,8 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
     let selected = session.cross_filter();
     if let Some(category) = selected {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(format!("Filtered by {}", category.label)).color(ui.visuals().hyperlink_color));
-            if ui.small_button("Clear filter").on_hover_text("Show every item on all the cases").clicked() {
+            ui.label(egui::RichText::new(tr!("fact-filtered", filters = category.label.as_str())).color(ui.visuals().hyperlink_color));
+            if ui.small_button(tr!("out-clear-filter")).on_hover_text(tr!("out-clear-filter-tip")).clicked() {
                 action = OutputAction::ClearFilter;
             }
         });
@@ -142,7 +143,7 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
     };
     if state.dashboard {
         if tiles.is_empty() {
-            empty(ui, "The dashboard is empty", "Pin tables and charts from the Output with the pin beside each one.");
+            empty(ui, &tr!("out-dashboard-empty"), &tr!("out-dashboard-empty-sub"));
         }
         apply_style(ui, &session.output.style);
         egui::ScrollArea::both().id_salt("dashboard").auto_shrink([false, false]).show(ui, |ui| {
@@ -153,7 +154,7 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
         return action;
     }
     if output.items.is_empty() {
-        empty(ui, "No output yet", "Pick a procedure on the Analyze or Graphs tab, or run syntax.");
+        empty(ui, &tr!("out-empty"), &tr!("out-empty-sub"));
     }
     apply_style(ui, &session.output.style);
     egui::ScrollArea::both().id_salt("output").stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
@@ -207,17 +208,17 @@ fn card(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, tiles: &[
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("Unpin").on_hover_text("Take it off the dashboard").clicked() {
+                if ui.small_button(tr!("out-unpin")).on_hover_text(tr!("out-unpin-tip")).clicked() {
                     action = Some(OutputAction::Pin(i));
                 }
-                let (label, tip) = if wide { ("Narrow", "Half a row") } else { ("Wide", "A whole row") };
+                let (label, tip) = if wide { (tr!("out-narrow"), tr!("out-narrow-tip")) } else { (tr!("out-wide"), tr!("out-wide-tip")) };
                 if ui.small_button(label).on_hover_text(tip).clicked() {
                     action = Some(OutputAction::Wide(i, !wide));
                 }
-                if ui.add_enabled(k + 1 < tiles.len(), egui::Button::new(">").small()).on_hover_text("Move later").clicked() {
+                if ui.add_enabled(k + 1 < tiles.len(), egui::Button::new(">").small()).on_hover_text(tr!("out-move-later")).clicked() {
                     action = Some(OutputAction::MoveTile(k, false));
                 }
-                if ui.add_enabled(k > 0, egui::Button::new("<").small()).on_hover_text("Move earlier").clicked() {
+                if ui.add_enabled(k > 0, egui::Button::new("<").small()).on_hover_text(tr!("out-move-earlier")).clicked() {
                     action = Some(OutputAction::MoveTile(k, true));
                 }
             });
@@ -232,9 +233,9 @@ fn card(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, tiles: &[
 /// The pin beside an item: filled when it is on the dashboard.
 fn pin_button(ui: &mut egui::Ui, pinned: bool) -> bool {
     let t = crate::theme::Tokens::get(ui.ctx());
-    let name = if pinned { "Unpin from the dashboard" } else { "Pin to the dashboard" };
+    let name = if pinned { tr!("out-unpin-from") } else { tr!("out-pin-to") };
     let (rect, response) = ui.allocate_exact_size(egui::vec2(22.0, 20.0), egui::Sense::click());
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, pinned, name));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, pinned, &name));
     if pinned {
         ui.painter().rect_filled(rect, 4.0, t.accent_soft);
     } else if response.hovered() {
@@ -318,11 +319,11 @@ fn slicers(ui: &mut egui::Ui, session: &Session, state: &mut OutputState) -> Opt
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         crate::icons::show(ui, crate::icons::Icon::Filter, 14.0);
-        ui.label(egui::RichText::new("Slicers").color(t.text_dim));
+        ui.label(egui::RichText::new(tr!("out-slicers")).color(t.text_dim));
         let names: Vec<String> = session.slicers().iter().map(|s| s.variable.clone()).chain(state.pending.iter().cloned()).collect();
         for name in names {
             let current = session.slicers().iter().find(|s| s.variable == name);
-            let text = current.map_or_else(|| format!("{name}: all"), |s| s.describe(ds));
+            let text = current.map_or_else(|| tr!("out-slicer-all", name = name.as_str()), |s| s.describe(ds));
             let chip = ui.add(
                 egui::Button::new(egui::RichText::new(text).color(if current.is_some() { t.accent } else { t.text_dim })).selected(current.is_some()),
             );
@@ -332,7 +333,7 @@ fn slicers(ui: &mut egui::Ui, session: &Session, state: &mut OutputState) -> Opt
                 }
             });
         }
-        let add = ui.small_button("+ Slicer").on_hover_text("Show only some cases in every item");
+        let add = ui.small_button(tr!("out-add-slicer")).on_hover_text(tr!("out-add-slicer-tip"));
         egui::Popup::menu(&add).show(|ui| {
             egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                 for var in ds.variables() {
@@ -383,7 +384,7 @@ fn slicer_editor(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, 
             }
         });
         if values.len() > SHOWN {
-            ui.label(egui::RichText::new(format!("The first {SHOWN} values")).small());
+            ui.label(egui::RichText::new(tr!("out-first-values", n = SHOWN)).small());
         }
     } else if let Some((lo, hi)) = session.range_of(name) {
         let start = match current.map(|s| &s.selection) {
@@ -393,18 +394,18 @@ fn slicer_editor(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, 
         let range = state.ranges.entry(name.to_string()).or_insert(start);
         let speed = ((hi - lo) / 200.0).max(0.01);
         ui.horizontal(|ui| {
-            ui.label("From");
+            ui.label(tr!("out-from"));
             ui.add(egui::DragValue::new(&mut range.0).speed(speed));
-            ui.label("to");
+            ui.label(tr!("out-to"));
             ui.add(egui::DragValue::new(&mut range.1).speed(speed));
         });
-        if ui.button("Apply").clicked() {
+        if ui.button(tr!("out-apply")).clicked() {
             let (a, b) = *range;
             syntax = Some(Slicer { variable: name.to_string(), selection: Selection::Range { low: Some(a.min(b)), high: Some(a.max(b)) } }.syntax());
         }
     }
     ui.separator();
-    if ui.button("Remove slicer").clicked() {
+    if ui.button(tr!("out-remove-slicer")).clicked() {
         state.ranges.remove(name);
         if current.is_some() {
             syntax = Some(format!("SLICE {name} OFF."));
@@ -441,9 +442,9 @@ fn table(
     ui.horizontal(|ui| {
         let title = ui.add(egui::Label::new(egui::RichText::new(&t.title).strong()).sense(egui::Sense::click()));
         copy_as_latex(&title, &Item::Table(t.clone()), style);
-        click.pivot = ui.small_button("pivot").on_hover_text("Swap rows and columns").clicked();
+        click.pivot = ui.small_button(tr!("out-pivot")).on_hover_text(tr!("out-pivot-tip")).clicked();
         if explain {
-            click.explain = ui.small_button("Σ").on_hover_text("The calculation by hand, step by step").clicked();
+            click.explain = ui.small_button("Σ").on_hover_text(tr!("out-sigma-tip")).clicked();
         }
         if let Some(pinned) = pin {
             click.pin = pin_button(ui, pinned);
@@ -462,7 +463,7 @@ fn table(
             return;
         };
         let on = selected == Some(category);
-        if ui.selectable_label(on, text).on_hover_text(format!("Filter the other items by {}", category.label)).clicked() {
+        if ui.selectable_label(on, text).on_hover_text(tr!("out-filter-by", category = category.label.as_str())).clicked() {
             click.select = Some(category.clone());
         }
     };
@@ -523,7 +524,7 @@ fn draw_chart(ui: &mut egui::Ui, c: &Chart, selected: Option<&Category>, style: 
     let clicked = if response.clicked() { response.interact_pointer_pos().and_then(part_at) } else { None };
     if let Some(category) = hovered.and_then(|p| c.category(p)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        response.on_hover_text(format!("Filter the other items by {}", category.label));
+        response.on_hover_text(tr!("out-filter-by", category = category.label.as_str()));
     }
     let dim = selected.filter(|s| (0..).map_while(|p| c.category(p)).any(|k| k == *s));
 

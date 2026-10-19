@@ -1029,7 +1029,7 @@ impl SigmaApp {
         let mut paste = false;
         let steps = self.session.steps();
         let count = steps.len();
-        egui::CollapsingHeader::new(format!("Applied steps ({count})")).id_salt("steps").default_open(true).show(ui, |ui| {
+        egui::CollapsingHeader::new(tr!("steps-title", n = count)).id_salt("steps").default_open(true).show(ui, |ui| {
             if steps.iter().any(|s| s.enabled && s.syntax().is_some()) && ui.small_button(tr!("steps-paste")).clicked() {
                 paste = true;
             }

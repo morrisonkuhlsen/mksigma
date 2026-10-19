@@ -6,6 +6,7 @@
 use mksigma_engine::Session;
 use mksigma_engine::core::{Measure, Value, VarType, Variable};
 use mksigma_engine::quote;
+use mksigma_i18n::tr;
 
 use crate::icons::{self, Icon};
 use crate::theme::Tokens;
@@ -30,23 +31,30 @@ pub enum Kind {
     Boxplot,
 }
 
+/// A slot's or an option's name, which is also its id, in the interface's language.
+fn shown(name: &str) -> String {
+    let id: String = name.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let id = id.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+    mksigma_i18n::message(&format!("dlg-{id}"), &[])
+}
+
 impl Kind {
-    fn title(self) -> &'static str {
+    fn title(self) -> String {
         match self {
-            Kind::Descriptives => "Descriptives",
-            Kind::Frequencies => "Frequencies",
-            Kind::Crosstabs => "Crosstabs",
-            Kind::TTest => "Independent-Samples T-Test",
-            Kind::Oneway => "One-Way ANOVA",
-            Kind::Correlations => "Bivariate Correlations",
-            Kind::Regression => "Linear Regression",
-            Kind::Logistic => "Binary Logistic Regression",
-            Kind::Nonparametric => "Nonparametric Tests",
-            Kind::Explore => "Explore",
-            Kind::Histogram => "Histogram",
-            Kind::Bar => "Bar Chart",
-            Kind::Scatter => "Scatterplot",
-            Kind::Boxplot => "Boxplot",
+            Kind::Descriptives => tr!("dlg-title-descriptives"),
+            Kind::Frequencies => tr!("dlg-title-frequencies"),
+            Kind::Crosstabs => tr!("dlg-title-crosstabs"),
+            Kind::TTest => tr!("dlg-title-ttest"),
+            Kind::Oneway => tr!("dlg-title-oneway"),
+            Kind::Correlations => tr!("dlg-title-correlations"),
+            Kind::Regression => tr!("dlg-title-regression"),
+            Kind::Logistic => tr!("dlg-title-logistic"),
+            Kind::Nonparametric => tr!("dlg-title-nonparametric"),
+            Kind::Explore => tr!("dlg-title-explore"),
+            Kind::Histogram => tr!("dlg-title-histogram"),
+            Kind::Bar => tr!("dlg-title-bar"),
+            Kind::Scatter => tr!("dlg-title-scatter"),
+            Kind::Boxplot => tr!("dlg-title-boxplot"),
         }
     }
 
@@ -233,13 +241,13 @@ impl Dialog {
         let need = |k: usize| {
             let s = self.slots.get(k);
             if s.is_some_and(|s| s.vars.is_empty() && !s.optional) {
-                Err(format!("Put a variable in {}.", s.map_or("", |s| s.name)))
+                Err(tr!("dlg-err-put-variable", slot = shown(s.map_or("", |s| s.name))))
             } else {
                 Ok(list(k))
             }
         };
         let title = if self.title.trim().is_empty() { String::new() } else { format!(" /TITLE={}", quote(self.title.trim())) };
-        let number = |x: &str, what: &str| x.trim().parse::<f64>().map(|n| n.to_string()).map_err(|_| format!("{what} must be a number."));
+        let number = |x: &str, what: &str| x.trim().parse::<f64>().map(|n| n.to_string()).map_err(|_| tr!("dlg-err-number", what = shown(what)));
         let ci = if (self.confidence - 95.0).abs() < 1e-9 { String::new() } else { format!(" /CRITERIA=CI({})", self.confidence / 100.0) };
         Ok(match self.kind {
             Kind::Descriptives => format!("DESCRIPTIVES VARIABLES={}.", need(0)?),
@@ -290,7 +298,7 @@ impl Dialog {
                 let (tests, group) = (need(0)?, need(1)?);
                 let (a, b) = (self.groups.0.trim(), self.groups.1.trim());
                 if a.is_empty() || b.is_empty() {
-                    return Err("Define the two groups.".into());
+                    return Err(tr!("dlg-err-groups"));
                 }
                 // A string grouping variable takes quoted values.
                 let string = session.dataset.variable(&group).is_some_and(|(_, v)| v.var_type != VarType::Numeric);
@@ -298,7 +306,7 @@ impl Dialog {
                     if string {
                         Ok(quote(x))
                     } else {
-                        x.parse::<f64>().map(|n| n.to_string()).map_err(|_| format!("{x} is not a number, and {group} is numeric."))
+                        x.parse::<f64>().map(|n| n.to_string()).map_err(|_| tr!("dlg-err-not-number", value = x, group = group.as_str()))
                     }
                 };
                 format!("T-TEST GROUPS={group}({} {}) /VARIABLES={tests}{ci}.", value(a)?, value(b)?)
@@ -324,7 +332,7 @@ impl Dialog {
             Kind::Correlations => {
                 let vars = need(0)?;
                 if self.slots.first().is_some_and(|s| s.vars.len() < 2) {
-                    return Err("Put two variables or more in Variables.".into());
+                    return Err(tr!("dlg-err-two-variables"));
                 }
                 let tails = if self.check("One-tailed") { "ONETAIL" } else { "TWOTAIL" };
                 let flag = if self.check("Flag significant") { " NOSIG" } else { "" };
@@ -355,7 +363,7 @@ impl Dialog {
                 let (descriptives, boxplots) =
                     if self.kind == Kind::Boxplot { (false, true) } else { (self.check("Descriptives"), self.check("Boxplots")) };
                 if !descriptives && !boxplots {
-                    return Err("Show descriptives, boxplots or both.".into());
+                    return Err(tr!("dlg-err-explore"));
                 }
                 let plot = if boxplots { "BOXPLOT" } else { "NONE" };
                 let stats = if descriptives { "DESCRIPTIVES" } else { "NONE" };
@@ -424,7 +432,7 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
             ui.horizontal_top(|ui| {
                 // The file's variables, those not in a slot.
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("Variables").color(t.text_dim));
+                    ui.label(egui::RichText::new(shown("Variables")).color(t.text_dim));
                     egui::Frame::new()
                         .fill(t.input_bg)
                         .stroke(egui::Stroke::new(1.0, t.border))
@@ -467,8 +475,11 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                             ui.vertical(|ui| {
                                 ui.add_space(22.0);
                                 let back = dialog.picked_in.as_ref().is_some_and(|(s, _)| *s == k);
-                                let (label, tip) =
-                                    if back { ("<", format!("Take it out of {}", slot.name)) } else { (">", format!("Put it in {}", slot.name)) };
+                                let (label, tip) = if back {
+                                    ("<", tr!("dlg-take-out", slot = shown(slot.name)))
+                                } else {
+                                    (">", tr!("dlg-put-in", slot = shown(slot.name)))
+                                };
                                 let button = egui::Button::new(label).min_size(egui::vec2(28.0, 24.0));
                                 if ui.add(button).on_hover_text(tip).clicked() {
                                     if let Some((s, name)) = dialog.picked_in.take().filter(|(s, _)| *s == k) {
@@ -479,7 +490,7 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                                 }
                             });
                             ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(slot.name).color(t.text_dim));
+                                ui.label(egui::RichText::new(shown(slot.name)).color(t.text_dim));
                                 let height = if slot.single { 26.0 } else { 90.0 };
                                 egui::Frame::new()
                                     .fill(t.input_bg)
@@ -509,8 +520,8 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                     if dialog.kind == Kind::Nonparametric {
                         ui.horizontal(|ui| {
                             let before = dialog.kruskal;
-                            ui.radio_value(&mut dialog.kruskal, false, "Mann-Whitney U (two groups)");
-                            ui.radio_value(&mut dialog.kruskal, true, "Kruskal-Wallis H (a range)");
+                            ui.radio_value(&mut dialog.kruskal, false, tr!("dlg-mann-whitney"));
+                            ui.radio_value(&mut dialog.kruskal, true, tr!("dlg-kruskal-wallis"));
                             if dialog.kruskal != before {
                                 dialog.fill_groups(session);
                             }
@@ -520,16 +531,16 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                         let names =
                             if dialog.kruskal && dialog.kind == Kind::Nonparametric { ("Minimum", "Maximum") } else { ("Group 1", "Group 2") };
                         ui.horizontal(|ui| {
-                            ui.label(names.0);
+                            ui.label(shown(names.0));
                             ui.add(egui::TextEdit::singleline(&mut dialog.groups.0).desired_width(60.0));
-                            ui.label(names.1);
+                            ui.label(shown(names.1));
                             ui.add(egui::TextEdit::singleline(&mut dialog.groups.1).desired_width(60.0));
                         });
                     }
                     if dialog.kind.is_chart() {
                         ui.horizontal(|ui| {
-                            ui.label("Title");
-                            ui.add(egui::TextEdit::singleline(&mut dialog.title).hint_text("the usual one").desired_width(180.0));
+                            ui.label(tr!("dlg-title"));
+                            ui.add(egui::TextEdit::singleline(&mut dialog.title).hint_text(tr!("dlg-title-hint")).desired_width(180.0));
                         });
                     }
                 });
@@ -539,10 +550,10 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
                     for (name, on) in &mut dialog.checks {
-                        ui.checkbox(on, *name);
+                        ui.checkbox(on, shown(name));
                     }
                     if dialog.kind == Kind::TTest {
-                        ui.label("Confidence interval");
+                        ui.label(tr!("dlg-confidence"));
                         ui.add(egui::DragValue::new(&mut dialog.confidence).range(50.0..=99.9).speed(0.5).suffix(" %"));
                     }
                 });
@@ -555,12 +566,12 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                     error = Some(e.clone());
                 }
                 ui.add_enabled_ui(built.is_ok(), |ui| {
-                    let ok = egui::Button::new(egui::RichText::new("OK").color(egui::Color32::WHITE)).fill(t.accent).min_size(egui::vec2(64.0, 26.0));
+                    let ok = egui::Button::new(egui::RichText::new(tr!("dlg-ok")).color(egui::Color32::WHITE))
+                        .fill(t.accent)
+                        .min_size(egui::vec2(64.0, 26.0));
                     let run = ui.add(ok).clicked();
-                    let paste = ui
-                        .add(egui::Button::new("Paste").min_size(egui::vec2(64.0, 26.0)))
-                        .on_hover_text("Put the command in the syntax editor")
-                        .clicked();
+                    let paste =
+                        ui.add(egui::Button::new(tr!("dlg-paste")).min_size(egui::vec2(64.0, 26.0))).on_hover_text(tr!("dlg-paste-tip")).clicked();
                     if let Ok(s) = &built {
                         if run {
                             outcome = Outcome::Run(s.clone());
@@ -569,10 +580,10 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                         }
                     }
                 });
-                if ui.button("Reset").clicked() {
+                if ui.button(tr!("dlg-reset")).clicked() {
                     *dialog = Dialog::new(dialog.kind);
                 }
-                if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                if ui.button(tr!("dlg-cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     outcome = Outcome::Cancel;
                 }
                 if let Some(e) = &error {
@@ -586,6 +597,39 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_slot_and_option_has_its_name_in_every_language() {
+        let kinds = [
+            Kind::Descriptives,
+            Kind::Frequencies,
+            Kind::Crosstabs,
+            Kind::TTest,
+            Kind::Oneway,
+            Kind::Correlations,
+            Kind::Regression,
+            Kind::Logistic,
+            Kind::Nonparametric,
+            Kind::Explore,
+            Kind::Histogram,
+            Kind::Bar,
+            Kind::Scatter,
+            Kind::Boxplot,
+        ];
+        let mut names: Vec<&str> = vec!["Variables", "Group 1", "Group 2", "Minimum", "Maximum", "The minimum", "The maximum"];
+        for kind in kinds {
+            let d = Dialog::new(kind);
+            names.extend(d.slots.iter().map(|s| s.name));
+            names.extend(d.checks.iter().map(|(n, _)| *n));
+        }
+        for lang in mksigma_i18n::Lang::ALL {
+            mksigma_i18n::set(lang);
+            for name in &names {
+                assert!(!shown(name).starts_with("dlg-"), "{name} in {}", lang.code());
+            }
+        }
+        mksigma_i18n::set(mksigma_i18n::Lang::En);
+    }
 
     fn session() -> Session {
         let mut s = Session::with_sample().unwrap();
