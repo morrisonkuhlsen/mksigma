@@ -15,6 +15,7 @@ pub mod logo;
 mod output;
 mod procedure;
 mod ribbon;
+mod splash;
 mod suggest;
 mod theme;
 mod views;
@@ -115,6 +116,8 @@ pub struct SigmaApp {
     services: Services,
     title: String,
     themed: bool,
+    /// The splash screen, while it shows.
+    splash: Option<splash::Splash>,
 }
 
 impl Default for SigmaApp {
@@ -154,7 +157,18 @@ impl SigmaApp {
             services,
             title: String::new(),
             themed: false,
+            splash: None,
         }
+    }
+
+    /// Shows the splash screen until it fades out, or a click or a key closes it.
+    pub fn show_splash(&mut self) {
+        self.splash = Some(splash::Splash::default());
+    }
+
+    /// Whether the splash screen is showing.
+    pub fn splash_showing(&self) -> bool {
+        self.splash.is_some()
     }
 
     /// Opens a system file from disk.
@@ -583,6 +597,13 @@ impl SigmaApp {
         if !self.themed {
             theme::apply(ui.ctx());
             self.themed = true;
+        }
+        // Keys that close the splash don't reach the app under it.
+        let splash = self.splash.as_mut().is_some_and(|s| s.show(ui.ctx()));
+        if splash {
+            ui.ctx().input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { .. } | egui::Event::Text(_))));
+        } else {
+            self.splash = None;
         }
         self.handle_input(ui.ctx());
         let title = format!("{}{} — MK Sigma", if self.session.modified { "• " } else { "" }, self.file_name.as_deref().unwrap_or("Untitled"));

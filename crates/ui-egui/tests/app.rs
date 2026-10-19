@@ -855,3 +855,26 @@ fn the_file_backstage() {
     h.run_steps(3);
     assert_eq!(h.state().backstage, None, "Esc goes back");
 }
+
+#[test]
+fn the_splash_fades_by_itself_or_on_a_click() {
+    // Steps of a quarter second: gone within its two seconds.
+    let mut app = SigmaApp::new(Services::default());
+    app.show_splash();
+    let mut h = Harness::builder().with_size(egui::vec2(1280.0, 800.0)).build_ui_state(|ui, app: &mut SigmaApp| app.ui(ui), app);
+    h.run_steps(2);
+    assert!(h.state().splash_showing());
+    h.run_steps(8);
+    assert!(!h.state().splash_showing());
+
+    // A click closes it sooner, and doesn't reach the app under it.
+    let mut app = SigmaApp::new(Services::default());
+    app.show_splash();
+    let mut h =
+        Harness::builder().with_size(egui::vec2(1280.0, 800.0)).with_step_dt(1.0 / 60.0).build_ui_state(|ui, app: &mut SigmaApp| app.ui(ui), app);
+    h.run_steps(2);
+    h.get_by_label("Analyze").click();
+    h.run_steps(40);
+    assert!(!h.state().splash_showing());
+    assert_eq!(h.state().tab, mksigma_ui_egui::Tab::default(), "the click went to the splash");
+}

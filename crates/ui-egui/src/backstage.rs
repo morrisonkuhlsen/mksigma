@@ -61,9 +61,9 @@ pub(crate) struct View<'a> {
 
 const COLUMN: f32 = 248.0;
 /// Morrison Kühlsen's ink and the colours on it, the same in both themes.
-const INK: egui::Color32 = egui::Color32::from_rgb(0x14, 0x16, 0x1C);
-const ON_INK: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
-const ON_INK_SOFT: egui::Color32 = egui::Color32::from_rgba_premultiplied(184, 184, 184, 184);
+pub(crate) const INK: egui::Color32 = egui::Color32::from_rgb(0x14, 0x16, 0x1C);
+pub(crate) const ON_INK: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
+pub(crate) const ON_INK_SOFT: egui::Color32 = egui::Color32::from_rgba_premultiplied(184, 184, 184, 184);
 const BRAND: egui::Color32 = egui::Color32::from_rgb(0x25, 0x40, 0xD8);
 
 /// The theme's tokens drawing in white, for icons on the ink column.

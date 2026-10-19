@@ -2,7 +2,7 @@
 //! touching the screen.
 //!
 //! `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav] [--variables] [--labels]
-//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--tab NAME] [--backstage] [--dialog KIND [--dialog-vars 'SLOT:VAR...']]
+//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--tab NAME] [--splash] [--backstage] [--dialog KIND [--dialog-vars 'SLOT:VAR...']]
 //!  [--size 1280x800] out.png` (`--disable` switches off applied step N, counting from 1, after
 //!  `--run`; `--select` cross-filters by category PART of Output item ITEM, both counting from 1:
 //!  a bar, bin or box, or a table row; `--pin` pins Output item ITEM to the dashboard and
@@ -52,6 +52,7 @@ fn main() -> Result<(), String> {
             }
             "--dashboard" => app.output_state.dashboard = true,
             "--no-ribbon" => app.ribbon_collapsed = true,
+            "--splash" => app.show_splash(),
             "--backstage" => app.backstage = Some(mksigma_ui_egui::BackstagePage::Home),
             "--dialog" => {
                 i += 1;
@@ -131,6 +132,8 @@ fn main() -> Result<(), String> {
     let mut harness = egui_kittest::Harness::builder()
         .with_size(egui::vec2(size.0, size.1))
         .with_pixels_per_point(1.0)
+        // The splash fades out in two seconds: catch it at its start.
+        .with_step_dt(if app.splash_showing() { 1.0 / 60.0 } else { 1.0 / 4.0 })
         .wgpu()
         .build_ui_state(|ui, app: &mut SigmaApp| app.ui(ui), app);
     harness.run_steps(6);

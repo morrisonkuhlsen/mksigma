@@ -76,6 +76,7 @@ fn main() -> eframe::Result {
         })),
     };
     let mut app = SigmaApp::new(services);
+    app.show_splash();
     if let Some(path) = std::env::args_os().nth(1) {
         app.open_path(std::path::Path::new(&path));
     }
