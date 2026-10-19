@@ -857,26 +857,33 @@ fn the_file_backstage() {
 }
 
 #[test]
-fn the_splash_fades_by_itself_or_on_a_click() {
-    // Steps of a quarter second: gone within its two seconds.
-    let mut app = SigmaApp::new(Services::default());
-    app.show_splash();
-    let mut h = Harness::builder().with_size(egui::vec2(1280.0, 800.0)).build_ui_state(|ui, app: &mut SigmaApp| app.ui(ui), app);
+fn the_splash_closes_by_itself_or_on_a_click() {
+    use mksigma_ui_egui::splash::{SIZE, SplashScreen};
+    let size = egui::vec2(SIZE[0], SIZE[1]);
+    // Steps of a quarter second: closed within its two seconds.
+    let mut h = Harness::builder().with_size(size).build_ui_state(|ui, s: &mut SplashScreen| s.ui(ui), SplashScreen::default());
     h.run_steps(2);
-    assert!(h.state().splash_showing());
+    assert!(!h.state().closed());
     h.run_steps(8);
-    assert!(!h.state().splash_showing());
-
-    // A click closes it sooner, and doesn't reach the app under it.
-    let mut app = SigmaApp::new(Services::default());
-    app.show_splash();
+    assert!(h.state().closed());
+    // A click closes it sooner.
     let mut h =
-        Harness::builder().with_size(egui::vec2(1280.0, 800.0)).with_step_dt(1.0 / 60.0).build_ui_state(|ui, app: &mut SigmaApp| app.ui(ui), app);
+        Harness::builder().with_size(size).with_step_dt(1.0 / 60.0).build_ui_state(|ui, s: &mut SplashScreen| s.ui(ui), SplashScreen::default());
     h.run_steps(2);
-    h.get_by_label("Analyze").click();
-    h.run_steps(40);
-    assert!(!h.state().splash_showing());
-    assert_eq!(h.state().tab, mksigma_ui_egui::Tab::default(), "the click went to the splash");
+    assert!(!h.state().closed());
+    let at = egui::pos2(200.0, 200.0);
+    h.event(egui::Event::PointerMoved(at));
+    let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    h.event(button(true));
+    h.event(button(false));
+    h.run_steps(2);
+    assert!(h.state().closed());
+    // And so does Esc.
+    let mut h =
+        Harness::builder().with_size(size).with_step_dt(1.0 / 60.0).build_ui_state(|ui, s: &mut SplashScreen| s.ui(ui), SplashScreen::default());
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert!(h.state().closed());
 }
 
 #[test]

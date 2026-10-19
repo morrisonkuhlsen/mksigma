@@ -6,7 +6,8 @@
 //!  [--size 1280x800] out.png` (`--disable` switches off applied step N, counting from 1, after
 //!  `--run`; `--select` cross-filters by category PART of Output item ITEM, both counting from 1:
 //!  a bar, bin or box, or a table row; `--pin` pins Output item ITEM to the dashboard and
-//!  `--dashboard` shows it; `--explain` opens the Σ window of Output item ITEM)
+//!  `--dashboard` shows it; `--explain` opens the Σ window of Output item ITEM; `--splash`
+//!  renders the splash screen's window instead)
 
 use mksigma_engine::output::Item;
 use mksigma_ui_egui::{SigmaApp, View};
@@ -23,6 +24,7 @@ fn main() -> Result<(), String> {
     let mut dialog = None;
     let mut dialog_vars = String::new();
     let mut explain = None;
+    let mut splash = false;
     let mut every_term = false;
     let mut i = 0;
     while let Some(arg) = args.get(i) {
@@ -54,7 +56,7 @@ fn main() -> Result<(), String> {
             }
             "--dashboard" => app.output_state.dashboard = true,
             "--no-ribbon" => app.ribbon_collapsed = true,
-            "--splash" => app.show_splash(),
+            "--splash" => splash = true,
             "--explain" => {
                 i += 1;
                 explain =
@@ -142,11 +144,24 @@ fn main() -> Result<(), String> {
         view.full = every_term;
         app.explain = Some(view);
     }
+    if splash {
+        let [w, h] = mksigma_ui_egui::splash::SIZE;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(w, h))
+            .with_pixels_per_point(1.0)
+            // A bar half full.
+            .with_step_dt(1.0 / 6.0)
+            .wgpu()
+            .build_ui_state(|ui, s: &mut mksigma_ui_egui::splash::SplashScreen| s.ui(ui), Default::default());
+        harness.run_steps(6);
+        let image = harness.render().map_err(|e| e.to_string())?;
+        image.save(&out).map_err(|e| e.to_string())?;
+        println!("{out}");
+        return Ok(());
+    }
     let mut harness = egui_kittest::Harness::builder()
         .with_size(egui::vec2(size.0, size.1))
         .with_pixels_per_point(1.0)
-        // The splash fades out in two seconds: catch it at its start.
-        .with_step_dt(if app.splash_showing() { 1.0 / 60.0 } else { 1.0 / 4.0 })
         .wgpu()
         .build_ui_state(|ui, app: &mut SigmaApp| app.ui(ui), app);
     harness.run_steps(6);

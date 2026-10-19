@@ -7,6 +7,31 @@ use mksigma_ui_egui::{Services, SigmaApp};
 
 struct App(SigmaApp);
 
+struct Splash(mksigma_ui_egui::splash::SplashScreen);
+
+impl eframe::App for Splash {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.0.ui(ui);
+    }
+}
+
+/// The splash screen in a small window of its own, centred and undecorated, until it closes.
+fn splash() -> eframe::Result {
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("MK Sigma")
+        .with_app_id("mksigma")
+        .with_inner_size(mksigma_ui_egui::splash::SIZE)
+        .with_decorations(false)
+        .with_resizable(false)
+        .with_taskbar(false);
+    let viewport = match mksigma_ui_egui::logo::icon() {
+        Some(icon) => viewport.with_icon(icon),
+        None => viewport,
+    };
+    let options = eframe::NativeOptions { viewport, centered: true, ..Default::default() };
+    eframe::run_native("MK Sigma splash", options, Box::new(|_cc| Ok(Box::new(Splash(Default::default())))))
+}
+
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.0.ui(ui);
@@ -35,6 +60,8 @@ fn recent_file() -> Option<std::path::PathBuf> {
 }
 
 fn main() -> eframe::Result {
+    // Without its splash the program still starts.
+    let _ = splash();
     let services = Services {
         pick_open: Some(Box::new(|| {
             rfd::FileDialog::new()
@@ -76,7 +103,6 @@ fn main() -> eframe::Result {
         })),
     };
     let mut app = SigmaApp::new(services);
-    app.show_splash();
     if let Some(path) = std::env::args_os().nth(1) {
         app.open_path(std::path::Path::new(&path));
     }
@@ -90,6 +116,6 @@ fn main() -> eframe::Result {
         Some(icon) => viewport.with_icon(icon),
         None => viewport,
     };
-    let options = eframe::NativeOptions { viewport, ..Default::default() };
+    let options = eframe::NativeOptions { viewport, centered: true, ..Default::default() };
     eframe::run_native("MK Sigma", options, Box::new(|_cc| Ok(Box::new(App(app)))))
 }
