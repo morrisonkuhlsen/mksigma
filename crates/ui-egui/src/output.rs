@@ -41,6 +41,8 @@ pub(crate) enum OutputAction {
     SaveDashboard,
     /// Make a tile take a whole row (`true`) or half of one.
     Wide(usize, bool),
+    /// Open the calculation behind an item, by hand.
+    Explain(usize),
 }
 
 /// What the Output is exported as.
@@ -250,7 +252,7 @@ fn show_item(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, i: u
     match item {
         Item::Table(t) => {
             let flipped = state.transposed.contains(&i);
-            let clicked = table(ui, i, t, flipped, shown, pin, &session.output.style);
+            let clicked = table(ui, i, t, flipped, shown, pin, session.can_explain(i), &session.output.style);
             if clicked.pivot {
                 if flipped {
                     state.transposed.remove(&i);
@@ -260,6 +262,9 @@ fn show_item(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, i: u
             }
             if clicked.pin {
                 action = Some(OutputAction::Pin(i));
+            }
+            if clicked.explain {
+                action = Some(OutputAction::Explain(i));
             }
             if let Some(category) = clicked.select {
                 action = Some(OutputAction::Select(i, category));
@@ -415,18 +420,31 @@ fn slicer_editor(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, 
 struct TableClick {
     pivot: bool,
     pin: bool,
+    explain: bool,
     select: Option<Category>,
 }
 
 /// Shows a table, transposed when `flipped`. A row that stands for a category can be selected
 /// at its first text cell (the value of a frequency table's row), or at its label if it has none.
 #[allow(clippy::too_many_arguments)]
-fn table(ui: &mut egui::Ui, index: usize, t: &Table, flipped: bool, selected: Option<&Category>, pin: Option<bool>, style: &Style) -> TableClick {
-    let mut click = TableClick { pivot: false, pin: false, select: None };
+fn table(
+    ui: &mut egui::Ui,
+    index: usize,
+    t: &Table,
+    flipped: bool,
+    selected: Option<&Category>,
+    pin: Option<bool>,
+    explain: bool,
+    style: &Style,
+) -> TableClick {
+    let mut click = TableClick { pivot: false, pin: false, explain: false, select: None };
     ui.horizontal(|ui| {
         let title = ui.add(egui::Label::new(egui::RichText::new(&t.title).strong()).sense(egui::Sense::click()));
         copy_as_latex(&title, &Item::Table(t.clone()), style);
         click.pivot = ui.small_button("pivot").on_hover_text("Swap rows and columns").clicked();
+        if explain {
+            click.explain = ui.small_button("Σ").on_hover_text("The calculation by hand, step by step").clicked();
+        }
         if let Some(pinned) = pin {
             click.pin = pin_button(ui, pinned);
         }

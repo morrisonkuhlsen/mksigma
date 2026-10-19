@@ -115,6 +115,14 @@ fn latex_text(s: &str) -> String {
             }
             '~' => out.push_str("\\textasciitilde{}"),
             '^' => out.push_str("\\textasciicircum{}"),
+            // Symbols pdflatex has no text glyph for, set as mathematics.
+            '−' => out.push_str("$-$"),
+            '≈' => out.push_str("$\\approx$"),
+            '·' => out.push_str("$\\cdot$"),
+            '×' => out.push_str("$\\times$"),
+            '≤' => out.push_str("$\\le$"),
+            '≥' => out.push_str("$\\ge$"),
+            '…' | '⋯' => out.push_str("\\ldots{}"),
             c => out.push(c),
         }
     }
@@ -219,9 +227,9 @@ mod tests {
         assert_eq!(row(vec![var("score"), text("≈"), text("Test & score")]).to_latex(), "\\mathit{score} \\approx \\text{Test \\& score}");
         let e = Explanation {
             title: "Descriptive Statistics".into(),
-            sections: vec![("age".into(), vec![Step { text: "50% of it".into(), math: Some(var("n")) }])],
+            sections: vec![("age".into(), vec![Step { text: "50% of it, by N − 1".into(), math: Some(var("n")) }])],
         };
         let tex = e.to_latex();
-        assert!(tex.contains("\\subsection*{age}") && tex.contains("50\\% of it") && tex.contains("\\begin{dmath*}\nn\n\\end{dmath*}"));
+        assert!(tex.contains("\\subsection*{age}") && tex.contains("50\\% of it, by N $-$ 1") && tex.contains("\\begin{dmath*}\nn\n\\end{dmath*}"));
     }
 }

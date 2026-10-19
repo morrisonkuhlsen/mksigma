@@ -639,6 +639,11 @@ impl Session {
         (sliced, crossed)
     }
 
+    /// Counts the changes to the data: what is computed from it is current while this stays.
+    pub fn data_version(&self) -> u64 {
+        self.version
+    }
+
     /// Whether Output item `item` has its calculation by hand (the Σ beside it).
     pub fn can_explain(&self, item: usize) -> bool {
         self.explained(item).is_some()
@@ -662,8 +667,12 @@ impl Session {
         use mksigma_stats::explain;
         let (run, title) = self.explained(item).ok_or_else(|| EngineError::Invalid("this item has no calculation by hand".into()))?;
         let Some(r) = self.runs.get(run) else { return Err(EngineError::Invalid(format!("there is no output item {}", item + 1))) };
-        // As `show_runs` chose the cases of this run's items.
+        // As `show_runs` chose the cases of this run's items, and said in the title.
         let (sliced, crossed) = self.filtered();
+        let mut filters: Vec<String> = self.slicers.iter().map(|s| s.describe(&self.dataset)).collect();
+        if let Some(f) = self.cross_filter.as_ref().filter(|f| f.source != run) {
+            filters.push(f.category.label.clone());
+        }
         let ds = match (crossed, sliced) {
             (Some((source, ds)), _) if source != run => ds?,
             (_, Some(ds)) => ds?,
@@ -690,6 +699,10 @@ impl Session {
             }
             _ => return Err(EngineError::Invalid("this item has no calculation by hand".into())),
         };
+        let mut explanation = explanation;
+        if !filters.is_empty() {
+            explanation.title.push_str(&format!(" (filtered by {})", filters.join("; ")));
+        }
         Ok(explanation)
     }
 
@@ -1134,6 +1147,7 @@ mod tests {
         // A slicer: the ages from 20 to 40 are 23 35 29 31 26.
         s.run_syntax("SLICE age (20 THRU 40).").unwrap();
         assert!(tex(&s, 0).contains("\\frac{144}{5} = 28.8"), "{}", tex(&s, 0));
+        assert!(s.explain(0, false).unwrap().title.starts_with("Descriptive Statistics (filtered by "));
         // Without filters the table stays as it was made; once the data change, it is refused.
         s.run_syntax("SLICE OFF.").unwrap();
         s.set_cell(0, 0, "24").unwrap();

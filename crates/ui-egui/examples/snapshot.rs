@@ -2,11 +2,11 @@
 //! touching the screen.
 //!
 //! `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav] [--variables] [--labels]
-//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--tab NAME] [--splash] [--backstage] [--dialog KIND [--dialog-vars 'SLOT:VAR...']]
+//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--tab NAME] [--splash] [--explain ITEM [--every-term]] [--backstage] [--dialog KIND [--dialog-vars 'SLOT:VAR...']]
 //!  [--size 1280x800] out.png` (`--disable` switches off applied step N, counting from 1, after
 //!  `--run`; `--select` cross-filters by category PART of Output item ITEM, both counting from 1:
 //!  a bar, bin or box, or a table row; `--pin` pins Output item ITEM to the dashboard and
-//!  `--dashboard` shows it)
+//!  `--dashboard` shows it; `--explain` opens the Σ window of Output item ITEM)
 
 use mksigma_engine::output::Item;
 use mksigma_ui_egui::{SigmaApp, View};
@@ -22,6 +22,8 @@ fn main() -> Result<(), String> {
     let mut pins: Vec<usize> = Vec::new();
     let mut dialog = None;
     let mut dialog_vars = String::new();
+    let mut explain = None;
+    let mut every_term = false;
     let mut i = 0;
     while let Some(arg) = args.get(i) {
         match arg.as_str() {
@@ -53,6 +55,12 @@ fn main() -> Result<(), String> {
             "--dashboard" => app.output_state.dashboard = true,
             "--no-ribbon" => app.ribbon_collapsed = true,
             "--splash" => app.show_splash(),
+            "--explain" => {
+                i += 1;
+                explain =
+                    Some(args.get(i).and_then(|n| n.parse::<usize>().ok()).and_then(|n| n.checked_sub(1)).ok_or("--explain needs an item number")?);
+            }
+            "--every-term" => every_term = true,
             "--backstage" => app.backstage = Some(mksigma_ui_egui::BackstagePage::Home),
             "--dialog" => {
                 i += 1;
@@ -128,6 +136,11 @@ fn main() -> Result<(), String> {
         };
         let category = category.cloned().ok_or("--select: that item has no such category")?;
         app.session.select_category(item, category).map_err(|e| e.to_string())?;
+    }
+    if let Some(item) = explain {
+        let mut view = mksigma_ui_egui::ExplainView::new(&app.session, item);
+        view.full = every_term;
+        app.explain = Some(view);
     }
     let mut harness = egui_kittest::Harness::builder()
         .with_size(egui::vec2(size.0, size.1))

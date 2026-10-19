@@ -10,8 +10,10 @@ use mksigma_engine::Session;
 
 mod backstage;
 mod edit;
+mod explain;
 mod icons;
 pub mod logo;
+mod math;
 mod output;
 mod procedure;
 mod ribbon;
@@ -22,6 +24,7 @@ mod views;
 
 pub use backstage::Page as BackstagePage;
 pub use edit::{Editing, Field, Target};
+pub use explain::ExplainView;
 pub use output::{ExportFormat, OutputState};
 pub use procedure::{Dialog as ProcedureDialog, Kind as ProcedureKind};
 pub use ribbon::Tab;
@@ -118,6 +121,8 @@ pub struct SigmaApp {
     themed: bool,
     /// The splash screen, while it shows.
     splash: Option<splash::Splash>,
+    /// The Σ window: an Output item's calculation by hand.
+    pub explain: Option<explain::ExplainView>,
 }
 
 impl Default for SigmaApp {
@@ -158,6 +163,7 @@ impl SigmaApp {
             title: String::new(),
             themed: false,
             splash: None,
+            explain: None,
         }
     }
 
@@ -799,6 +805,7 @@ impl SigmaApp {
                 self.output_state.transposed.clear();
                 self.run_edit(&syntax);
             }
+            output::OutputAction::Explain(item) => self.explain = Some(explain::ExplainView::new(&self.session, item)),
             output::OutputAction::ClearFilter => {
                 self.output_state.transposed.clear();
                 self.session.clear_cross_filter();
@@ -1086,6 +1093,20 @@ impl SigmaApp {
     }
 
     fn dialogs(&mut self, ctx: &egui::Context) {
+        if let Some(view) = self.explain.as_mut() {
+            match explain::show(ctx, view, &self.session) {
+                explain::Outcome::Open => {}
+                explain::Outcome::Close => self.explain = None,
+                explain::Outcome::Export(tex, name) => {
+                    if let Some(path) = self.services.pick_export.as_ref().and_then(|pick| pick(&name)) {
+                        match std::fs::write(&path, tex) {
+                            Ok(()) => self.status = Some(Status::Info(format!("Exported the calculation to {}", path.display()))),
+                            Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
+                        }
+                    }
+                }
+            }
+        }
         if let Some(dialog) = self.procedure_dialog.as_mut() {
             match procedure::show(ctx, dialog, &self.session) {
                 procedure::Outcome::Open => {}

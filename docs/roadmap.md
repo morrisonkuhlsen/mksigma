@@ -191,6 +191,15 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   apart), so they always agree with it, and a reader can check every number with a calculator.
   Weights, missing values and filters show where they enter. Start with DESCRIPTIVES,
   FREQUENCIES, T-TEST and CORRELATIONS; large data shows the sums, with the terms on demand.
+- **First part — done:** the Σ beside DESCRIPTIVES, CORRELATIONS and frequency tables opens a
+  window with every step, typeset in the app (fractions, sums with limits, roots, bars; long
+  equations break at `=` and `+`). The first five and last two terms of a long sum, or every
+  term on request; Copy LaTeX and Export .tex give a document that compiles as it is. The
+  steps run on the cases the table shows (slicers, cross-filter), say so in the title, and a
+  table made before the data changed is refused rather than explained on other numbers. Tests
+  hold each final figure against the table's.
+- **Next:** T-TEST (Levene, pooled and Welch), the FREQUENCIES Statistics table, CROSSTABS'
+  chi-square, ONEWAY; then the charts (a histogram's bins, a bar's mean).
 
 ## Later
 - Multiple related tables (star-schema data model) and measures

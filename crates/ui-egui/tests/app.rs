@@ -878,3 +878,30 @@ fn the_splash_fades_by_itself_or_on_a_click() {
     assert!(!h.state().splash_showing());
     assert_eq!(h.state().tab, mksigma_ui_egui::Tab::default(), "the click went to the splash");
 }
+
+#[test]
+fn sigma_shows_the_calculation_by_hand_and_exports_it() {
+    let path = temp_path("calculation.tex");
+    let picked = path.clone();
+    let services = Services { pick_export: Some(Box::new(move |_: &str| Some(picked.clone()))), ..Services::default() };
+    let mut app = SigmaApp::new(services);
+    app.session.run_syntax("DESCRIPTIVES age.\nGRAPH /HISTOGRAM=age.").unwrap();
+    let mut h = harness(app);
+    // The table has its Σ; the chart doesn't.
+    assert_eq!(h.get_all_by_label("Σ").count(), 1);
+    h.get_by_label("Σ").click();
+    h.run_steps(3);
+    assert!(shows(&h, "Σ  Descriptive Statistics, by hand"));
+    // Each equation is drawn, and named by its LaTeX. Ages 23 35 41 29 52 47 31 26.
+    assert!(h.query_by_label_contains("\\frac{284}{8} = 35.5").is_some());
+    h.get_by_label("Show every term").click();
+    h.run_steps(3);
+    assert!(h.state().explain.as_ref().is_some_and(|v| v.full));
+    h.get_by_label("Export .tex…").click();
+    h.run_steps(3);
+    let tex = std::fs::read_to_string(&path).unwrap();
+    assert!(tex.contains("\\documentclass{article}") && tex.contains("\\frac{744}{8 - 1} = 106.2857"), "{tex}");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().explain.is_none());
+}
