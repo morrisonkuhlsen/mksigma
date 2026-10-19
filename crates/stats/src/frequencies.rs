@@ -66,20 +66,20 @@ enum Key {
 }
 
 /// One variable's weighted counts.
-struct Counts {
+pub(crate) struct Counts {
     /// Valid values and their summed weights, in table order.
-    valid: Vec<(Value, f64)>,
+    pub(crate) valid: Vec<(Value, f64)>,
     /// User-missing values and their summed weights, ascending.
     user_missing: Vec<(Value, f64)>,
     system_missing: f64,
 }
 
 impl Counts {
-    fn valid_total(&self) -> f64 {
+    pub(crate) fn valid_total(&self) -> f64 {
         self.valid.iter().map(|(_, w)| w).sum()
     }
 
-    fn missing_total(&self) -> f64 {
+    pub(crate) fn missing_total(&self) -> f64 {
         self.user_missing.iter().map(|(_, w)| w).sum::<f64>() + self.system_missing
     }
 }
@@ -92,7 +92,7 @@ fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
     }
 }
 
-fn count(var: &Variable, column: &[Value], weights: &[f64], order: Order) -> Counts {
+pub(crate) fn count(var: &Variable, column: &[Value], weights: &[f64], order: Order) -> Counts {
     let mut map: HashMap<Key, (Value, f64)> = HashMap::new();
     let mut system_missing = 0.0;
     for (value, &w) in column.iter().zip(weights).filter(|(_, w)| **w > 0.0) {

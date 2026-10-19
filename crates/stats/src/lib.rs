@@ -12,6 +12,7 @@ mod correlations;
 mod crosstabs;
 mod dist;
 mod examine;
+pub mod explain;
 mod frequencies;
 mod groups;
 mod logistic;

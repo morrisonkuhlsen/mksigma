@@ -5,6 +5,7 @@
 pub mod chart;
 pub mod html;
 pub mod latex;
+pub mod math;
 mod pdf;
 pub mod style;
 
