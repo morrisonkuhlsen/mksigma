@@ -9,7 +9,7 @@ use crate::backstage::{BRAND, INK, ON_INK, ON_INK_SOFT};
 /// The window's size, in points.
 pub const SIZE: [f32; 2] = [680.0, 400.0];
 /// Seconds it stays.
-const HOLD: f64 = 2.4;
+const HOLD: f64 = 5.0;
 
 /// The program's components, named in turn as the bar fills.
 const COMPONENTS: [&str; 12] = [

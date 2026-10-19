@@ -860,11 +860,11 @@ fn the_file_backstage() {
 fn the_splash_closes_by_itself_or_on_a_click() {
     use mksigma_ui_egui::splash::{SIZE, SplashScreen};
     let size = egui::vec2(SIZE[0], SIZE[1]);
-    // Steps of a quarter second: closed within its two seconds.
+    // Steps of a quarter second: closed within its five seconds.
     let mut h = Harness::builder().with_size(size).build_ui_state(|ui, s: &mut SplashScreen| s.ui(ui), SplashScreen::default());
-    h.run_steps(2);
-    assert!(!h.state().closed());
     h.run_steps(8);
+    assert!(!h.state().closed());
+    h.run_steps(14);
     assert!(h.state().closed());
     // A click closes it sooner.
     let mut h =
