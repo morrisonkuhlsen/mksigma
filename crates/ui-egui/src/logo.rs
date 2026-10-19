@@ -2,7 +2,7 @@
 //! the window icon and the mark at the start of the title row. And the Morrison Kühlsen logo
 //! (morrisonkuhlsen.com, its header's SVG drawn in white), in the File backstage. And the
 //! spiral staircase from the house's own site (github.com/morrisonkuhlsen, spiral.avif, cropped
-//! to the splash screen's shape), the splash screen's artwork.
+//! to the splash screen's right half), the splash screen's artwork.
 
 const PNG: &[u8] = include_bytes!("../assets/mksigma.png");
 const MORRISON_KUHLSEN: &[u8] = include_bytes!("../assets/morrison-kuhlsen.png");
@@ -76,6 +76,6 @@ mod tests {
         assert!(width > height * 2, "a wide wordmark");
         // A palette PNG, expanded.
         let (rgba, width, height) = super::decode(super::SPIRAL).unwrap();
-        assert_eq!((width, height, rgba.len()), (1020, 600, 1020 * 600 * 4));
+        assert_eq!((width, height, rgba.len()), (510, 600, 510 * 600 * 4));
     }
 }
