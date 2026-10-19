@@ -23,23 +23,23 @@ pub struct Options {
 }
 
 /// A group's key (the `BY` value, `None` without `BY`) and its values with their weights.
-type Group = (Option<Value>, Vec<(f64, f64)>);
+pub(crate) type Group = (Option<Value>, Vec<(f64, f64)>);
 
 /// Values sorted ascending with their weights.
-struct Sorted(Vec<(f64, f64)>);
+pub(crate) struct Sorted(pub(crate) Vec<(f64, f64)>);
 
 impl Sorted {
-    fn new(mut values: Vec<(f64, f64)>) -> Self {
+    pub(crate) fn new(mut values: Vec<(f64, f64)>) -> Self {
         values.sort_by(|a, b| a.0.total_cmp(&b.0));
         Sorted(values)
     }
 
-    fn total(&self) -> f64 {
+    pub(crate) fn total(&self) -> f64 {
         self.0.iter().map(|(_, w)| w).sum()
     }
 
     /// The value at 1-based rank `r` of the data with weights as frequencies.
-    fn at_rank(&self, r: f64) -> f64 {
+    pub(crate) fn at_rank(&self, r: f64) -> f64 {
         let mut seen = 0.0;
         for (x, w) in &self.0 {
             seen += w;
@@ -57,7 +57,7 @@ impl Sorted {
     }
 
     /// The `p` percentile by the weighted average at (W + 1)p.
-    fn percentile(&self, p: f64) -> f64 {
+    pub(crate) fn percentile(&self, p: f64) -> f64 {
         let w = self.total();
         let pos = (w + 1.0) * p;
         if pos <= 1.0 {
@@ -81,7 +81,7 @@ impl Sorted {
     }
 
     /// Mean after cutting `share` of the weight from each end (partial weights at the cuts).
-    fn trimmed_mean(&self, share: f64) -> f64 {
+    pub(crate) fn trimmed_mean(&self, share: f64) -> f64 {
         let cut = self.total() * share;
         let (mut below, mut sum, mut kept) = (0.0, 0.0, 0.0);
         let total = self.total();
@@ -149,6 +149,41 @@ fn descriptive_rows(label: String, values: &Sorted) -> Vec<(String, Vec<Cell>)> 
         .collect()
 }
 
+/// The values of variable `vi` in one group per value of `by` (ascending), or in a single
+/// group; and the weight of the cases missing on it.
+pub(crate) fn groups_of(ds: &Dataset, vi: usize, by: Option<usize>) -> (Vec<Group>, f64) {
+    // One group of values per category of `by`, or a single group.
+    let mut groups: Vec<Group> = Vec::new();
+    let mut missing = 0.0;
+    for case in 0..ds.n_cases() {
+        let w = ds.case_weight(case);
+        if w <= 0.0 {
+            continue;
+        }
+        let key = match by {
+            Some(bi) => match valid_value(ds, bi, case) {
+                Some(v) => Some(v.clone()),
+                None => continue,
+            },
+            None => None,
+        };
+        let Some(x) = valid(ds, vi, case) else {
+            missing += w;
+            continue;
+        };
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, list)) => list.push((x, w)),
+            None => groups.push((key, vec![(x, w)])),
+        }
+    }
+    groups.sort_by(|a, b| match (&a.0, &b.0) {
+        (Some(Value::Num(x)), Some(Value::Num(y))) => x.total_cmp(y),
+        (Some(Value::Str(x)), Some(Value::Str(y))) => x.cmp(y),
+        _ => std::cmp::Ordering::Equal,
+    });
+    (groups, missing)
+}
+
 pub fn examine(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> {
     let by = options.by.as_ref().map(|b| ds.variable(b).ok_or_else(|| StatsError::UnknownVariable(b.clone()))).transpose()?;
     let mut summary = Vec::new();
@@ -156,35 +191,7 @@ pub fn examine(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError>
     let mut charts = Vec::new();
     for name in &options.variables {
         let (vi, var) = numeric(ds, name)?;
-        // One group of values per category of `by`, or a single group.
-        let mut groups: Vec<Group> = Vec::new();
-        let mut missing = 0.0;
-        for case in 0..ds.n_cases() {
-            let w = ds.case_weight(case);
-            if w <= 0.0 {
-                continue;
-            }
-            let key = match by {
-                Some((bi, _)) => match valid_value(ds, bi, case) {
-                    Some(v) => Some(v.clone()),
-                    None => continue,
-                },
-                None => None,
-            };
-            let Some(x) = valid(ds, vi, case) else {
-                missing += w;
-                continue;
-            };
-            match groups.iter_mut().find(|(k, _)| *k == key) {
-                Some((_, list)) => list.push((x, w)),
-                None => groups.push((key, vec![(x, w)])),
-            }
-        }
-        groups.sort_by(|a, b| match (&a.0, &b.0) {
-            (Some(Value::Num(x)), Some(Value::Num(y))) => x.total_cmp(y),
-            (Some(Value::Str(x)), Some(Value::Str(y))) => x.cmp(y),
-            _ => std::cmp::Ordering::Equal,
-        });
+        let (groups, missing) = groups_of(ds, vi, by.map(|(bi, _)| bi));
         let valid_n: f64 = groups.iter().flat_map(|(_, g)| g.iter().map(|(_, w)| w)).sum();
         summary.push((var.display_name().to_string(), vec![n_cell(valid_n), n_cell(missing), n_cell(valid_n + missing)]));
         let mut boxes = Vec::new();

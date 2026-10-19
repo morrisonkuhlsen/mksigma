@@ -208,8 +208,13 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   correction, Fisher's exact test as every table with the same totals in factorials, the
   linear-by-linear association; each group's mean and variance, the sums of squares, F,
   Levene's test for k groups, Tukey's q and Bonferroni's multiplied t for every pair.
-- **Next:** REGRESSION, EXAMINE, NPAR TESTS, LOGISTIC REGRESSION; then the charts (a
-  histogram's bins, a bar's mean).
+- **NPAR TESTS, EXAMINE — done:** every value ranked, ties as the mean of the ranks they span,
+  the sums and mean ranks, U and W, T− and T+, H, the correction for ties, z; Explore's
+  Descriptives with the 5% trimmed mean (partial weights at the cuts), the median and quartiles
+  by the weighted average at (W + 1)p, and G1 and G2 with their standard errors.
+- **Next:** REGRESSION and LOGISTIC REGRESSION (a matrix in the notation, for (XᵀX)⁻¹Xᵀy and
+  Newton–Raphson's iterations); then the charts (a histogram's bins, a bar's mean, a box's
+  hinges).
 
 ## Later
 - Multiple related tables (star-schema data model) and measures

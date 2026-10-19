@@ -664,6 +664,7 @@ impl Session {
             // With its chi-square tests: the crosstabulations and the tests, not the summary.
             Command::Crosstabs { chisq: true, .. } if table.title != "Case Processing Summary" => Some((run, None)),
             Command::Oneway { .. } | Command::NparTests(_) => Some((run, None)),
+            Command::Examine { .. } if table.title == "Descriptives" => Some((run, None)),
             _ => None,
         }
     }
@@ -710,6 +711,7 @@ impl Session {
             Command::TTest { test, ci } => explain::t_test(&ds, &t_test_of(test), *ci, full)?,
             Command::Crosstabs { rows, columns, .. } => explain::crosstabs(&ds, rows, columns, full)?,
             Command::NparTests(specs) => explain::npar_tests(&ds, &npar_of(specs), full)?,
+            Command::Examine { variables, by, .. } => explain::examine(&ds, variables, by.as_deref(), full)?,
             Command::Oneway { .. } => match oneway_options(&command) {
                 Some(options) => explain::oneway(&ds, &options, full)?,
                 None => return Err(EngineError::Invalid("this item has no calculation by hand".into())),
@@ -1196,6 +1198,20 @@ mod tests {
         // The summary has none, nor a crosstabulation without the tests.
         assert_eq!(can.iter().filter(|(_, c)| *c).count(), 2, "{can:?}");
         assert!(can.iter().all(|(t, c)| !(t == "Case Processing Summary" && *c)));
+    }
+
+    #[test]
+    fn explains_the_descriptives_of_explore() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("EXAMINE VARIABLES=score income /PLOT=BOXPLOT /STATISTICS=DESCRIPTIVES.").unwrap();
+        let can: Vec<(String, bool)> = (0..s.output.items.len())
+            .filter_map(|i| match &s.output.items[i] {
+                Item::Table(t) => Some((t.title.clone(), s.can_explain(i))),
+                _ => None,
+            })
+            .collect();
+        assert!(can.contains(&("Descriptives".to_string(), true)), "{can:?}");
+        assert_eq!(can.iter().filter(|(_, c)| *c).count(), 1, "{can:?}");
     }
 
     #[test]

@@ -331,7 +331,7 @@ fn sample(steps: &mut Vec<Step>, xs: &[(f64, f64)], names: &Names, w: bool, full
     steps.extend(several(
         "The variance divides that by the size minus 1, and the standard deviation is its square root:",
         vec![
-            equals(vec![sup(names.s.clone(), text("2")), frac(n(ss), row(vec![n(total), text("−"), text("1")])), n(variance)]),
+            equals(vec![sup(names.s.clone(), text("2")), frac(n(ss), row(vec![n(total), text("−"), text("1")])), approx(variance)]),
             equals(vec![names.s.clone(), sqrt(n(variance)), approx(variance.sqrt())]),
         ],
     ));
@@ -1343,6 +1343,253 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
     Ok(Explanation { title: "NPar Tests".into(), sections })
 }
 
+/// `EXAMINE`'s Descriptives for each variable (and group of `by`): the mean with its standard
+/// error and interval, the 5% trimmed mean, the median and the interquartile range by SPSS's
+/// weighted average at (W + 1)p, the variance and standard deviation, the extremes, and the
+/// skewness and kurtosis with their standard errors.
+pub fn examine(ds: &Dataset, variables: &[String], by: Option<&str>, full: bool) -> Result<Explanation, StatsError> {
+    let by = by.map(|b| ds.variable(b).ok_or_else(|| StatsError::UnknownVariable(b.to_string()))).transpose()?;
+    let w = weighted(ds);
+    let mut sections = Vec::new();
+    for name in variables {
+        let (vi, variable) = numeric(ds, name)?;
+        let (groups, _) = crate::examine::groups_of(ds, vi, by.map(|(bi, _)| bi));
+        for (key, values) in groups {
+            let heading = match (&key, by) {
+                (Some(v), Some((_, bvar))) => format!("{}, {} = {}", variable.display_name(), bvar.display_name(), value_text(bvar, v)),
+                _ => variable.display_name().to_string(),
+            };
+            let sorted = crate::examine::Sorted::new(values);
+            sections.push((heading, examine_steps(&sorted, w, full)));
+        }
+    }
+    Ok(Explanation { title: "Explore".into(), sections })
+}
+
+fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<Step> {
+    let mut steps = Vec::new();
+    let names = Names::of("x", "");
+    let Some(Sample { n: big_w, mean, variance }) = sample(&mut steps, &sorted.0, &names, w, full) else { return steps };
+    if let Some(variance) = variance {
+        let se = (variance / big_w).sqrt();
+        steps.push(step(
+            "The standard error of the mean:",
+            equals(vec![var("SE"), frac(var("s"), sqrt(var("n"))), frac(n(variance.sqrt()), sqrt(n(big_w))), approx(se)]),
+        ));
+        if let Some(critical) = dist::t_quantile(0.975, big_w - 1.0) {
+            let half = critical * se;
+            steps.extend(several(
+                &format!(
+                    "The 95% interval of the mean, with the t that leaves 2.5% in each tail at {} degrees of freedom:",
+                    number_text(big_w - 1.0)
+                ),
+                vec![
+                    equals(vec![sub(var("t"), text("0.975")), approx(critical)]),
+                    equals(vec![text("Lower"), row(vec![n(mean), text("−"), n(critical), text("·"), n(se)]), approx(mean - half)]),
+                    equals(vec![text("Upper"), row(vec![n(mean), text("+"), n(critical), text("·"), n(se)]), approx(mean + half)]),
+                ],
+            ));
+        }
+    }
+
+    // The 5% trimmed mean: 5% of the weight off each end, a value at a cut keeping its share.
+    let cut = big_w * 0.05;
+    let mut below = 0.0;
+    let mut kept: Vec<(f64, f64)> = Vec::new();
+    for (x, wi) in &sorted.0 {
+        let (start, end) = (below, below + wi);
+        below = end;
+        let keep = (end.min(big_w - cut) - start.max(cut)).max(0.0);
+        if keep > 0.0 {
+            kept.push((*x, keep));
+        }
+    }
+    let kept_w: f64 = kept.iter().map(|(_, k)| k).sum();
+    let kept_sum: f64 = kept.iter().map(|(x, k)| x * k).sum();
+    steps.push(step(
+        "The 5% trimmed mean leaves out 5% of the cases at each end; a case at a cut counts for the part of it inside:",
+        equals(vec![var("c"), row(vec![text("0.05"), text("·"), n(big_w)]), n(cut)]),
+    ));
+    steps.push(step(
+        "What remains, each value times the part of it kept, over the part kept:",
+        equals(vec![
+            frac(
+                terms(kept.iter().map(|(x, k)| row(vec![n(*k), text("·"), val(*x)])).collect(), full),
+                terms(kept.iter().map(|(_, k)| n(*k)).collect(), full),
+            ),
+            frac(n(kept_sum), n(kept_w)),
+            approx(kept_sum / kept_w),
+        ]),
+    ));
+
+    // Percentiles: the weighted average at (W + 1)p.
+    let percentile = |p: f64, name: Math, label: &str, steps: &mut Vec<Step>| -> f64 {
+        let value = sorted.percentile(p);
+        let pos = (big_w + 1.0) * p;
+        let at = equals(vec![
+            row(vec![paren(row(vec![var("W"), text("+"), text("1")])), text("·"), num(p, 2)]),
+            row(vec![n(big_w + 1.0), text("·"), num(p, 2)]),
+            n(pos),
+        ]);
+        if pos <= 1.0 || pos >= big_w {
+            let end = if pos <= 1.0 { "the smallest" } else { "the largest" };
+            steps.extend(several(
+                &format!("The {label} sits at position (W + 1)p, at or beyond the end, so it is {end} value:"),
+                vec![at, equals(vec![name, n(value)])],
+            ));
+        } else {
+            let k = pos.floor();
+            let (a, b) = (sorted.at_rank(k), sorted.at_rank(k + 1.0));
+            steps.extend(several(
+                &format!(
+                    "The {label} sits at position (W + 1)p, between the values ranked {} and {}, {} and {}:",
+                    number_text(k),
+                    number_text(k + 1.0),
+                    number_text(a),
+                    number_text(b)
+                ),
+                vec![
+                    at,
+                    equals(vec![
+                        name,
+                        row(vec![val(a), text("+"), n(pos - k), text("·"), paren(row(vec![val(b), text("−"), val(a)]))]),
+                        approx(value),
+                    ]),
+                ],
+            ));
+        }
+        value
+    };
+    percentile(0.5, text("Median"), "median", &mut steps);
+    let q1 = percentile(0.25, sub(var("Q"), text("1")), "first quartile", &mut steps);
+    let q3 = percentile(0.75, sub(var("Q"), text("3")), "third quartile", &mut steps);
+    steps.push(step(
+        "The interquartile range:",
+        equals(vec![
+            text("IQR"),
+            row(vec![sub(var("Q"), text("3")), text("−"), sub(var("Q"), text("1"))]),
+            row(vec![n(q3), text("−"), val(q1)]),
+            approx(q3 - q1),
+        ]),
+    ));
+    steps.extend(extremes(&sorted.0));
+    if let (Some(lo), Some(hi)) = (sorted.0.first(), sorted.0.last()) {
+        steps.push(step("The range:", equals(vec![text("Range"), row(vec![n(hi.0), text("−"), val(lo.0)]), approx(hi.0 - lo.0)])));
+    }
+
+    // Skewness and kurtosis: the bias-corrected G1 and G2, from the third and fourth moments.
+    let Some(variance) = variance else { return steps };
+    let sd = variance.sqrt();
+    if big_w > 2.0 {
+        let cubes: Vec<Math> =
+            sorted.0.iter().map(|(x, wi)| weighted_term(w, *wi, sup(paren(row(vec![val(*x), text("−"), n(mean)])), text("3")))).collect();
+        let m3: f64 = sorted.0.iter().map(|(x, wi)| wi * (x - mean).powi(3)).sum();
+        steps.push(step(
+            "The cubed deviations from the mean, added up:",
+            equals(vec![sum(None, None, sup(paren(row(vec![indexed("x", "i"), text("−"), bar(var("x"))])), text("3"))), terms(cubes, full), n(m3)]),
+        ));
+        let g1 = big_w / ((big_w - 1.0) * (big_w - 2.0)) * m3 / sd.powi(3);
+        steps.push(step(
+            "The skewness:",
+            equals(vec![
+                sub(var("G"), text("1")),
+                row(vec![
+                    frac(var("W"), row(vec![paren(row(vec![var("W"), text("−"), text("1")])), paren(row(vec![var("W"), text("−"), text("2")]))])),
+                    text("·"),
+                    frac(sum(None, None, sup(paren(row(vec![indexed("x", "i"), text("−"), bar(var("x"))])), text("3"))), sup(var("s"), text("3"))),
+                ]),
+                row(vec![frac(n(big_w), row(vec![n(big_w - 1.0), text("·"), n(big_w - 2.0)])), text("·"), frac(n(m3), sup(n(sd), text("3")))]),
+                approx(g1),
+            ]),
+        ));
+        let se1 = (6.0 * big_w * (big_w - 1.0) / ((big_w - 2.0) * (big_w + 1.0) * (big_w + 3.0))).sqrt();
+        steps.push(step(
+            "Its standard error:",
+            equals(vec![
+                sub(var("SE"), sub(var("G"), text("1"))),
+                sqrt(frac(
+                    row(vec![text("6"), var("W"), paren(row(vec![var("W"), text("−"), text("1")]))]),
+                    row(vec![
+                        paren(row(vec![var("W"), text("−"), text("2")])),
+                        paren(row(vec![var("W"), text("+"), text("1")])),
+                        paren(row(vec![var("W"), text("+"), text("3")])),
+                    ]),
+                )),
+                sqrt(frac(
+                    row(vec![text("6"), text("·"), n(big_w), text("·"), n(big_w - 1.0)]),
+                    row(vec![n(big_w - 2.0), text("·"), n(big_w + 1.0), text("·"), n(big_w + 3.0)]),
+                )),
+                approx(se1),
+            ]),
+        ));
+        if big_w > 3.0 {
+            let fourths: Vec<Math> =
+                sorted.0.iter().map(|(x, wi)| weighted_term(w, *wi, sup(paren(row(vec![val(*x), text("−"), n(mean)])), text("4")))).collect();
+            let m4: f64 = sorted.0.iter().map(|(x, wi)| wi * (x - mean).powi(4)).sum();
+            steps.push(step(
+                "The fourth powers of the deviations, added up:",
+                equals(vec![
+                    sum(None, None, sup(paren(row(vec![indexed("x", "i"), text("−"), bar(var("x"))])), text("4"))),
+                    terms(fourths, full),
+                    n(m4),
+                ]),
+            ));
+            let a = big_w * (big_w + 1.0) / ((big_w - 1.0) * (big_w - 2.0) * (big_w - 3.0));
+            let b = 3.0 * (big_w - 1.0).powi(2) / ((big_w - 2.0) * (big_w - 3.0));
+            let g2 = a * m4 / sd.powi(4) - b;
+            steps.push(step(
+                "The kurtosis:",
+                equals(vec![
+                    sub(var("G"), text("2")),
+                    row(vec![
+                        frac(
+                            row(vec![var("W"), paren(row(vec![var("W"), text("+"), text("1")]))]),
+                            row(vec![
+                                paren(row(vec![var("W"), text("−"), text("1")])),
+                                paren(row(vec![var("W"), text("−"), text("2")])),
+                                paren(row(vec![var("W"), text("−"), text("3")])),
+                            ]),
+                        ),
+                        text("·"),
+                        frac(
+                            sum(None, None, sup(paren(row(vec![indexed("x", "i"), text("−"), bar(var("x"))])), text("4"))),
+                            sup(var("s"), text("4")),
+                        ),
+                        text("−"),
+                        frac(
+                            row(vec![text("3"), sup(paren(row(vec![var("W"), text("−"), text("1")])), text("2"))]),
+                            row(vec![paren(row(vec![var("W"), text("−"), text("2")])), paren(row(vec![var("W"), text("−"), text("3")]))]),
+                        ),
+                    ]),
+                    row(vec![n(a), text("·"), frac(n(m4), sup(n(sd), text("4"))), text("−"), n(b)]),
+                    approx(g2),
+                ]),
+            ));
+            let se2 = (4.0 * (big_w * big_w - 1.0) * se1 * se1 / ((big_w - 3.0) * (big_w + 5.0))).sqrt();
+            steps.push(step(
+                "Its standard error:",
+                equals(vec![
+                    sub(var("SE"), sub(var("G"), text("2"))),
+                    sqrt(frac(
+                        row(vec![
+                            text("4"),
+                            paren(row(vec![sup(var("W"), text("2")), text("−"), text("1")])),
+                            sup(sub(var("SE"), sub(var("G"), text("1"))), text("2")),
+                        ]),
+                        row(vec![paren(row(vec![var("W"), text("−"), text("3")])), paren(row(vec![var("W"), text("+"), text("5")]))]),
+                    )),
+                    sqrt(frac(
+                        row(vec![text("4"), text("·"), n(big_w * big_w - 1.0), text("·"), sup(n(se1), text("2"))]),
+                        row(vec![n(big_w - 3.0), text("·"), n(big_w + 5.0)]),
+                    )),
+                    approx(se2),
+                ]),
+            ));
+        }
+    }
+    steps
+}
+
 /// `CROSSTABS`' chi-square tests for each row × column pair: the counts and their totals, the
 /// expected counts, Pearson's chi-square, the likelihood ratio, for a 2 × 2 table the
 /// continuity correction and Fisher's exact test, and the linear-by-linear association.
@@ -2168,6 +2415,32 @@ mod tests {
         assert!(tex.contains("2 \\to \\frac{2 + 3}{2} = 2.5") && tex.contains("3 \\to \\frac{4 + 5}{2} = 4.5"), "{tex}");
         // Three ties of two: T = 3 · (2³ − 2) = 18.
         assert!(tex.contains("= 18"), "{tex}");
+    }
+
+    #[test]
+    fn examine_by_hand_agrees_with_the_table() {
+        let ds = t_data();
+        for by in [None, Some("g")] {
+            let tex = latex(&examine(&ds, &["before".into(), "after".into()], by, false).unwrap());
+            let options = crate::ExamineOptions {
+                variables: vec!["before".into(), "after".into()],
+                by: by.map(String::from),
+                descriptives: true,
+                boxplot: false,
+            };
+            let items = crate::examine(&ds, &options).unwrap();
+            let t = tables(&items).into_iter().find(|t| t.title == "Descriptives").unwrap();
+            for (_, cells) in &t.rows {
+                for cell in cells {
+                    let Cell::Num { value, .. } = cell else { continue };
+                    let shown = number(*value, 3);
+                    assert!(tex.contains(&format!("\\approx {shown}")) || tex.contains(&format!("= {shown}")), "{value} in {tex}");
+                }
+            }
+        }
+        // before: 4 4 5 6 6 7 8; the median at (7 + 1) · 0.5 = 4, between 6 and 6.
+        let tex = latex(&examine(&ds, &["before".into()], None, false).unwrap());
+        assert!(tex.contains("= 8 \\cdot 0.5 = 4") && tex.contains("\\text{Median} = 6 + 0 \\cdot \\left( 6 - 6 \\right) = 6"), "{tex}");
     }
 
     #[test]

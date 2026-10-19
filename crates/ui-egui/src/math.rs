@@ -65,6 +65,21 @@ struct Typesetter<'a> {
 
 impl Typesetter<'_> {
     fn text(&self, s: &str, size: f32, italic: bool) -> Laid {
+        // An arrow the interface's fonts lack: drawn.
+        if s == "→" {
+            let (axis, stroke) = (size * 0.3, (size / 14.0).max(1.0));
+            let (pad, length, head) = (size * 0.3, size * 0.9, size * 0.22);
+            let tip = vec2(pad + length, -axis);
+            return Laid {
+                width: length + 2.0 * pad,
+                ascent: axis + head,
+                descent: 0.0,
+                prims: vec![
+                    Prim::Path(vec![vec2(pad, -axis), tip], stroke),
+                    Prim::Path(vec![tip + vec2(-head, -head * 0.8), tip, tip + vec2(-head, head * 0.8)], stroke),
+                ],
+            };
+        }
         // Glyphs the interface's fonts may not have, as ones they do.
         let s = match s {
             "⋯" | "…" => "···",
