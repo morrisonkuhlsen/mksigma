@@ -216,17 +216,18 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   Newton–Raphson's iterations); then the charts (a histogram's bins, a bar's mean, a box's
   hinges).
 
-## Next: languages
-- The interface, the Output (table titles, row and column labels, notes, warnings), the Σ
-  explanations and the error messages in the user's language: English and Português (Brasil)
-  first, Español next. Command syntax stays English in every language, as in SPSS, so syntax
-  files and dashboards run anywhere.
-- One message catalog per language (Fluent `.ftl` files, embedded), read through a small L0
-  crate that every layer uses; a test fails when a key is missing from a language or a
-  placeholder differs. View ▸ Language switches at once (the Output is rebuilt from its runs),
-  remembered with the recent files; the first run follows the system's language.
-- Numbers follow the language when shown (decimal comma in Portuguese), never in syntax or
-  saved files.
+## Languages — done (English and Português (Brasil))
+- The interface, the Output (titles, labels, notes, warnings, exports), the Σ explanations and
+  the error messages speak English or Brazilian Portuguese; command syntax stays English, as
+  in SPSS. One catalog per language in a subset of Fluent (`crates/i18n/locales/*.ftl`),
+  embedded, read by `mksigma-i18n` (L0, no dependencies); its tests fail when a language lacks
+  a message or a placeholder, or the code asks for one English lacks.
+- View ▸ Language switches at once and the Output is made again in the new language; the
+  choice is kept, and the first run follows the system's (LC_ALL, LC_MESSAGES, LANG).
+- Numbers shown in the Output, charts and Σ take the language's decimal comma; syntax, saved
+  files and Data View keep the point.
+- **Next:** Español; Data View with the decimal comma (typing it too); the interactive
+  dashboard's page in the exporting language.
 
 ## Next: Learn, the study section
 - A Learn page (in the File backstage and beside every table and dialog) with an article per

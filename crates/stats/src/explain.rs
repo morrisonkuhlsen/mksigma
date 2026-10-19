@@ -354,7 +354,7 @@ fn sample(steps: &mut Vec<Step>, xs: &[(f64, f64)], names: &Names, w: bool, full
 
 /// `x` to four decimals, then as the tables show it, to three (when that differs).
 fn approx(x: f64) -> Math {
-    if number_text(x) == mksigma_output::math::number(x, 3) { n(x) } else { row(vec![n(x), text("≈"), num(x, 3)]) }
+    if mksigma_output::math::number(x, places(x)) == mksigma_output::math::number(x, 3) { n(x) } else { row(vec![n(x), text("≈"), num(x, 3)]) }
 }
 
 /// The two-tailed significance of `t` with `df` degrees of freedom.
@@ -2257,13 +2257,18 @@ fn fisher_steps([a, b, c, d]: [f64; 4], full: bool) -> Vec<Step> {
     steps
 }
 
+/// A number in a sentence, with the language's decimal mark.
 fn number_text(x: f64) -> String {
-    mksigma_output::math::number(x, places(x))
+    mksigma_i18n::decimal(&mksigma_output::math::number(x, places(x)))
 }
 
 /// `x` to four decimals, then to `places` as the table shows it (when that differs).
-fn approx_to(x: f64, places: usize) -> Math {
-    if number_text(x) == mksigma_output::math::number(x, places) { n(x) } else { row(vec![n(x), text("≈"), num(x, places)]) }
+fn approx_to(x: f64, shown: usize) -> Math {
+    if mksigma_output::math::number(x, places(x)) == mksigma_output::math::number(x, shown) {
+        n(x)
+    } else {
+        row(vec![n(x), text("≈"), num(x, shown)])
+    }
 }
 
 /// `FREQUENCIES`' Statistics table: N valid and missing, then each statistic asked for, from

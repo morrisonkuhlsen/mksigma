@@ -71,7 +71,7 @@ impl Slicer {
         let show = |v: &Value| {
             var.map_or_else(
                 || mksigma_core::Format::new(mksigma_core::FormatKind::F, 8, 2).render(v),
-                |var| var.value_label(v).map_or_else(|| var.format.render(v), str::to_string),
+                |var| var.value_label(v).map_or_else(|| mksigma_i18n::decimal(&var.format.render(v)), str::to_string),
             )
         };
         match &self.selection {

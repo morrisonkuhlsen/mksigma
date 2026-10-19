@@ -117,6 +117,7 @@ impl Typesetter<'_> {
         let small = (size * 0.72).max(MIN_SIZE);
         match m {
             Math::Var(s) => self.text(s, size, true),
+            Math::Text(s) if s.parse::<f64>().is_ok() => self.text(&mksigma_i18n::decimal(s), size, false),
             Math::Text(s) => self.text(s, size, false),
             Math::Row(parts) => self.row(parts, size),
             Math::Frac(a, b) => {

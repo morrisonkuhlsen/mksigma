@@ -60,7 +60,7 @@ fn comparisons(test: PostHoc, labels: &[String], stats: &[Moments], mse: f64, df
                 vec![
                     Cell::Text(if first { li.clone() } else { String::new() }),
                     Cell::Text(lj.clone()),
-                    if flagged { Cell::Text(format!("{diff:.3}*")) } else { num(Some(diff), 3) },
+                    if flagged { Cell::Text(format!("{}*", mksigma_i18n::decimal(&format!("{diff:.3}")))) } else { num(Some(diff), 3) },
                     num(Some(se), 3),
                     num(sig, 3),
                     num(critical.map(|c| diff - c * se), 3),

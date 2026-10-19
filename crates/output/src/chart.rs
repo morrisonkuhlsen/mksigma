@@ -147,7 +147,7 @@ fn label(value: f64, step: f64) -> String {
     });
     let decimals = decimals.unwrap_or(10) as usize;
     let text = format!("{value:.decimals$}");
-    if text == "-0" { "0".into() } else { text }
+    if text == "-0" { "0".into() } else { mksigma_i18n::decimal(&text) }
 }
 
 struct Frame {
@@ -257,7 +257,12 @@ pub fn layout(chart: &Chart, width: f64, height: f64) -> Vec<Shape> {
                 out.push(Shape::Text {
                     x: f.right,
                     y: f.top - 4.0,
-                    text: tr!("chart-normal-legend", mean = format!("{mean:.2}"), sd = format!("{sd:.3}"), n = format!("{n:.0}")),
+                    text: tr!(
+                        "chart-normal-legend",
+                        mean = mksigma_i18n::decimal(&format!("{mean:.2}")),
+                        sd = mksigma_i18n::decimal(&format!("{sd:.3}")),
+                        n = format!("{n:.0}")
+                    ),
                     anchor: Anchor::End,
                     size: TextSize::Small,
                     vertical: false,

@@ -80,7 +80,12 @@ impl Moments {
 
 /// A value's label, else the value in the variable's format.
 pub(crate) fn value_text(var: &Variable, v: &Value) -> String {
-    var.value_label(v).map_or_else(|| var.format.render(v), str::to_string)
+    let shown = || match v {
+        Value::Num(_) => mksigma_i18n::decimal(&var.format.render(v)),
+        Value::Str(_) => var.format.render(v),
+        _ => var.format.render(v),
+    };
+    var.value_label(v).map_or_else(shown, str::to_string)
 }
 
 /// The cases where `var` has the value `v`, for cross-filtering; none for system-missing.

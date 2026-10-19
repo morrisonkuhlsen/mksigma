@@ -182,21 +182,24 @@ fn statistics(var: &Variable, counts: &Counts, wanted: &[Statistic]) -> (Vec<Cel
     let num = |value: f64| Cell::Num { value, decimals: 2 };
     let have = m.w > 0.0;
     let sd = m.std_dev();
-    let cells = wanted
-        .iter()
-        .map(|s| match s {
-            Statistic::Mean if have => num(m.mean),
-            Statistic::SeMean => sd.map_or(Cell::Empty, |sd| num(sd / m.w.sqrt())),
-            Statistic::Mode => mode.map_or(Cell::Empty, |x| if modes.len() > 1 { Cell::Text(format!("{x:.2}a")) } else { num(x) }),
-            Statistic::StdDev => sd.map_or(Cell::Empty, num),
-            Statistic::Variance => sd.map_or(Cell::Empty, |sd| num(sd * sd)),
-            Statistic::Range if have => num(m.max - m.min),
-            Statistic::Minimum if have => num(m.min),
-            Statistic::Maximum if have => num(m.max),
-            Statistic::Sum if have => num(m.mean * m.w),
-            _ => Cell::Empty,
-        })
-        .collect();
+    let cells =
+        wanted
+            .iter()
+            .map(|s| match s {
+                Statistic::Mean if have => num(m.mean),
+                Statistic::SeMean => sd.map_or(Cell::Empty, |sd| num(sd / m.w.sqrt())),
+                Statistic::Mode => mode.map_or(Cell::Empty, |x| {
+                    if modes.len() > 1 { Cell::Text(format!("{}a", mksigma_i18n::decimal(&format!("{x:.2}")))) } else { num(x) }
+                }),
+                Statistic::StdDev => sd.map_or(Cell::Empty, num),
+                Statistic::Variance => sd.map_or(Cell::Empty, |sd| num(sd * sd)),
+                Statistic::Range if have => num(m.max - m.min),
+                Statistic::Minimum if have => num(m.min),
+                Statistic::Maximum if have => num(m.max),
+                Statistic::Sum if have => num(m.mean * m.w),
+                _ => Cell::Empty,
+            })
+            .collect();
     (cells, modes.len() > 1)
 }
 

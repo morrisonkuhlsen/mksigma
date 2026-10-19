@@ -74,7 +74,7 @@ pub fn correlations(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsE
             flagged_05 |= stars == "*";
             r_cells.push(match (r, stars) {
                 (Some(r), "") => num(Some(r), 3),
-                (Some(r), stars) => Cell::Text(format!("{r:.3}{stars}")),
+                (Some(r), stars) => Cell::Text(format!("{}{stars}", mksigma_i18n::decimal(&format!("{r:.3}")))),
                 (None, _) => Cell::Empty,
             });
             sig_cells.push(if same { Cell::Empty } else { num(sig, 3) });

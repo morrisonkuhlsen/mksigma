@@ -196,7 +196,8 @@ impl Math {
                 "±" => "\\pm".into(),
                 "→" => "\\to".into(),
                 "|" | "!" => s.clone(),
-                s if s.parse::<f64>().is_ok() => s.to_string(),
+                // The decimal comma in braces, so TeX doesn't space it as punctuation.
+                s if s.parse::<f64>().is_ok() => mksigma_i18n::decimal(s).replace(',', "{,}"),
                 s => format!("\\text{{{}}}", latex_text(s)),
             },
             Math::Row(parts) => parts.iter().map(Math::to_latex).collect::<Vec<_>>().join(" "),

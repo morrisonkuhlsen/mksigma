@@ -177,6 +177,15 @@ pub fn message_in(lang: Lang, id: &str, args: &[(&str, Arg)]) -> String {
     }
 }
 
+/// A number written for a reader, `1234.5`, with the language's decimal mark: a comma in
+/// Portuguese. Only for what is shown; syntax and files keep the point.
+pub fn decimal(number: &str) -> String {
+    match current() {
+        Lang::PtBr => number.replace('.', ","),
+        Lang::En => number.to_string(),
+    }
+}
+
 /// The message `id` in this thread's language (or English), if a catalog has it.
 pub fn lookup(id: &str) -> Option<String> {
     let lang = current();

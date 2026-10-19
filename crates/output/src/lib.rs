@@ -58,7 +58,7 @@ pub enum Cell {
 impl Cell {
     pub fn render(&self) -> String {
         match self {
-            Cell::Num { value, decimals } => format!("{value:.*}", usize::from(*decimals)),
+            Cell::Num { value, decimals } => mksigma_i18n::decimal(&format!("{value:.*}", usize::from(*decimals))),
             Cell::Int(n) => n.to_string(),
             Cell::Text(s) => s.clone(),
             Cell::Empty => String::new(),
