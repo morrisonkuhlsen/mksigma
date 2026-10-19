@@ -1,6 +1,7 @@
 //! Applied steps: every change to the data since the file was opened, in order, like Power
 //! Query's. The current dataset is always the base dataset with the enabled steps applied, so a
 //! step can be switched off, removed, moved or rewritten and the data replayed from the base.
+use mksigma_i18n::tr;
 
 /// What a step does.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,10 +37,10 @@ impl AppliedStep {
             StepKind::Syntax(source) => source.clone(),
             StepKind::Cell { case, variable, input } => {
                 let shown = if input.trim().is_empty() { "(blank)" } else { input.as_str() };
-                format!("Edit case {}, {variable} = {shown}", case + 1)
+                tr!("step-edit-case", case = case + 1, variable = variable.as_str(), value = shown)
             }
-            StepKind::InsertCase(case) => format!("Insert case {}", case + 1),
-            StepKind::DeleteCase(case) => format!("Delete case {}", case + 1),
+            StepKind::InsertCase(case) => tr!("step-insert-case", case = case + 1),
+            StepKind::DeleteCase(case) => tr!("step-delete-case", case = case + 1),
         }
     }
 

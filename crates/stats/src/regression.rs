@@ -6,6 +6,7 @@
 //! of `Sxx` and the residual mean square.
 
 use mksigma_core::Dataset;
+use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 
 use crate::groups::{numeric, valid};
@@ -73,7 +74,7 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
     let n: f64 = cases.iter().map(|(_, _, w)| w).sum();
     let df_residual = n - p as f64 - 1.0;
     if p == 0 || df_residual <= 0.0 {
-        return Ok(vec![Item::Warning(format!("REGRESSION needs more valid cases ({n}) than predictors plus one ({})", p + 1))]);
+        return Ok(vec![Item::Warning(tr!("o-regression-needs-cases", n = n, needed = p + 1))]);
     }
     let my = cases.iter().map(|(y, _, w)| y * w).sum::<f64>() / n;
     let mx: Vec<f64> = (0..p).map(|j| cases.iter().map(|(_, x, w)| x.get(j).copied().unwrap_or(0.0) * w).sum::<f64>() / n).collect();
@@ -93,7 +94,7 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
         }
     }
     let Some(inverse) = invert(&sxx) else {
-        return Ok(vec![Item::Warning("REGRESSION: a predictor is a linear combination of the others (or constant); no model".into())]);
+        return Ok(vec![Item::Warning(tr!("o-regression-collinear"))]);
     };
     let b: Vec<f64> = (0..p).map(|j| (0..p).map(|k| inverse[j][k] * sxy[k]).sum()).collect();
     let constant = my - b.iter().zip(&mx).map(|(b, m)| b * m).sum::<f64>();
@@ -109,19 +110,19 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
 
     let names: Vec<String> = xs.iter().map(|(_, v)| v.display_name().to_string()).collect();
     let summary = Table {
-        title: "Model Summary".into(),
-        columns: ["R", "R Square", "Adjusted R Square", "Std. Error of the Estimate"].map(String::from).to_vec(),
+        title: tr!("o-model-summary"),
+        columns: [tr!("o-r"), tr!("o-r-square"), tr!("o-adjusted-r-square"), tr!("o-std-error-of-the-estimate")].map(String::from).to_vec(),
         rows: vec![("1".into(), vec![num(Some(r2.sqrt()), 3), num(Some(r2), 3), num(Some(adjusted), 3), num(Some(ms_residual.sqrt()), 3)])],
         categories: Vec::new(),
     };
     let anova = Table {
-        title: "ANOVA".into(),
-        columns: ["", "Sum of Squares", "df", "Mean Square", "F", "Sig."].map(String::from).to_vec(),
+        title: tr!("o-anova"),
+        columns: [String::new(), tr!("o-sum-of-squares"), tr!("o-df"), tr!("o-mean-square"), tr!("o-f"), tr!("o-sig")].map(String::from).to_vec(),
         rows: vec![
             (
                 "1".into(),
                 vec![
-                    Cell::Text("Regression".into()),
+                    Cell::Text(tr!("o-regression")),
                     num(Some(ss_regression), 3),
                     n_cell(df_regression),
                     num(Some(ms_regression), 3),
@@ -132,7 +133,7 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
             (
                 String::new(),
                 vec![
-                    Cell::Text("Residual".into()),
+                    Cell::Text(tr!("o-residual")),
                     num(Some(ss_residual), 3),
                     n_cell(df_residual),
                     num(Some(ms_residual), 3),
@@ -140,7 +141,7 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
                     Cell::Empty,
                 ],
             ),
-            (String::new(), vec![Cell::Text("Total".into()), num(Some(syy), 3), n_cell(df_total), Cell::Empty, Cell::Empty, Cell::Empty]),
+            (String::new(), vec![Cell::Text(tr!("o-total")), num(Some(syy), 3), n_cell(df_total), Cell::Empty, Cell::Empty, Cell::Empty]),
         ],
         categories: Vec::new(),
     };
@@ -158,22 +159,22 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
     };
     // Var(constant) = MSE (1/n + x̄ᵀ Sxx⁻¹ x̄).
     let quad: f64 = (0..p).map(|j| (0..p).map(|k| mx[j] * inverse[j][k] * mx[k]).sum::<f64>()).sum();
-    let mut coefficients = vec![("1".to_string(), row("(Constant)".into(), constant, (ms_residual * (1.0 / n + quad)).sqrt(), None))];
+    let mut coefficients = vec![("1".to_string(), row(tr!("o-constant"), constant, (ms_residual * (1.0 / n + quad)).sqrt(), None))];
     for j in 0..p {
         let se = (ms_residual * inverse[j][j]).sqrt();
         let sd_x = (sxx[j][j] / df_total).sqrt();
         let beta = b[j] * sd_x / sd_y;
         coefficients.push((String::new(), row(names[j].clone(), b[j], se, Some(beta).filter(|b| b.is_finite()))));
     }
-    let mut columns = ["", "B", "Std. Error", "Beta", "t", "Sig."].map(String::from).to_vec();
+    let mut columns = [String::new(), tr!("o-b"), tr!("o-std-error"), tr!("o-beta"), tr!("o-t"), tr!("o-sig")].map(String::from).to_vec();
     if let Some(level) = options.ci {
-        columns.extend([format!("{:.0}% CI Lower", level * 100.0), format!("{:.0}% CI Upper", level * 100.0)]);
+        columns.extend([tr!("o-ci-lower", level = format!("{:.0}", level * 100.0)), tr!("o-ci-upper", level = format!("{:.0}", level * 100.0))]);
     }
     Ok(vec![
         Item::Table(summary),
-        Item::Text(format!("Predictors: (Constant), {}. Dependent Variable: {}", names.join(", "), yvar.display_name())),
+        Item::Text(tr!("o-regression-note", predictors = names.join(", "), dependent = yvar.display_name())),
         Item::Table(anova),
-        Item::Table(Table { title: "Coefficients".into(), columns, rows: coefficients, categories: Vec::new() }),
+        Item::Table(Table { title: tr!("o-coefficients"), columns, rows: coefficients, categories: Vec::new() }),
     ])
 }
 

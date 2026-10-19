@@ -9,3 +9,4 @@ description = "MK Sigma output model: pivot-style tables, text and warnings"
 workspace = true
 
 [dependencies]
+mksigma-i18n = { workspace = true }

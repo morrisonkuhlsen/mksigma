@@ -179,6 +179,7 @@ impl SigmaApp {
     /// Speaks `lang` from now on, and remembers it.
     pub fn set_language(&mut self, lang: mksigma_i18n::Lang) {
         mksigma_i18n::set(lang);
+        self.session.language_changed();
         if let Some(save) = &self.services.save_language {
             save(lang.code());
         }

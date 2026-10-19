@@ -3,6 +3,7 @@
 //! Newton–Raphson. Cases missing any variable are left out; weights count as frequencies.
 
 use mksigma_core::{Dataset, Value};
+use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 use statrs::distribution::{ContinuousCDF, Normal};
 
@@ -62,11 +63,7 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
     levels.sort_by(f64::total_cmp);
     levels.dedup();
     let [low, high] = levels[..] else {
-        return Ok(vec![Item::Warning(format!(
-            "LOGISTIC REGRESSION needs a dependent variable with exactly two values; {} has {}",
-            yvar.name,
-            levels.len()
-        ))]);
+        return Ok(vec![Item::Warning(tr!("o-logistic-two-values", name = yvar.name.as_str(), n = levels.len()))]);
     };
     let rows: Vec<(f64, Vec<f64>, f64)> = raw.into_iter().map(|(y, x, w)| (if y == high { 1.0 } else { 0.0 }, x, w)).collect();
     let n: f64 = rows.iter().map(|(_, _, w)| w).sum();
@@ -124,7 +121,7 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
     }
     let covariance = invert(&hessian).or(information);
     let Some(covariance) = covariance else {
-        return Ok(vec![Item::Warning("LOGISTIC REGRESSION: the covariates are collinear (or constant); no model".into())]);
+        return Ok(vec![Item::Warning(tr!("o-logistic-collinear"))]);
     };
 
     let chi = 2.0 * (ll - ll0);
@@ -134,21 +131,21 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
     let nagelkerke = cox_snell / (1.0 - (2.0 * ll0 / n).exp());
 
     let encoding = Table {
-        title: "Dependent Variable Encoding".into(),
-        columns: vec!["Internal Value".into()],
+        title: tr!("o-dependent-variable-encoding"),
+        columns: vec![tr!("o-internal-value")],
         rows: vec![(value_text(yvar, &Value::Num(low)), vec![Cell::Int(0)]), (value_text(yvar, &Value::Num(high)), vec![Cell::Int(1)])],
         categories: Vec::new(),
     };
     let omnibus_row = || vec![num(Some(chi), 3), n_cell(df), num(chi_sig, 3)];
     let omnibus = Table {
-        title: "Omnibus Tests of Model Coefficients".into(),
-        columns: ["Chi-square", "df", "Sig."].map(String::from).to_vec(),
-        rows: vec![("Step".into(), omnibus_row()), ("Block".into(), omnibus_row()), ("Model".into(), omnibus_row())],
+        title: tr!("o-omnibus-tests-of-model-coefficients"),
+        columns: [tr!("o-chi-square"), tr!("o-df"), tr!("o-sig")].map(String::from).to_vec(),
+        rows: vec![(tr!("o-step"), omnibus_row()), (tr!("o-block"), omnibus_row()), (tr!("o-model"), omnibus_row())],
         categories: Vec::new(),
     };
     let summary = Table {
-        title: "Model Summary".into(),
-        columns: ["-2 Log likelihood", "Cox & Snell R Square", "Nagelkerke R Square"].map(String::from).to_vec(),
+        title: tr!("o-model-summary"),
+        columns: [tr!("o-2-log-likelihood"), tr!("o-cox-snell-r-square"), tr!("o-nagelkerke-r-square")].map(String::from).to_vec(),
         rows: vec![("1".into(), vec![num(Some(-2.0 * ll), 3), num(Some(cox_snell), 3), num(Some(nagelkerke), 3)])],
         categories: Vec::new(),
     };
@@ -168,12 +165,12 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
     };
     let overall = (counts[0][0] + counts[1][1]) / n * 100.0;
     let classification = Table {
-        title: format!("Classification Table (cut value {})", options.cut),
+        title: tr!("o-classification-table", cut = format!("{}", options.cut)),
         columns: vec![
-            "Observed".into(),
-            format!("Predicted {}", value_text(yvar, &Value::Num(low))),
-            format!("Predicted {}", value_text(yvar, &Value::Num(high))),
-            "Percentage Correct".into(),
+            tr!("o-observed"),
+            tr!("o-predicted-value", value = value_text(yvar, &Value::Num(low))),
+            tr!("o-predicted-value", value = value_text(yvar, &Value::Num(high))),
+            tr!("o-percentage-correct"),
         ],
         rows: vec![
             (
@@ -181,14 +178,14 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
                 vec![Cell::Text(value_text(yvar, &Value::Num(low))), n_cell(counts[0][0]), n_cell(counts[0][1]), correct(counts[0], 0)],
             ),
             (String::new(), vec![Cell::Text(value_text(yvar, &Value::Num(high))), n_cell(counts[1][0]), n_cell(counts[1][1]), correct(counts[1], 1)]),
-            ("Overall Percentage".into(), vec![Cell::Empty, Cell::Empty, Cell::Empty, num(Some(overall), 1)]),
+            (tr!("o-overall-percentage"), vec![Cell::Empty, Cell::Empty, Cell::Empty, num(Some(overall), 1)]),
         ],
         categories: Vec::new(),
     };
 
     let z = options.ci.and_then(|level| Normal::new(0.0, 1.0).ok().map(|d| d.inverse_cdf(0.5 + level / 2.0)));
     let mut names: Vec<String> = xs.iter().map(|(_, v)| v.display_name().to_string()).collect();
-    names.push("Constant".into());
+    names.push(tr!("o-constant"));
     // The constant is listed last, as SPSS does.
     let order: Vec<usize> = (1..k).chain(std::iter::once(0)).collect();
     let coefficients = order
@@ -213,25 +210,24 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
             (name.clone(), cells)
         })
         .collect();
-    let mut columns = ["B", "S.E.", "Wald", "df", "Sig.", "Exp(B)"].map(String::from).to_vec();
+    let mut columns = [tr!("o-b"), tr!("o-s-e"), tr!("o-wald"), tr!("o-df"), tr!("o-sig"), tr!("o-exp-b")].map(String::from).to_vec();
     if let Some(level) = options.ci {
-        columns.extend([format!("{:.0}% CI Exp(B) Lower", level * 100.0), format!("{:.0}% CI Exp(B) Upper", level * 100.0)]);
+        columns.extend([
+            tr!("o-ci-exp-b-lower", level = format!("{:.0}", level * 100.0)),
+            tr!("o-ci-exp-b-upper", level = format!("{:.0}", level * 100.0)),
+        ]);
     }
-    let note = if converged {
-        format!("Estimation terminated at iteration number {iterations} because parameter estimates changed by less than .001.")
-    } else {
-        format!("Estimation stopped after {iterations} iterations without converging; the estimates are unreliable (complete separation?).")
-    };
+    let note = if converged { tr!("o-logistic-converged", n = iterations) } else { tr!("o-logistic-stopped", n = iterations) };
     let mut items = vec![
         Item::Table(encoding),
         Item::Table(omnibus),
         Item::Table(summary),
         Item::Text(note),
         Item::Table(classification),
-        Item::Table(Table { title: "Variables in the Equation".into(), columns, rows: coefficients, categories: Vec::new() }),
+        Item::Table(Table { title: tr!("o-variables-in-the-equation"), columns, rows: coefficients, categories: Vec::new() }),
     ];
     if !converged {
-        items.insert(0, Item::Warning("LOGISTIC REGRESSION did not converge".into()));
+        items.insert(0, Item::Warning(tr!("o-logistic-no-convergence")));
     }
     Ok(items)
 }

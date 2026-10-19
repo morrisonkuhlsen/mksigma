@@ -1,6 +1,7 @@
 //! `DISPLAY DICTIONARY`: the Variable Information and Variable Values tables.
 
 use mksigma_core::{Dataset, Measure, MissingValues, Value};
+use mksigma_i18n::tr;
 use mksigma_output::{Cell, Table};
 
 fn value_text(v: &Value) -> String {
@@ -24,17 +25,17 @@ fn missing_text(m: &MissingValues) -> String {
 
 pub(crate) fn tables(ds: &Dataset) -> Vec<Table> {
     let info = Table {
-        title: "Variable Information".to_string(),
-        columns: ["Position", "Label", "Measurement Level", "Format", "Missing Values"].map(String::from).to_vec(),
+        title: tr!("o-variable-information").to_string(),
+        columns: [tr!("o-position"), tr!("o-label"), tr!("o-measurement-level"), tr!("o-format"), tr!("o-missing-values")].map(String::from).to_vec(),
         rows: ds
             .variables()
             .iter()
             .enumerate()
             .map(|(i, v)| {
                 let measure = match v.measure {
-                    Measure::Nominal => "Nominal",
-                    Measure::Ordinal => "Ordinal",
-                    Measure::Scale => "Scale",
+                    Measure::Nominal => tr!("o-nominal"),
+                    Measure::Ordinal => tr!("o-ordinal"),
+                    Measure::Scale => tr!("o-scale"),
                 };
                 let cells = vec![
                     Cell::Int(i64::try_from(i + 1).unwrap_or(i64::MAX)),
@@ -59,8 +60,8 @@ pub(crate) fn tables(ds: &Dataset) -> Vec<Table> {
             }
         }
         tables.push(Table {
-            title: "Variable Values".to_string(),
-            columns: vec!["Value".to_string(), "Label".to_string()],
+            title: tr!("o-variable-values").to_string(),
+            columns: vec![tr!("o-value").to_string(), tr!("o-label").to_string()],
             rows,
             categories: Vec::new(),
         });

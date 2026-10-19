@@ -3,6 +3,7 @@
 //! Significant correlations are flagged `*` (p < .05) and `**` (p < .01), as SPSS does by default.
 
 use mksigma_core::Dataset;
+use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 
 use crate::groups::{numeric, valid};
@@ -52,13 +53,13 @@ pub fn correlations(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsE
     let all: Vec<usize> = rows_vars.iter().chain(&column_vars).map(|(i, _)| *i).collect();
     let usable = |case: usize| ds.case_weight(case) > 0.0 && (!options.listwise || all.iter().all(|&v| valid(ds, v, case).is_some()));
 
-    let tail = if options.one_tailed { "Sig. (1-tailed)" } else { "Sig. (2-tailed)" };
+    let tail = if options.one_tailed { tr!("o-sig-1-tailed") } else { tr!("o-sig-2-tailed") };
     let (mut flagged_05, mut flagged_01) = (false, false);
     let mut rows = Vec::new();
     for (ri, rvar) in &rows_vars {
-        let mut r_cells = vec![Cell::Text("Pearson Correlation".into())];
-        let mut sig_cells = vec![Cell::Text(tail.into())];
-        let mut n_cells = vec![Cell::Text("N".into())];
+        let mut r_cells = vec![Cell::Text(tr!("o-pearson-correlation"))];
+        let mut sig_cells = vec![Cell::Text(tail.clone())];
+        let mut n_cells = vec![Cell::Text(tr!("o-n"))];
         for (ci, _) in &column_vars {
             let pairs: Vec<(f64, f64, f64)> =
                 (0..ds.n_cases()).filter(|&c| usable(c)).filter_map(|c| Some((valid(ds, *ri, c)?, valid(ds, *ci, c)?, ds.case_weight(c)))).collect();
@@ -86,17 +87,17 @@ pub fn correlations(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsE
     }
     let mut columns = vec![String::new()];
     columns.extend(column_vars.iter().map(|(_, v)| v.display_name().to_string()));
-    let mut items = vec![Item::Table(Table { title: "Correlations".into(), columns, rows, categories: Vec::new() })];
-    let tails = if options.one_tailed { "1-tailed" } else { "2-tailed" };
+    let mut items = vec![Item::Table(Table { title: tr!("o-correlations"), columns, rows, categories: Vec::new() })];
+    let tails = if options.one_tailed { tr!("o-1-tailed") } else { tr!("o-2-tailed") };
     if flagged_01 {
-        items.push(Item::Text(format!("**. Correlation is significant at the 0.01 level ({tails}).")));
+        items.push(Item::Text(tr!("o-correlation-significant-01", tails = tails.as_str())));
     }
     if flagged_05 {
-        items.push(Item::Text(format!("*. Correlation is significant at the 0.05 level ({tails}).")));
+        items.push(Item::Text(tr!("o-correlation-significant-05", tails = tails.as_str())));
     }
     if options.listwise {
         let n: f64 = (0..ds.n_cases()).filter(|&c| usable(c)).map(|c| ds.case_weight(c)).sum();
-        items.push(Item::Text(format!("Listwise N = {}", n.round())));
+        items.push(Item::Text(tr!("o-listwise-n", n = n.round())));
     }
     Ok(items)
 }

@@ -3,6 +3,7 @@
 //! for ties. Ties share their mean rank; case weights count as frequencies.
 
 use mksigma_core::{Dataset, Value};
+use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 use statrs::distribution::{ContinuousCDF, Normal};
 
@@ -55,8 +56,8 @@ pub(crate) fn two_sided(z: f64) -> Option<f64> {
     Some(2.0 * normal.sf(z.abs()))
 }
 
-fn table(title: &str, columns: Vec<String>, rows: Vec<(String, Vec<Cell>)>) -> Item {
-    Item::Table(Table { title: title.into(), columns, rows, categories: Vec::new() })
+fn table(title: String, columns: Vec<String>, rows: Vec<(String, Vec<Cell>)>) -> Item {
+    Item::Table(Table { title, columns, rows, categories: Vec::new() })
 }
 
 pub(crate) fn group_values(ds: &Dataset, var: usize, group: usize, keep: impl Fn(f64) -> bool) -> Vec<(f64, f64, f64)> {
@@ -84,7 +85,7 @@ fn mann_whitney(ds: &Dataset, variables: &[String], group: &str, first: f64, sec
             rank_rows
                 .push((label, vec![Cell::Text(value_text(gvar, &Value::Num(g))), n_cell(gn), num((gn > 0.0).then(|| gr / gn), 2), num(Some(gr), 2)]));
         }
-        rank_rows.push((String::new(), vec![Cell::Text("Total".into()), n_cell(n), Cell::Empty, Cell::Empty]));
+        rank_rows.push((String::new(), vec![Cell::Text(tr!("o-total")), n_cell(n), Cell::Empty, Cell::Empty]));
         // U counts the pairs where the first group's value is higher; report the smaller U and
         // the rank sum of the group it belongs to.
         let u1 = r1 - n1 * (n1 + 1.0) / 2.0;
@@ -97,12 +98,12 @@ fn mann_whitney(ds: &Dataset, variables: &[String], group: &str, first: f64, sec
             row.push(cell);
         }
     }
-    let names = ["Mann-Whitney U", "Wilcoxon W", "Z", "Asymp. Sig. (2-tailed)"];
+    let names = [tr!("o-mann-whitney-u"), tr!("o-wilcoxon-w"), tr!("o-z"), tr!("o-asymp-sig-2-tailed")];
     let rows = names.iter().zip(stats).map(|(n, cells)| (n.to_string(), cells)).collect();
     Ok(vec![
-        table("Ranks", ["", "N", "Mean Rank", "Sum of Ranks"].map(String::from).to_vec(), rank_rows),
-        table("Test Statistics", columns, rows),
-        Item::Text(format!("Grouping Variable: {}", gvar.display_name())),
+        table(tr!("o-ranks"), [String::new(), tr!("o-n"), tr!("o-mean-rank"), tr!("o-sum-of-ranks")].map(String::from).to_vec(), rank_rows),
+        table(tr!("o-test-statistics"), columns, rows),
+        Item::Text(tr!("o-grouping-variable", name = gvar.display_name())),
     ])
 }
 
@@ -125,11 +126,16 @@ fn wilcoxon(ds: &Dataset, pairs: &[(String, String)]) -> Result<Vec<Item>, Stats
         let ((nn, tn), (np, tp)) = (side(true), side(false));
         let n = nn + np;
         let label = format!("{} - {}", bvar.display_name(), avar.display_name());
-        let lines = [("Negative Ranks", nn, Some(tn)), ("Positive Ranks", np, Some(tp)), ("Ties", zero, None), ("Total", n + zero, None)];
+        let lines = [
+            (tr!("o-negative-ranks"), nn, Some(tn)),
+            (tr!("o-positive-ranks"), np, Some(tp)),
+            (tr!("o-ties"), zero, None),
+            (tr!("o-total"), n + zero, None),
+        ];
         for (k, (name, count, sum)) in lines.into_iter().enumerate() {
             rank_rows.push((
                 if k == 0 { label.clone() } else { String::new() },
-                vec![Cell::Text(name.into()), n_cell(count), num(sum.filter(|_| count > 0.0).map(|s| s / count), 2), num(sum, 2)],
+                vec![Cell::Text(name), n_cell(count), num(sum.filter(|_| count > 0.0).map(|s| s / count), 2), num(sum, 2)],
             ));
         }
         let variance = n * (n + 1.0) * (2.0 * n + 1.0) / 24.0 - ties / 48.0;
@@ -139,9 +145,9 @@ fn wilcoxon(ds: &Dataset, pairs: &[(String, String)]) -> Result<Vec<Item>, Stats
         sig_row.push(num(z.and_then(two_sided), 3));
     }
     Ok(vec![
-        table("Ranks", ["", "N", "Mean Rank", "Sum of Ranks"].map(String::from).to_vec(), rank_rows),
-        table("Test Statistics", columns, vec![("Z".into(), z_row), ("Asymp. Sig. (2-tailed)".into(), sig_row)]),
-        Item::Text("Wilcoxon Signed Ranks Test. Negative ranks: the second variable is lower.".into()),
+        table(tr!("o-ranks"), [String::new(), tr!("o-n"), tr!("o-mean-rank"), tr!("o-sum-of-ranks")].map(String::from).to_vec(), rank_rows),
+        table(tr!("o-test-statistics"), columns, vec![(tr!("o-z"), z_row), (tr!("o-asymp-sig-2-tailed"), sig_row)]),
+        Item::Text(tr!("o-wilcoxon-signed-ranks-test-negative-ranks-the-second-variable-is-lower")),
     ])
 }
 
@@ -164,7 +170,7 @@ fn kruskal_wallis(ds: &Dataset, variables: &[String], group: &str, low: f64, hig
             let label = if k == 0 { var.display_name().to_string() } else { String::new() };
             rank_rows.push((label, vec![Cell::Text(value_text(gvar, &Value::Num(*level))), n_cell(gn), num(Some(gr / gn), 2)]));
         }
-        rank_rows.push((String::new(), vec![Cell::Text("Total".into()), n_cell(n), Cell::Empty]));
+        rank_rows.push((String::new(), vec![Cell::Text(tr!("o-total")), n_cell(n), Cell::Empty]));
         let h = (12.0 / (n * (n + 1.0)) * h - 3.0 * (n + 1.0)) / (1.0 - ties / (n.powi(3) - n));
         let df = levels.len() as f64 - 1.0;
         let h = Some(h).filter(|h| h.is_finite() && df >= 1.0);
@@ -173,11 +179,11 @@ fn kruskal_wallis(ds: &Dataset, variables: &[String], group: &str, low: f64, hig
             row.push(cell);
         }
     }
-    let rows = ["Kruskal-Wallis H", "df", "Asymp. Sig."].iter().zip(stats).map(|(n, cells)| (n.to_string(), cells)).collect();
+    let rows = [tr!("o-kruskal-wallis-h"), tr!("o-df"), tr!("o-asymp-sig")].iter().zip(stats).map(|(n, cells)| (n.to_string(), cells)).collect();
     Ok(vec![
-        table("Ranks", ["", "N", "Mean Rank"].map(String::from).to_vec(), rank_rows),
-        table("Test Statistics", columns, rows),
-        Item::Text(format!("Kruskal Wallis Test. Grouping Variable: {}", gvar.display_name())),
+        table(tr!("o-ranks"), [String::new(), tr!("o-n"), tr!("o-mean-rank")].map(String::from).to_vec(), rank_rows),
+        table(tr!("o-test-statistics"), columns, rows),
+        Item::Text(tr!("o-kruskal-wallis-note", name = gvar.display_name())),
     ])
 }
 

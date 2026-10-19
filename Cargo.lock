@@ -1786,6 +1786,7 @@ version = "0.1.0"
 dependencies = [
  "mksigma-core",
  "mksigma-csv",
+ "mksigma-i18n",
  "mksigma-output",
  "mksigma-sav",
  "mksigma-stats",
@@ -1809,6 +1810,9 @@ dependencies = [
 [[package]]
 name = "mksigma-output"
 version = "0.1.0"
+dependencies = [
+ "mksigma-i18n",
+]
 
 [[package]]
 name = "mksigma-sav"
@@ -1824,6 +1828,7 @@ name = "mksigma-stats"
 version = "0.1.0"
 dependencies = [
  "mksigma-core",
+ "mksigma-i18n",
  "mksigma-output",
  "statrs",
  "thiserror 2.0.21",

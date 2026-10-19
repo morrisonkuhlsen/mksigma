@@ -9,6 +9,7 @@ description = "MK Sigma session: runs commands against a dataset and collects ou
 workspace = true
 
 [dependencies]
+mksigma-i18n = { workspace = true }
 mksigma-core = { workspace = true }
 mksigma-output = { workspace = true }
 mksigma-sav = { workspace = true }

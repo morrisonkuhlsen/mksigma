@@ -3,6 +3,7 @@
 //! analysis by analysis; case weights count as frequencies.
 
 use mksigma_core::{Dataset, Value};
+use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 
 use crate::groups::{levene, moments, numeric, std_error, valid, valid_value};
@@ -16,7 +17,7 @@ pub enum TTest {
 }
 
 fn ci_label(ci: f64, end: &str) -> String {
-    format!("{:.0}% CI {end}", ci * 100.0)
+    tr!(end, level = format!("{:.0}", ci * 100.0))
 }
 
 /// `mean ± t × se` for a two-sided interval of confidence `ci`.
@@ -44,13 +45,13 @@ fn one_sample(ds: &Dataset, variables: &[String], test_value: f64, ci: f64) -> R
             vec![num(t, 3), n_cell(df.max(0.0)), num(sig, 3), num((m.w > 0.0).then_some(diff), 3), lower, upper],
         ));
     }
-    let stat_columns = ["N", "Mean", "Std. Deviation", "Std. Error Mean"].map(String::from).to_vec();
-    let mut test_columns = ["t", "df", "Sig. (2-tailed)", "Mean Difference"].map(String::from).to_vec();
-    test_columns.extend([ci_label(ci, "Lower"), ci_label(ci, "Upper")]);
+    let stat_columns = [tr!("o-n"), tr!("o-mean"), tr!("o-std-deviation"), tr!("o-std-error-mean")].map(String::from).to_vec();
+    let mut test_columns = [tr!("o-t"), tr!("o-df"), tr!("o-sig-2-tailed"), tr!("o-mean-difference")].map(String::from).to_vec();
+    test_columns.extend([ci_label(ci, "o-ci-lower"), ci_label(ci, "o-ci-upper")]);
     Ok(vec![
-        Item::Table(Table { title: "One-Sample Statistics".into(), columns: stat_columns, rows: stats, categories: Vec::new() }),
+        Item::Table(Table { title: tr!("o-one-sample-statistics"), columns: stat_columns, rows: stats, categories: Vec::new() }),
         Item::Table(Table {
-            title: format!("One-Sample Test (Test Value = {test_value})"),
+            title: tr!("o-one-sample-test", value = format!("{test_value}")),
             columns: test_columns,
             rows: tests,
             categories: Vec::new(),
@@ -116,18 +117,29 @@ fn independent(ds: &Dataset, variables: &[String], group: &str, first: &Value, s
         let levene_cells = [num(lev.map(|l| l.0), 3), num(lev.map(|l| l.3), 3)];
         let mut equal = row(se_pooled, Some(df_pooled), n_cell(df_pooled), levene_cells);
         let mut unequal = row(se_welch, df_welch, num(df_welch, 3), [Cell::Empty, Cell::Empty]);
-        equal[0] = Cell::Text("Equal variances assumed".into());
-        unequal[0] = Cell::Text("Equal variances not assumed".into());
+        equal[0] = Cell::Text(tr!("o-equal-variances-assumed"));
+        unequal[0] = Cell::Text(tr!("o-equal-variances-not-assumed"));
         tests.push((var.display_name().to_string(), equal));
         tests.push((String::new(), unequal));
     }
-    let stat_columns = [gvar.display_name(), "N", "Mean", "Std. Deviation", "Std. Error Mean"].map(String::from).to_vec();
-    let mut test_columns =
-        ["", "Levene F", "Levene Sig.", "t", "df", "Sig. (2-tailed)", "Mean Difference", "Std. Error Difference"].map(String::from).to_vec();
-    test_columns.extend([ci_label(ci, "Lower"), ci_label(ci, "Upper")]);
+    let stat_columns =
+        [gvar.display_name().to_string(), tr!("o-n"), tr!("o-mean"), tr!("o-std-deviation"), tr!("o-std-error-mean")].map(String::from).to_vec();
+    let mut test_columns = [
+        String::new(),
+        tr!("o-levene-f"),
+        tr!("o-levene-sig"),
+        tr!("o-t"),
+        tr!("o-df"),
+        tr!("o-sig-2-tailed"),
+        tr!("o-mean-difference"),
+        tr!("o-std-error-difference"),
+    ]
+    .map(String::from)
+    .to_vec();
+    test_columns.extend([ci_label(ci, "o-ci-lower"), ci_label(ci, "o-ci-upper")]);
     Ok(vec![
-        Item::Table(Table { title: "Group Statistics".into(), columns: stat_columns, rows: stats, categories: Vec::new() }),
-        Item::Table(Table { title: "Independent Samples Test".into(), columns: test_columns, rows: tests, categories: Vec::new() }),
+        Item::Table(Table { title: tr!("o-group-statistics"), columns: stat_columns, rows: stats, categories: Vec::new() }),
+        Item::Table(Table { title: tr!("o-independent-samples-test"), columns: test_columns, rows: tests, categories: Vec::new() }),
     ])
 }
 
@@ -141,7 +153,7 @@ fn paired(ds: &Dataset, pairs: &[(String, String)], ci: f64) -> Result<Vec<Item>
         let ma = moments(&rows.iter().map(|(x, _, w)| (*x, *w)).collect::<Vec<_>>());
         let mb = moments(&rows.iter().map(|(_, y, w)| (*y, *w)).collect::<Vec<_>>());
         let md = moments(&rows.iter().map(|(x, y, w)| (x - y, *w)).collect::<Vec<_>>());
-        let pair = format!("Pair {}", p + 1);
+        let pair = tr!("o-pair", n = p + 1);
         for (k, (var, m)) in [(avar, &ma), (bvar, &mb)].into_iter().enumerate() {
             let label = if k == 0 { pair.clone() } else { String::new() };
             stats.push((
@@ -183,15 +195,15 @@ fn paired(ds: &Dataset, pairs: &[(String, String)], ci: f64) -> Result<Vec<Item>
             ],
         ));
     }
-    let stat_columns = ["", "Mean", "N", "Std. Deviation", "Std. Error Mean"].map(String::from).to_vec();
-    let corr_columns = ["", "N", "Correlation", "Sig."].map(String::from).to_vec();
-    let mut test_columns = ["", "Mean", "Std. Deviation", "Std. Error Mean"].map(String::from).to_vec();
-    test_columns.extend([ci_label(ci, "Lower"), ci_label(ci, "Upper")]);
-    test_columns.extend(["t", "df", "Sig. (2-tailed)"].map(String::from));
+    let stat_columns = [String::new(), tr!("o-mean"), tr!("o-n"), tr!("o-std-deviation"), tr!("o-std-error-mean")].map(String::from).to_vec();
+    let corr_columns = [String::new(), tr!("o-n"), tr!("o-correlation"), tr!("o-sig")].map(String::from).to_vec();
+    let mut test_columns = [String::new(), tr!("o-mean"), tr!("o-std-deviation"), tr!("o-std-error-mean")].map(String::from).to_vec();
+    test_columns.extend([ci_label(ci, "o-ci-lower"), ci_label(ci, "o-ci-upper")]);
+    test_columns.extend([tr!("o-t"), tr!("o-df"), tr!("o-sig-2-tailed")].map(String::from));
     Ok(vec![
-        Item::Table(Table { title: "Paired Samples Statistics".into(), columns: stat_columns, rows: stats, categories: Vec::new() }),
-        Item::Table(Table { title: "Paired Samples Correlations".into(), columns: corr_columns, rows: correlations, categories: Vec::new() }),
-        Item::Table(Table { title: "Paired Samples Test".into(), columns: test_columns, rows: tests, categories: Vec::new() }),
+        Item::Table(Table { title: tr!("o-paired-samples-statistics"), columns: stat_columns, rows: stats, categories: Vec::new() }),
+        Item::Table(Table { title: tr!("o-paired-samples-correlations"), columns: corr_columns, rows: correlations, categories: Vec::new() }),
+        Item::Table(Table { title: tr!("o-paired-samples-test"), columns: test_columns, rows: tests, categories: Vec::new() }),
     ])
 }
 

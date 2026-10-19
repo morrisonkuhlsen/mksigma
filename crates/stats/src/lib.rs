@@ -4,6 +4,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use mksigma_core::{Dataset, Value, Variable};
+use mksigma_i18n::tr;
 use mksigma_output::{Cases, Category, Cell, Table};
 use thiserror::Error;
 
@@ -103,7 +104,7 @@ fn n_cell(w: f64) -> Cell {
 }
 
 /// `DESCRIPTIVES`: N, minimum, maximum, mean and standard deviation of each variable, with
-/// missing values excluded variable by variable, and a "Valid N (listwise)" row. Under
+/// missing values excluded variable by variable, and a tr!("o-valid-n-listwise") row. Under
 /// `WEIGHT BY` each case counts as its weight; cases with no valid positive weight are left out.
 pub fn descriptives(ds: &Dataset, names: &[String]) -> Result<Table, StatsError> {
     let mut vars = Vec::with_capacity(names.len());
@@ -140,11 +141,11 @@ pub fn descriptives(ds: &Dataset, names: &[String]) -> Result<Table, StatsError>
         .filter(|&(case, _)| vars.iter().all(|(var, column)| column.get(case).is_some_and(|v| matches!(v, Value::Num(_)) && !var.is_missing(v))))
         .map(|(_, w)| w)
         .sum();
-    rows.push(("Valid N (listwise)".to_string(), vec![n_cell(listwise), Cell::Empty, Cell::Empty, Cell::Empty, Cell::Empty]));
+    rows.push((tr!("o-valid-n-listwise").to_string(), vec![n_cell(listwise), Cell::Empty, Cell::Empty, Cell::Empty, Cell::Empty]));
 
     Ok(Table {
-        title: "Descriptive Statistics".to_string(),
-        columns: ["N", "Minimum", "Maximum", "Mean", "Std. Deviation"].map(String::from).to_vec(),
+        title: tr!("o-descriptive-statistics").to_string(),
+        columns: [tr!("o-n"), tr!("o-minimum"), tr!("o-maximum"), tr!("o-mean"), tr!("o-std-deviation")].map(String::from).to_vec(),
         rows,
         categories: Vec::new(),
     })

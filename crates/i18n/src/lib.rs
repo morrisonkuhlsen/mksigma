@@ -133,6 +133,16 @@ impl From<i64> for Arg {
         Arg::Num(x as f64)
     }
 }
+macro_rules! from_integer {
+    ($($t:ty),*) => {$(
+        impl From<$t> for Arg {
+            fn from(x: $t) -> Self {
+                Arg::Num(f64::from(x))
+            }
+        }
+    )*};
+}
+from_integer!(i32, u32, u16, u8);
 
 /// A piece of a message.
 #[derive(Debug, Clone, PartialEq)]

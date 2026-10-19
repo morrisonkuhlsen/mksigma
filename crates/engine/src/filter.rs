@@ -8,6 +8,7 @@
 //! the analyses, and then the cross-filter, start from.
 
 use mksigma_core::{Dataset, Value, Variable};
+use mksigma_i18n::tr;
 use mksigma_output::{Cases, Category, Item};
 use mksigma_syntax::Command;
 
@@ -74,11 +75,13 @@ impl Slicer {
             )
         };
         match &self.selection {
-            Selection::Values(values) => format!("{name}: {}", values.iter().map(show).collect::<Vec<_>>().join(", ")),
-            Selection::Range { low: Some(l), high: Some(h) } => format!("{name} {} to {}", show(&Value::Num(*l)), show(&Value::Num(*h))),
-            Selection::Range { low: Some(l), high: None } => format!("{name} from {}", show(&Value::Num(*l))),
-            Selection::Range { low: None, high: Some(h) } => format!("{name} up to {}", show(&Value::Num(*h))),
-            Selection::Range { low: None, high: None } => format!("{name}: any valid value"),
+            Selection::Values(values) => tr!("slice-values", name = name, values = values.iter().map(show).collect::<Vec<_>>().join(", ")),
+            Selection::Range { low: Some(l), high: Some(h) } => {
+                tr!("slice-range", name = name, low = show(&Value::Num(*l)), high = show(&Value::Num(*h)))
+            }
+            Selection::Range { low: Some(l), high: None } => tr!("slice-from", name = name, low = show(&Value::Num(*l))),
+            Selection::Range { low: None, high: Some(h) } => tr!("slice-up-to", name = name, high = show(&Value::Num(*h))),
+            Selection::Range { low: None, high: None } => tr!("slice-any", name = name),
         }
     }
 

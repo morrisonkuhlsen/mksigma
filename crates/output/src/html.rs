@@ -5,6 +5,7 @@ use crate::Category;
 use crate::chart::{svg, svg_picking};
 use crate::style::{Family, Style};
 use crate::{Cell, Item, Output, Table};
+use mksigma_i18n::tr;
 
 const STYLE: &str = r#"
 :root { --fg: #1d2330; --muted: #5b6475; --line: #d5d9e0; --stripe: #f4f6f9; --bg: #ffffff;
@@ -89,7 +90,7 @@ fn item(item: &Item, style: &Style) -> String {
     match item {
         Item::Table(t) => table(t, style),
         Item::Text(s) => format!("<p class=\"note\">{}</p>", escape(s)),
-        Item::Warning(s) => format!("<p class=\"warning\">Warning: {}</p>", escape(s)),
+        Item::Warning(s) => format!("<p class=\"warning\">{}</p>", escape(&tr!("warning", text = s.as_str()))),
         Item::Chart(c) => svg(c, 640.0, 400.0),
     }
 }
@@ -167,7 +168,7 @@ impl Output {
     /// allows (a `wide` item, by index, takes a whole row), under `title` and a line naming the
     /// filters, if any.
     pub fn to_dashboard_html(&self, title: &str, filters: Option<&str>, wide: &[bool]) -> String {
-        let mut body = filters.map(|f| format!("<p class=\"filters\">Filtered by {}</p>\n", escape(f))).unwrap_or_default();
+        let mut body = filters.map(|f| format!("<p class=\"filters\">{}</p>\n", escape(&tr!("fact-filtered", filters = f)))).unwrap_or_default();
         body.push_str("<div class=\"tiles\">\n");
         for (k, i) in self.items.iter().enumerate() {
             let class = if wide.get(k).copied().unwrap_or(false) { "tile wide" } else { "tile" };

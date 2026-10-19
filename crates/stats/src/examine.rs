@@ -7,6 +7,7 @@
 //! Tukey's hinges, as SPSS's boxplots do.
 
 use mksigma_core::{Dataset, Value};
+use mksigma_i18n::tr;
 use mksigma_output::chart::BoxStats;
 use mksigma_output::{Cell, Chart, Item, Table};
 
@@ -125,26 +126,26 @@ fn descriptive_rows(label: String, values: &Sorted) -> Vec<(String, Vec<Cell>)> 
         .filter(|_| w > 3.0)
         .map(|s| w * (w + 1.0) / ((w - 1.0) * (w - 2.0) * (w - 3.0)) * central(4) / s.powi(4) - 3.0 * (w - 1.0).powi(2) / ((w - 2.0) * (w - 3.0)));
     let se_kurt = se_skew.filter(|_| w > 3.0).map(|s| (4.0 * (w * w - 1.0) * s * s / ((w - 3.0) * (w + 5.0))).sqrt());
-    let lines: Vec<(&str, Option<f64>, Option<f64>)> = vec![
-        ("Mean", Some(m.mean), se),
-        ("95% CI for Mean, Lower Bound", half.map(|h| m.mean - h), None),
-        ("95% CI for Mean, Upper Bound", half.map(|h| m.mean + h), None),
-        ("5% Trimmed Mean", Some(values.trimmed_mean(0.05)), None),
-        ("Median", Some(values.percentile(0.5)), None),
-        ("Variance", sd.map(|s| s * s), None),
-        ("Std. Deviation", sd, None),
-        ("Minimum", min, None),
-        ("Maximum", max, None),
-        ("Range", min.zip(max).map(|(a, b)| b - a), None),
-        ("Interquartile Range", Some(values.percentile(0.75) - values.percentile(0.25)), None),
-        ("Skewness", skew, se_skew),
-        ("Kurtosis", kurt, se_kurt),
+    let lines: Vec<(String, Option<f64>, Option<f64>)> = vec![
+        (tr!("o-mean"), Some(m.mean), se),
+        (tr!("o-95-ci-for-mean-lower-bound"), half.map(|h| m.mean - h), None),
+        (tr!("o-95-ci-for-mean-upper-bound"), half.map(|h| m.mean + h), None),
+        (tr!("o-5-trimmed-mean"), Some(values.trimmed_mean(0.05)), None),
+        (tr!("o-median"), Some(values.percentile(0.5)), None),
+        (tr!("o-variance"), sd.map(|s| s * s), None),
+        (tr!("o-std-deviation"), sd, None),
+        (tr!("o-minimum"), min, None),
+        (tr!("o-maximum"), max, None),
+        (tr!("o-range"), min.zip(max).map(|(a, b)| b - a), None),
+        (tr!("o-interquartile-range"), Some(values.percentile(0.75) - values.percentile(0.25)), None),
+        (tr!("o-skewness"), skew, se_skew),
+        (tr!("o-kurtosis"), kurt, se_kurt),
     ];
     lines
         .into_iter()
         .enumerate()
         .map(|(i, (name, statistic, error))| {
-            (if i == 0 { label.clone() } else { String::new() }, vec![Cell::Text(name.into()), num(statistic, 3), num(error, 3)])
+            (if i == 0 { label.clone() } else { String::new() }, vec![Cell::Text(name), num(statistic, 3), num(error, 3)])
         })
         .collect()
 }
@@ -224,15 +225,15 @@ pub fn examine(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError>
         }
     }
     let mut items = vec![Item::Table(Table {
-        title: "Case Processing Summary".into(),
-        columns: ["Valid N", "Missing N", "Total N"].map(String::from).to_vec(),
+        title: tr!("o-case-processing-summary"),
+        columns: [tr!("o-valid-n"), tr!("o-missing-n"), tr!("o-total-n")].map(String::from).to_vec(),
         rows: summary,
         categories: Vec::new(),
     })];
     if options.descriptives {
         items.push(Item::Table(Table {
-            title: "Descriptives".into(),
-            columns: ["", "Statistic", "Std. Error"].map(String::from).to_vec(),
+            title: tr!("o-descriptives"),
+            columns: [String::new(), tr!("o-statistic"), tr!("o-std-error")].map(String::from).to_vec(),
             rows: descriptives,
             categories: Vec::new(),
         }));

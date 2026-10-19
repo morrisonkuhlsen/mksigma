@@ -9,6 +9,7 @@
 use crate::chart::{self, Anchor, Shape, Stroke, TextSize};
 use crate::style::{Family, Style};
 use crate::{Cell, Item, Output, Table};
+use mksigma_i18n::tr;
 
 const PAGE: (f64, f64) = (595.28, 841.89);
 const MARGIN: f64 = 50.0;
@@ -331,7 +332,7 @@ impl Pages {
         let total: f64 = widths.iter().sum();
         let caption = |pages: &mut Pages, more: bool| {
             pages.y -= 12.0;
-            let title = if more { format!("{} (continued)", t.title) } else { t.title.clone() };
+            let title = if more { tr!("pdf-continued", title = t.title.as_str()) } else { t.title.clone() };
             let size = pages.pt(10.0);
             pages.text(MARGIN, pages.y, &title, Font { size, bold: true, color: INK }, Anchor::Start, false);
             pages.y -= 4.0;
@@ -494,7 +495,7 @@ impl Output {
                 }
                 Item::Warning(s) => {
                     let size = pages.pt(8.5);
-                    pages.paragraph(&format!("Warning: {s}"), size, WARN, content);
+                    pages.paragraph(&tr!("warning", text = s.as_str()), size, WARN, content);
                 }
                 Item::Chart(c) => pages.chart(c),
             }
@@ -508,7 +509,7 @@ impl Output {
             footer.text(
                 PAGE.0 - MARGIN,
                 30.0,
-                &format!("Page {} of {total}", i + 1),
+                &tr!("pdf-page", n = i + 1, total = total),
                 Font { size: 8.0, bold: false, color: MUTED },
                 Anchor::End,
                 false,

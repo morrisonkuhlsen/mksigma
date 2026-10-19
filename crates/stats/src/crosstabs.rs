@@ -3,6 +3,7 @@
 //! out of that table. Weighted cell counts are rounded to whole numbers, as SPSS does by default.
 
 use mksigma_core::{Dataset, Value, VarType, Variable};
+use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 
 use crate::groups::valid_value;
@@ -135,13 +136,13 @@ impl Line {
         .collect()
     }
 
-    fn name(self) -> &'static str {
+    fn name(self) -> String {
         match self {
-            Line::Count => "Count",
-            Line::Expected => "Expected Count",
-            Line::RowPercent => "% within row",
-            Line::ColumnPercent => "% within column",
-            Line::TotalPercent => "% of Total",
+            Line::Count => tr!("o-count"),
+            Line::Expected => tr!("o-expected-count"),
+            Line::RowPercent => tr!("o-within-row"),
+            Line::ColumnPercent => tr!("o-within-column"),
+            Line::TotalPercent => tr!("o-of-total"),
         }
     }
 }
@@ -173,7 +174,7 @@ fn table(row_var: &Variable, column_var: &Variable, counts: &Counts, cells: Cell
     let n = counts.total();
     let mut columns = vec![String::new()];
     columns.extend(counts.columns.iter().map(|v| value_text(column_var, v)));
-    columns.push("Total".to_string());
+    columns.push(tr!("o-total").to_string());
     let lines = Line::requested(cells);
     let column_totals: Vec<f64> = (0..counts.columns.len()).map(|c| counts.column_total(c)).collect();
 
@@ -196,7 +197,7 @@ fn table(row_var: &Variable, column_var: &Variable, counts: &Counts, cells: Cell
     let mut totals: Vec<Margins> =
         column_totals.iter().map(|&column| Margins { count: column, expected: column, row: n, column, total: n }).collect();
     totals.push(Margins { count: n, expected: n, row: n, column: n, total: n });
-    blocks.push(("Total".to_string(), totals));
+    blocks.push((tr!("o-total").to_string(), totals));
 
     let mut rows = Vec::with_capacity(blocks.len() * lines.len());
     for (label, margins) in blocks {
@@ -206,7 +207,12 @@ fn table(row_var: &Variable, column_var: &Variable, counts: &Counts, cells: Cell
             rows.push((if i == 0 { label.clone() } else { String::new() }, out));
         }
     }
-    Table { title: format!("{} * {} Crosstabulation", row_var.display_name(), column_var.display_name()), columns, rows, categories: Vec::new() }
+    Table {
+        title: tr!("o-crosstabulation", rows = row_var.display_name(), columns = column_var.display_name()),
+        columns,
+        rows,
+        categories: Vec::new(),
+    }
 }
 
 /// Pearson correlation of the row and column scores, weighted by the cell counts.
@@ -241,7 +247,7 @@ fn chi_square(row_var: &Variable, column_var: &Variable, counts: &Counts) -> Vec
     let n = counts.total();
     if nr < 2 || nc < 2 {
         let constant = if nr < 2 { row_var } else { column_var };
-        return vec![Item::Text(format!("No statistics are computed because {} is a constant.", constant.name))];
+        return vec![Item::Text(tr!("o-constant-no-statistics", name = constant.name.as_str()))];
     }
     let df = ((nr - 1) * (nc - 1)) as f64;
     let (mut pearson, mut lr, mut small, mut min_expected) = (0.0, 0.0, 0, f64::INFINITY);
@@ -259,39 +265,44 @@ fn chi_square(row_var: &Variable, column_var: &Variable, counts: &Counts) -> Vec
         }
     }
     let sig = |x: f64, df: f64| num(dist::chi_square_sig(x, df), 3);
-    let row = |name: &str, value: f64, df: f64, extra: [Cell; 2]| {
+    let row = |name: String, value: f64, df: f64, extra: [Cell; 2]| {
         let [two, one] = extra;
-        (name.to_string(), vec![num(Some(value), 3), Cell::Int(df as i64), sig(value, df), two, one])
+        (name, vec![num(Some(value), 3), Cell::Int(df as i64), sig(value, df), two, one])
     };
-    let mut rows = vec![row("Pearson Chi-Square", pearson, df, [Cell::Empty, Cell::Empty])];
+    let mut rows = vec![row(tr!("o-pearson-chi-square"), pearson, df, [Cell::Empty, Cell::Empty])];
     let two_by_two = nr == 2 && nc == 2;
     if two_by_two {
         let (a, b, c, d) = (counts.get(0, 0), counts.get(0, 1), counts.get(1, 0), counts.get(1, 1));
         let (r1, r2, c1, c2) = (a + b, c + d, a + c, b + d);
         let yates = n * ((a * d - b * c).abs() - n / 2.0).max(0.0).powi(2) / (r1 * r2 * c1 * c2);
-        rows.push(row("Continuity Correction", yates, 1.0, [Cell::Empty, Cell::Empty]));
-        rows.push(row("Likelihood Ratio", lr, df, [Cell::Empty, Cell::Empty]));
+        rows.push(row(tr!("o-continuity-correction"), yates, 1.0, [Cell::Empty, Cell::Empty]));
+        rows.push(row(tr!("o-likelihood-ratio"), lr, df, [Cell::Empty, Cell::Empty]));
         let (two, one) = dist::fisher_exact(a, b, c, d);
-        rows.push(("Fisher's Exact Test".to_string(), vec![Cell::Empty, Cell::Empty, Cell::Empty, num(Some(two), 3), num(Some(one), 3)]));
+        rows.push((tr!("o-fisher-s-exact-test").to_string(), vec![Cell::Empty, Cell::Empty, Cell::Empty, num(Some(two), 3), num(Some(one), 3)]));
     } else {
-        rows.push(row("Likelihood Ratio", lr, df, [Cell::Empty, Cell::Empty]));
+        rows.push(row(tr!("o-likelihood-ratio"), lr, df, [Cell::Empty, Cell::Empty]));
     }
     if row_var.var_type == VarType::Numeric
         && column_var.var_type == VarType::Numeric
         && let Some(r) = score_correlation(counts)
     {
-        rows.push(row("Linear-by-Linear Association", (n - 1.0) * r * r, 1.0, [Cell::Empty, Cell::Empty]));
+        rows.push(row(tr!("o-linear-by-linear-association"), (n - 1.0) * r * r, 1.0, [Cell::Empty, Cell::Empty]));
     }
-    rows.push(("N of Valid Cases".to_string(), vec![n_cell(n), Cell::Empty, Cell::Empty, Cell::Empty, Cell::Empty]));
-    let columns = ["Value", "df", "Asymptotic Significance (2-sided)", "Exact Sig. (2-sided)", "Exact Sig. (1-sided)"].map(String::from).to_vec();
+    rows.push((tr!("o-n-of-valid-cases").to_string(), vec![n_cell(n), Cell::Empty, Cell::Empty, Cell::Empty, Cell::Empty]));
+    let columns = [tr!("o-value"), tr!("o-df"), tr!("o-asymptotic-significance-2-sided"), tr!("o-exact-sig-2-sided"), tr!("o-exact-sig-1-sided")]
+        .map(String::from)
+        .to_vec();
     let total_cells = nr * nc;
-    let note = format!(
-        "a. {small} cells ({:.1}%) have expected count less than 5. The minimum expected count is {min_expected:.2}.",
-        small as f64 / total_cells as f64 * 100.0
+    let note = tr!(
+        "o-expected-note",
+        cells = small,
+        percent = format!("{:.1}", small as f64 / total_cells as f64 * 100.0),
+        minimum = format!("{min_expected:.2}")
     );
-    let mut items = vec![Item::Table(Table { title: "Chi-Square Tests".to_string(), columns, rows, categories: Vec::new() }), Item::Text(note)];
+    let mut items =
+        vec![Item::Table(Table { title: tr!("o-chi-square-tests").to_string(), columns, rows, categories: Vec::new() }), Item::Text(note)];
     if two_by_two {
-        items.push(Item::Text("b. Continuity Correction is computed only for a 2x2 table.".to_string()));
+        items.push(Item::Text(tr!("o-b-continuity-correction-is-computed-only-for-a-2x2-table").to_string()));
     }
     items
 }
@@ -317,8 +328,10 @@ pub fn crosstabs(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErro
             }
         }
     }
-    let columns = ["Valid N", "Valid Percent", "Missing N", "Missing Percent", "Total N", "Total Percent"].map(String::from).to_vec();
-    let mut items = vec![Item::Table(Table { title: "Case Processing Summary".to_string(), columns, rows: summary, categories: Vec::new() })];
+    let columns = [tr!("o-valid-n"), tr!("o-valid-percent"), tr!("o-missing-n"), tr!("o-missing-percent"), tr!("o-total-n"), tr!("o-total-percent")]
+        .map(String::from)
+        .to_vec();
+    let mut items = vec![Item::Table(Table { title: tr!("o-case-processing-summary").to_string(), columns, rows: summary, categories: Vec::new() })];
     items.extend(tables);
     Ok(items)
 }

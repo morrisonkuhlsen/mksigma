@@ -233,7 +233,7 @@ pub fn layout(chart: &Chart, width: f64, height: f64) -> Vec<Shape> {
     let mut out = Vec::new();
     match chart {
         Chart::Histogram { title, x_label, bins, normal, n, .. } => {
-            axis_titles(&mut out, &f, width, title, x_label, "Frequency");
+            axis_titles(&mut out, &f, width, title, x_label, &tr!("o-frequency"));
             let (lo, hi) = (bins.first().map_or(0.0, |b| b.0), bins.last().map_or(1.0, |b| b.1));
             let top = bins.iter().map(|b| b.2).fold(0.0, f64::max);
             let curve_top = normal.map_or(0.0, |(m, s)| normal_pdf(m, m, s) * n * bins.first().map_or(1.0, |b| b.1 - b.0));
@@ -257,7 +257,7 @@ pub fn layout(chart: &Chart, width: f64, height: f64) -> Vec<Shape> {
                 out.push(Shape::Text {
                     x: f.right,
                     y: f.top - 4.0,
-                    text: format!("Mean = {mean:.2}  Std. Dev. = {sd:.3}  N = {n:.0}"),
+                    text: tr!("chart-normal-legend", mean = format!("{mean:.2}"), sd = format!("{sd:.3}"), n = format!("{n:.0}")),
                     anchor: Anchor::End,
                     size: TextSize::Small,
                     vertical: false,
@@ -353,6 +353,7 @@ pub fn part_at(shapes: &[Shape], x: f64) -> Option<usize> {
 
 use crate::Category;
 use crate::html::escape;
+use mksigma_i18n::tr;
 
 /// The chart as a standalone SVG element (colours via CSS classes, so a page can theme it).
 pub fn svg(chart: &Chart, width: f64, height: f64) -> String {

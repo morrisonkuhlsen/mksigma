@@ -3,6 +3,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use mksigma_core::{Dataset, DatasetError, Value, Variable};
+use mksigma_i18n::tr;
 use mksigma_output::{Item, Output};
 use mksigma_syntax::{Command, SyntaxError};
 use thiserror::Error;
@@ -639,6 +640,19 @@ impl Session {
         (sliced, crossed)
     }
 
+    /// The language changed: the Output's tables and charts are made again in it, those on the
+    /// data as it still is. One made before the data changed keeps its words, and its numbers.
+    pub fn language_changed(&mut self) {
+        for run in &mut self.runs {
+            if run.version == self.version
+                && let Ok(items) = analyse(&self.dataset, &run.command)
+            {
+                run.items = items;
+            }
+        }
+        self.show_runs();
+    }
+
     /// Counts the changes to the data: what is computed from it is current while this stays.
     pub fn data_version(&self) -> u64 {
         self.version
@@ -662,9 +676,11 @@ impl Session {
             // Every table of a t test: the groups, the test, a pair's correlation.
             Command::TTest { .. } => Some((run, None)),
             // With its chi-square tests: the crosstabulations and the tests, not the summary.
-            Command::Crosstabs { chisq: true, .. } if table.title != "Case Processing Summary" => Some((run, None)),
+            // The summary comes first.
+            Command::Crosstabs { chisq: true, .. } if place > 0 => Some((run, None)),
             Command::Oneway { .. } | Command::NparTests(_) => Some((run, None)),
-            Command::Examine { .. } if table.title == "Descriptives" => Some((run, None)),
+            // After the summary.
+            Command::Examine { descriptives: true, .. } if place == 1 => Some((run, None)),
             Command::Regression { .. } => Some((run, None)),
             _ => None,
         }
@@ -1062,7 +1078,7 @@ fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
                 mksigma_stats::ExamineOptions { variables: variables.clone(), by: by.clone(), descriptives: *descriptives, boxplot: *boxplot };
             items.extend(mksigma_stats::examine(ds, &options)?);
             if *stemleaf {
-                items.push(Item::Text("Stem-and-leaf plots are not drawn yet.".into()));
+                items.push(Item::Text(tr!("o-stem-and-leaf-plots-are-not-drawn-yet")));
             }
         }
         Command::Graph { chart, title } => {
@@ -1263,6 +1279,19 @@ mod tests {
             assert_eq!(e.title, "T-Test");
             assert!(e.sections.iter().any(|(h, _)| h.contains("Levene")), "{:?}", e.sections);
         }
+    }
+
+    #[test]
+    fn the_output_follows_the_language() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("DESCRIPTIVES age.").unwrap();
+        mksigma_i18n::set(mksigma_i18n::Lang::PtBr);
+        s.language_changed();
+        let text = s.output.to_text();
+        mksigma_i18n::set(mksigma_i18n::Lang::En);
+        assert!(text.starts_with("Estatísticas descritivas\n"), "{text}");
+        // Syntax stays English whatever the language.
+        assert_eq!(s.journal, ["DESCRIPTIVES age."]);
     }
 
     #[test]

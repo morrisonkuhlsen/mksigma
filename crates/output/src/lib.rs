@@ -125,7 +125,7 @@ impl Output {
                 Item::Table(t) => out.push_str(&table_to_text(t)),
                 Item::Text(s) => out.push_str(s),
                 Item::Warning(s) => {
-                    out.push_str("Warning: ");
+                    out.push_str(&mksigma_i18n::message("warning", &[("text", mksigma_i18n::Arg::Str(String::new()))]));
                     out.push_str(s);
                 }
                 Item::Chart(c) => {

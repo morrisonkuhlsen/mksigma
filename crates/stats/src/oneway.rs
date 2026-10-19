@@ -4,6 +4,7 @@
 //! Bonferroni). Missing values are excluded analysis by analysis.
 
 use mksigma_core::{Dataset, Value};
+use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 
 use crate::groups::{anova, levene, moments, numeric, std_error, valid};
@@ -32,8 +33,8 @@ fn comparisons(test: PostHoc, labels: &[String], stats: &[Moments], mse: f64, df
     let k = stats.len() as f64;
     let m = k * (k - 1.0) / 2.0;
     let name = match test {
-        PostHoc::Tukey => "Tukey HSD",
-        PostHoc::Bonferroni => "Bonferroni",
+        PostHoc::Tukey => tr!("o-tukey-hsd"),
+        PostHoc::Bonferroni => tr!("o-bonferroni"),
     };
     // The critical value for the intervals, the same for every pair.
     let critical = match test {
@@ -120,7 +121,7 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
                 anova_rows.push((
                     label.clone(),
                     vec![
-                        Cell::Text("Between Groups".into()),
+                        Cell::Text(tr!("o-between-groups")),
                         num(Some(parts.between), 3),
                         n_cell(df1),
                         num(Some(parts.between / df1), 3),
@@ -131,7 +132,7 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
                 anova_rows.push((
                     String::new(),
                     vec![
-                        Cell::Text("Within Groups".into()),
+                        Cell::Text(tr!("o-within-groups")),
                         num(Some(parts.within), 3),
                         n_cell(df2),
                         num(Some(parts.within / df2), 3),
@@ -142,7 +143,7 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
                 anova_rows.push((
                     String::new(),
                     vec![
-                        Cell::Text("Total".into()),
+                        Cell::Text(tr!("o-total")),
                         num(Some(parts.between + parts.within), 3),
                         n_cell(df1 + df2),
                         Cell::Empty,
@@ -151,7 +152,7 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
                     ],
                 ));
             }
-            None => anova_rows.push((label.clone(), vec![Cell::Text("needs at least two groups with more cases than groups".into())])),
+            None => anova_rows.push((label.clone(), vec![Cell::Text(tr!("o-anova-needs-groups"))])),
         }
 
         if options.descriptives {
@@ -160,7 +161,7 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
                 .iter()
                 .map(|l| value_text(fvar, &Value::Num(*l)))
                 .zip(groups.iter().map(Vec::as_slice))
-                .chain(std::iter::once(("Total".to_string(), all.as_slice())));
+                .chain(std::iter::once((tr!("o-total").to_string(), all.as_slice())));
             for (k, (level, values)) in lines.enumerate() {
                 let m = moments(values);
                 let se = std_error(&m);
@@ -189,27 +190,40 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
     }
     let mut items = Vec::new();
     if options.descriptives {
-        let columns =
-            ["", "N", "Mean", "Std. Deviation", "Std. Error", "95% CI Lower", "95% CI Upper", "Minimum", "Maximum"].map(String::from).to_vec();
-        items.push(Item::Table(Table { title: "Descriptives".into(), columns, rows: descriptive_rows, categories: Vec::new() }));
+        let columns = [
+            String::new(),
+            tr!("o-n"),
+            tr!("o-mean"),
+            tr!("o-std-deviation"),
+            tr!("o-std-error"),
+            tr!("o-95-ci-lower"),
+            tr!("o-95-ci-upper"),
+            tr!("o-minimum"),
+            tr!("o-maximum"),
+        ]
+        .map(String::from)
+        .to_vec();
+        items.push(Item::Table(Table { title: tr!("o-descriptives"), columns, rows: descriptive_rows, categories: Vec::new() }));
     }
     if options.homogeneity {
-        let columns = ["Levene Statistic", "df1", "df2", "Sig."].map(String::from).to_vec();
-        items.push(Item::Table(Table { title: "Test of Homogeneity of Variances".into(), columns, rows: levene_rows, categories: Vec::new() }));
+        let columns = [tr!("o-levene-statistic"), tr!("o-df1"), tr!("o-df2"), tr!("o-sig")].map(String::from).to_vec();
+        items.push(Item::Table(Table { title: tr!("o-test-of-homogeneity-of-variances"), columns, rows: levene_rows, categories: Vec::new() }));
     }
-    let columns = ["", "Sum of Squares", "df", "Mean Square", "F", "Sig."].map(String::from).to_vec();
-    items.push(Item::Table(Table { title: "ANOVA".into(), columns, rows: anova_rows, categories: Vec::new() }));
+    let columns = [String::new(), tr!("o-sum-of-squares"), tr!("o-df"), tr!("o-mean-square"), tr!("o-f"), tr!("o-sig")].map(String::from).to_vec();
+    items.push(Item::Table(Table { title: tr!("o-anova"), columns, rows: anova_rows, categories: Vec::new() }));
     if !options.posthoc.is_empty() {
-        let level = format!("{:.0}%", (1.0 - alpha) * 100.0);
-        let mut columns = ["(I)", "(J)", "Mean Difference (I-J)", "Std. Error", "Sig."].map(String::from).to_vec();
-        columns.extend([format!("{level} CI Lower"), format!("{level} CI Upper")]);
+        let mut columns = [tr!("o-i"), tr!("o-j"), tr!("o-mean-difference-i-j"), tr!("o-std-error"), tr!("o-sig")].map(String::from).to_vec();
+        columns.extend([
+            tr!("o-ci-lower", level = format!("{:.0}", (1.0 - alpha) * 100.0)),
+            tr!("o-ci-upper", level = format!("{:.0}", (1.0 - alpha) * 100.0)),
+        ]);
         items.push(Item::Table(Table {
-            title: format!("Multiple Comparisons ({})", fvar.display_name()),
+            title: tr!("o-multiple-comparisons", factor = fvar.display_name()),
             columns,
             rows: posthoc_rows,
             categories: Vec::new(),
         }));
-        items.push(Item::Text(format!("*. The mean difference is significant at the {alpha} level.")));
+        items.push(Item::Text(tr!("o-mean-difference-significant", alpha = format!("{alpha}"))));
     }
     Ok(items)
 }

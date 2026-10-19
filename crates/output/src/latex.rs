@@ -5,6 +5,7 @@
 use crate::chart::BoxStats;
 use crate::style::{Family, Style};
 use crate::{Cell, Chart, Item, Output, Table};
+use mksigma_i18n::tr;
 
 /// The charts' colours as `xcolor` specifications, written inline so a pasted fragment needs no
 /// colour definitions: bars, their outline, the curve. Grey and black by default, for print.
@@ -85,7 +86,9 @@ fn notes(notes: &[&Item]) -> String {
     notes
         .iter()
         .map(|n| match n {
-            Item::Warning(s) => format!("\n\\par\\smallskip{{\\raggedright\\footnotesize\\textit{{Warning: {}}}\\par}}", escape(s)),
+            Item::Warning(s) => {
+                format!("\n\\par\\smallskip{{\\raggedright\\footnotesize\\textit{{{}}}\\par}}", escape(&tr!("warning", text = s.as_str())))
+            }
             Item::Text(s) => format!("\n\\par\\smallskip{{\\raggedright\\footnotesize {}\\par}}", escape(s)),
             _ => String::new(),
         })
@@ -172,7 +175,7 @@ fn chart(c: &Chart, labels: &mut Labels, after: &[&Item], style: &Style) -> Stri
     let mut s = String::from("\\begin{figure}[htbp]\n\\centering\n\\begin{tikzpicture}\n");
     match c {
         Chart::Histogram { x_label, bins, normal, n, .. } => {
-            s.push_str(&axis(x_label, "Frequency", ", ymin=0, area style"));
+            s.push_str(&axis(x_label, &tr!("o-frequency"), ", ymin=0, area style"));
             // `ybar interval` draws each bin from its point to the next; the last edge closes it.
             let mut points: Vec<(f64, f64)> = bins.iter().map(|(a, _, count)| (*a, *count)).collect();
             if let Some((_, b, _)) = bins.last() {
@@ -236,7 +239,9 @@ fn item(i: &Item, labels: &mut Labels, after: &[&Item], style: &Style) -> String
         Item::Table(t) => table(t, labels, after, style),
         Item::Chart(c) => chart(c, labels, after, style),
         Item::Text(s) => format!("\\begin{{flushleft}}\\footnotesize {}\\end{{flushleft}}\n", escape(s)),
-        Item::Warning(s) => format!("\\begin{{flushleft}}\\footnotesize\\textit{{Warning: {}}}\\end{{flushleft}}\n", escape(s)),
+        Item::Warning(s) => {
+            format!("\\begin{{flushleft}}\\footnotesize\\textit{{{}}}\\end{{flushleft}}\n", escape(&tr!("warning", text = s.as_str())))
+        }
     }
 }
 

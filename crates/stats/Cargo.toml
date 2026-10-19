@@ -9,6 +9,7 @@ description = "MK Sigma statistical procedures"
 workspace = true
 
 [dependencies]
+mksigma-i18n = { workspace = true }
 mksigma-core = { workspace = true }
 mksigma-output = { workspace = true }
 thiserror = { workspace = true }

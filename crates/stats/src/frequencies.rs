@@ -2,6 +2,7 @@
 //! per variable, a frequency table with valid values, user-missing values, system-missing and
 //! totals. Counts are sums of case weights, shown rounded; percentages use the exact sums.
 
+use mksigma_i18n::tr;
 use std::collections::HashMap;
 
 use mksigma_core::{Dataset, Value, VarType, Variable};
@@ -34,17 +35,17 @@ pub enum Statistic {
 }
 
 impl Statistic {
-    fn label(self) -> &'static str {
+    fn label(self) -> String {
         match self {
-            Statistic::Mean => "Mean",
-            Statistic::SeMean => "Std. Error of Mean",
-            Statistic::Mode => "Mode",
-            Statistic::StdDev => "Std. Deviation",
-            Statistic::Variance => "Variance",
-            Statistic::Range => "Range",
-            Statistic::Minimum => "Minimum",
-            Statistic::Maximum => "Maximum",
-            Statistic::Sum => "Sum",
+            Statistic::Mean => tr!("o-mean"),
+            Statistic::SeMean => tr!("o-std-error-of-mean"),
+            Statistic::Mode => tr!("o-mode"),
+            Statistic::StdDev => tr!("o-std-deviation"),
+            Statistic::Variance => tr!("o-variance"),
+            Statistic::Range => tr!("o-range"),
+            Statistic::Minimum => tr!("o-minimum"),
+            Statistic::Maximum => tr!("o-maximum"),
+            Statistic::Sum => tr!("o-sum"),
         }
     }
 }
@@ -132,31 +133,33 @@ fn frequency_table(var: &Variable, counts: &Counts) -> Table {
     let mut cumulative = 0.0;
     for (i, (value, w)) in counts.valid.iter().enumerate() {
         cumulative += w;
-        let stub = if i == 0 { "Valid" } else { "" };
+        let stub = if i == 0 { tr!("o-valid") } else { String::new() };
         rows.push((
             stub.to_string(),
             vec![Cell::Text(value_text(var, value)), n_cell(*w), percent(*w, total), percent(*w, valid), percent(cumulative, valid)],
         ));
     }
     if !counts.valid.is_empty() {
-        rows.push((String::new(), vec![Cell::Text("Total".into()), n_cell(valid), percent(valid, total), percent(valid, valid), Cell::Empty]));
+        rows.push((String::new(), vec![Cell::Text(tr!("o-total")), n_cell(valid), percent(valid, total), percent(valid, valid), Cell::Empty]));
     }
     let mut missing_rows: Vec<(String, f64)> = counts.user_missing.iter().map(|(v, w)| (value_text(var, v), *w)).collect();
     if counts.system_missing > 0.0 {
-        missing_rows.push(("System".to_string(), counts.system_missing));
+        missing_rows.push((tr!("o-system").to_string(), counts.system_missing));
     }
     if !missing_rows.is_empty() {
         let missing = counts.missing_total();
         for (i, (text, w)) in missing_rows.into_iter().enumerate() {
-            let stub = if i == 0 { "Missing" } else { "" };
+            let stub = if i == 0 { tr!("o-missing") } else { String::new() };
             rows.push((stub.to_string(), vec![Cell::Text(text), n_cell(w), percent(w, total), Cell::Empty, Cell::Empty]));
         }
-        rows.push((String::new(), vec![Cell::Text("Total".into()), n_cell(missing), percent(missing, total), Cell::Empty, Cell::Empty]));
-        rows.push(("Total".to_string(), vec![Cell::Empty, n_cell(total), percent(total, total), Cell::Empty, Cell::Empty]));
+        rows.push((String::new(), vec![Cell::Text(tr!("o-total")), n_cell(missing), percent(missing, total), Cell::Empty, Cell::Empty]));
+        rows.push((tr!("o-total").to_string(), vec![Cell::Empty, n_cell(total), percent(total, total), Cell::Empty, Cell::Empty]));
     }
     Table {
         title: var.display_name().to_string(),
-        columns: ["", "Frequency", "Percent", "Valid Percent", "Cumulative Percent"].map(String::from).to_vec(),
+        columns: [String::new(), tr!("o-frequency"), tr!("o-percent"), tr!("o-valid-percent"), tr!("o-cumulative-percent")]
+            .map(String::from)
+            .to_vec(),
         rows,
         categories,
     }
@@ -209,26 +212,26 @@ pub fn frequencies(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsEr
     // The Statistics table has one column per variable.
     let per_var: Vec<(Vec<Cell>, bool)> = vars.iter().map(|(var, counts)| statistics(var, counts, &options.statistics)).collect();
     let mut rows = vec![
-        ("N Valid".to_string(), vars.iter().map(|(_, c)| n_cell(c.valid_total())).collect()),
-        ("N Missing".to_string(), vars.iter().map(|(_, c)| n_cell(c.missing_total())).collect()),
+        (tr!("o-n-valid").to_string(), vars.iter().map(|(_, c)| n_cell(c.valid_total())).collect()),
+        (tr!("o-n-missing").to_string(), vars.iter().map(|(_, c)| n_cell(c.missing_total())).collect()),
     ];
     for (i, stat) in options.statistics.iter().enumerate() {
         rows.push((stat.label().to_string(), per_var.iter().map(|(cells, _)| cells.get(i).cloned().unwrap_or(Cell::Empty)).collect()));
     }
     let mut items = vec![Item::Table(Table {
-        title: "Statistics".to_string(),
+        title: tr!("o-statistics").to_string(),
         columns: vars.iter().map(|(var, _)| var.display_name().to_string()).collect(),
         rows,
         categories: Vec::new(),
     })];
     if per_var.iter().any(|(_, multiple)| *multiple) {
-        items.push(Item::Text("a. Multiple modes exist. The smallest value is shown".to_string()));
+        items.push(Item::Text(tr!("o-a-multiple-modes-exist-the-smallest-value-is-shown").to_string()));
     }
 
     if options.table {
         for (var, counts) in &vars {
             if counts.valid.is_empty() && counts.missing_total() == 0.0 {
-                items.push(Item::Warning(format!("{} has no cases", var.name)));
+                items.push(Item::Warning(tr!("o-no-cases", name = var.name.as_str())));
             } else {
                 items.push(Item::Table(frequency_table(var, counts)));
             }

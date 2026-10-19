@@ -3,6 +3,7 @@
 //! frequencies (except in scatterplots, where each case is one point).
 
 use mksigma_core::{Dataset, Value};
+use mksigma_i18n::tr;
 use mksigma_output::chart::ticks;
 use mksigma_output::{Cases, Category, Chart, Item};
 
@@ -15,7 +16,7 @@ pub fn histogram(ds: &Dataset, name: &str, normal: bool) -> Result<Item, StatsEr
     let (i, var) = numeric(ds, name)?;
     let values: Vec<(f64, f64)> = (0..ds.n_cases()).filter_map(|c| Some((valid(ds, i, c)?, ds.case_weight(c)))).filter(|(_, w)| *w > 0.0).collect();
     if values.is_empty() {
-        return Ok(Item::Warning(format!("{} has no valid values to chart", var.name)));
+        return Ok(Item::Warning(tr!("o-nothing-to-chart", name = var.name.as_str())));
     }
     let (lo, hi) = values.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (x, _)| (a.min(*x), b.max(*x)));
     let m = moments(&values);
@@ -44,7 +45,7 @@ pub fn histogram(ds: &Dataset, name: &str, normal: bool) -> Result<Item, StatsEr
         .map(|(k, (low, high, _))| Category {
             variable: var.name.clone(),
             cases: Cases::Range { low: *low, high: *high, closed: k == last },
-            label: format!("{} {low} to {high}", var.display_name()),
+            label: tr!("o-bin", name = var.display_name(), low = format!("{low}"), high = format!("{high}")),
         })
         .collect();
     Ok(Item::Chart(Chart::Histogram {
@@ -111,8 +112,8 @@ pub fn bar(ds: &Dataset, value: &BarValue, by: &str) -> Result<Item, StatsError>
     // Every category is a valid value, so each bar gets one; all or none keeps them in step.
     let categories = groups.iter().map(|(v, _)| category(bvar, v)).collect::<Option<Vec<_>>>().unwrap_or_default();
     let (y_label, title) = match measured {
-        Some((_, var)) => (format!("Mean {}", var.display_name()), format!("Mean {} by {}", var.display_name(), bvar.display_name())),
-        None => ("Count".to_string(), bvar.display_name().to_string()),
+        Some((_, var)) => (tr!("o-mean-of", name = var.display_name()), tr!("o-mean-of-by", name = var.display_name(), by = bvar.display_name())),
+        None => (tr!("o-count").to_string(), bvar.display_name().to_string()),
     };
     Ok(Item::Chart(Chart::Bar { title, x_label: bvar.display_name().to_string(), y_label, bars, categories }))
 }
@@ -123,10 +124,10 @@ pub fn scatter(ds: &Dataset, x: &str, y: &str) -> Result<Item, StatsError> {
     let points: Vec<(f64, f64)> =
         (0..ds.n_cases()).filter(|&c| ds.case_weight(c) > 0.0).filter_map(|c| Some((valid(ds, xi, c)?, valid(ds, yi, c)?))).collect();
     if points.is_empty() {
-        return Ok(Item::Warning(format!("no case has valid values of both {} and {}", xvar.name, yvar.name)));
+        return Ok(Item::Warning(tr!("o-no-pairs", x = xvar.name.as_str(), y = yvar.name.as_str())));
     }
     Ok(Item::Chart(Chart::Scatter {
-        title: format!("{} by {}", yvar.display_name(), xvar.display_name()),
+        title: tr!("o-by", y = yvar.display_name(), x = xvar.display_name()),
         x_label: xvar.display_name().to_string(),
         y_label: yvar.display_name().to_string(),
         points,
