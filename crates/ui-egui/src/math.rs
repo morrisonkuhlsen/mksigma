@@ -242,6 +242,61 @@ impl Typesetter<'_> {
                 out.place(body, vec2(x, 0.0));
                 out
             }
+            Math::Matrix { rows, bar } => {
+                let laid: Vec<Vec<Laid>> = rows.iter().map(|r| r.iter().map(|m| self.lay(m, size)).collect()).collect();
+                let columns = laid.iter().map(Vec::len).max().unwrap_or(0);
+                let widths: Vec<f32> = (0..columns).map(|c| laid.iter().filter_map(|r| r.get(c)).map(|l| l.width).fold(0.0, f32::max)).collect();
+                let heights: Vec<(f32, f32)> = laid
+                    .iter()
+                    .map(|r| (r.iter().map(|l| l.ascent).fold(size * 0.75, f32::max), r.iter().map(|l| l.descent).fold(size * 0.25, f32::max)))
+                    .collect();
+                let (gap_x, gap_y, edge) = (size * 0.9, size * 0.3, size * 0.35);
+                let height = heights.iter().map(|(a, d)| a + d).sum::<f32>() + gap_y * heights.len().saturating_sub(1) as f32;
+                let inner = widths.iter().sum::<f32>() + gap_x * columns.saturating_sub(1) as f32;
+                let (top, bottom) = (-axis - height / 2.0, -axis + height / 2.0);
+                let (left, right) = (edge, edge + inner + size * 0.3);
+                let width = right + edge;
+                let (t, b) = (top - size * 0.12, bottom + size * 0.12);
+                let tick = size * 0.25;
+                let mut out = Laid {
+                    width,
+                    ascent: -t,
+                    descent: b,
+                    prims: vec![
+                        Prim::Path(
+                            vec![vec2(tick + size * 0.05, t), vec2(size * 0.05, t), vec2(size * 0.05, b), vec2(tick + size * 0.05, b)],
+                            stroke,
+                        ),
+                        Prim::Path(
+                            vec![
+                                vec2(width - tick - size * 0.05, t),
+                                vec2(width - size * 0.05, t),
+                                vec2(width - size * 0.05, b),
+                                vec2(width - tick - size * 0.05, b),
+                            ],
+                            stroke,
+                        ),
+                    ],
+                };
+                let mut y = top;
+                for (r, row_laid) in laid.into_iter().enumerate() {
+                    let (ascent, descent) = heights.get(r).copied().unwrap_or((size, 0.0));
+                    let mut x = left + size * 0.15;
+                    for (c, entry) in row_laid.into_iter().enumerate() {
+                        let column = widths.get(c).copied().unwrap_or(0.0);
+                        let at = vec2(x + (column - entry.width) / 2.0, y + ascent);
+                        out.place(entry, at);
+                        x += column + gap_x;
+                    }
+                    y += ascent + descent + gap_y;
+                }
+                // The augmented matrix's bar, halfway between its columns.
+                if let Some(split) = bar.filter(|s| *s > 0 && *s < columns) {
+                    let x = left + size * 0.15 + widths.iter().take(split).sum::<f32>() + gap_x * (split as f32 - 0.5);
+                    out.prims.push(Prim::Path(vec![vec2(x, top), vec2(x, bottom)], stroke));
+                }
+                out
+            }
             Math::Paren(a) => {
                 let a = self.lay(a, size);
                 let open = self.text("(", size, false);

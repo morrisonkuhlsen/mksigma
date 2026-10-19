@@ -665,6 +665,7 @@ impl Session {
             Command::Crosstabs { chisq: true, .. } if table.title != "Case Processing Summary" => Some((run, None)),
             Command::Oneway { .. } | Command::NparTests(_) => Some((run, None)),
             Command::Examine { .. } if table.title == "Descriptives" => Some((run, None)),
+            Command::Regression { .. } => Some((run, None)),
             _ => None,
         }
     }
@@ -712,6 +713,10 @@ impl Session {
             Command::Crosstabs { rows, columns, .. } => explain::crosstabs(&ds, rows, columns, full)?,
             Command::NparTests(specs) => explain::npar_tests(&ds, &npar_of(specs), full)?,
             Command::Examine { variables, by, .. } => explain::examine(&ds, variables, by.as_deref(), full)?,
+            Command::Regression { dependent, predictors, ci } => {
+                let options = mksigma_stats::RegressionOptions { dependent: dependent.clone(), predictors: predictors.clone(), ci: *ci };
+                explain::regression(&ds, &options, full)?
+            }
             Command::Oneway { .. } => match oneway_options(&command) {
                 Some(options) => explain::oneway(&ds, &options, full)?,
                 None => return Err(EngineError::Invalid("this item has no calculation by hand".into())),
@@ -1198,6 +1203,17 @@ mod tests {
         // The summary has none, nor a crosstabulation without the tests.
         assert_eq!(can.iter().filter(|(_, c)| *c).count(), 2, "{can:?}");
         assert!(can.iter().all(|(t, c)| !(t == "Case Processing Summary" && *c)));
+    }
+
+    #[test]
+    fn explains_every_table_of_a_regression() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("REGRESSION /DEPENDENT=score /METHOD=ENTER age income.").unwrap();
+        let tables: Vec<usize> = (0..s.output.items.len()).filter(|&i| matches!(s.output.items[i], Item::Table(_))).collect();
+        assert_eq!(tables.len(), 3);
+        for i in tables {
+            assert_eq!(s.explain(i, false).unwrap().title, "Regression");
+        }
     }
 
     #[test]

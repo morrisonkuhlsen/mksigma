@@ -109,7 +109,8 @@ pub(crate) fn show(ctx: &egui::Context, view: &mut ExplainView, session: &Sessio
                     ui.colored_label(ui.visuals().warn_fg_color, e);
                 }
                 Ok(e) => {
-                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    // Both ways: a matrix may be wider than the window.
+                    egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 6.0;
                         for (heading, steps) in &e.sections {
                             ui.add_space(8.0);

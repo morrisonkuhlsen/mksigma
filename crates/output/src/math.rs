@@ -25,6 +25,12 @@ pub enum Math {
     },
     /// In parentheses that grow with it.
     Paren(Box<Math>),
+    /// A matrix in brackets, its rows of entries; with a bar before column `bar` when it is an
+    /// augmented one (`[A | I]`).
+    Matrix {
+        rows: Vec<Vec<Math>>,
+        bar: Option<usize>,
+    },
 }
 
 /// A shorthand for building trees.
@@ -61,6 +67,13 @@ pub mod build {
     }
     pub fn paren(a: Math) -> Math {
         Math::Paren(Box::new(a))
+    }
+    pub fn matrix(rows: Vec<Vec<Math>>) -> Math {
+        Math::Matrix { rows, bar: None }
+    }
+    /// `[A | B]`: the bar before column `bar`.
+    pub fn augmented(rows: Vec<Vec<Math>>, bar: usize) -> Math {
+        Math::Matrix { rows, bar: Some(bar) }
     }
     pub fn sum(from: Option<Math>, to: Option<Math>, body: Math) -> Math {
         Math::Sum { from: from.map(Box::new), to: to.map(Box::new), body: Box::new(body) }
@@ -188,6 +201,12 @@ impl Math {
                 format!("\\sum{from}{to} {}", body.to_latex())
             }
             Math::Paren(a) => format!("\\left( {} \\right)", a.to_latex()),
+            Math::Matrix { rows, bar } => {
+                let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+                let spec: String = (0..columns).map(|c| if Some(c) == *bar && c > 0 { "|c" } else { "c" }).collect();
+                let body: Vec<String> = rows.iter().map(|r| r.iter().map(Math::to_latex).collect::<Vec<_>>().join(" & ")).collect();
+                format!("\\left[ \\begin{{array}}{{{spec}}} {} \\end{{array}} \\right]", body.join(" \\\\ "))
+            }
         }
     }
 }
@@ -250,6 +269,10 @@ mod tests {
         assert_eq!(mean.to_latex(), "\\bar{x} = \\frac{1}{n} = \\sum_{i = 1}^{n} {x}_{i}");
         assert_eq!(sqrt(sup(var("s"), num(2.0, 0))).to_latex(), "\\sqrt{{s}^{2}}");
         assert_eq!(row(vec![sub(var("μ"), text("0")), text("±"), text("|")]).to_latex(), "{\\mu}_{0} \\pm |");
+        assert_eq!(
+            augmented(vec![vec![num(2.0, 0), num(1.0, 0)], vec![num(1.0, 0), num(3.0, 0)]], 1).to_latex(),
+            "\\left[ \\begin{array}{c|c} 2 & 1 \\\\ 1 & 3 \\end{array} \\right]"
+        );
         // The symbols the explanations write in their sentences: none left for pdflatex to refuse.
         let words = latex_text("N − 1, ≈ · × ≤ ≥ … ± μ σ χ α √2 Welch–Satterthwaite");
         assert!(words.is_ascii(), "{words}");

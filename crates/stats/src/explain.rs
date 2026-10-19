@@ -46,7 +46,17 @@ fn terms(items: Vec<Math>, full: bool) -> Math {
 }
 
 fn n(x: f64) -> Math {
-    num(x, PLACES)
+    num(x, places(x))
+}
+
+/// Four decimals; a small number (under 0.01) four significant digits instead, so that the
+/// entries of an inverse matrix, say, don't show as 0.
+fn places(x: f64) -> usize {
+    let size = x.abs();
+    if size == 0.0 || size >= 0.01 || !size.is_finite() {
+        return PLACES;
+    }
+    ((-size.log10()).ceil() as usize + 3).min(15)
 }
 
 /// A value as it would be written: negatives in parentheses inside an expression.
@@ -1590,6 +1600,372 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
     steps
 }
 
+/// A matrix of numbers.
+fn numbers(m: &[Vec<f64>]) -> Vec<Vec<Math>> {
+    m.iter().map(|r| r.iter().map(|x| n(*x)).collect()).collect()
+}
+
+/// `[A | B]` of numbers.
+fn side_by_side(a: &[Vec<f64>], b: &[Vec<f64>]) -> Math {
+    let rows = a.iter().zip(b).map(|(ra, rb)| ra.iter().chain(rb).map(|x| n(*x)).collect()).collect();
+    augmented(rows, a.first().map_or(0, Vec::len))
+}
+
+/// The inverse of `m` by Gauss–Jordan elimination, as the engine does it (the largest pivot of
+/// each column first), with the augmented matrix after each column. `None` when a pivot
+/// vanishes: a predictor that is a combination of the others.
+fn gauss_jordan_steps(m: &[Vec<f64>], steps: &mut Vec<Step>) -> Option<Vec<Vec<f64>>> {
+    let size = m.len();
+    let mut a: Vec<Vec<f64>> = m.to_vec();
+    let mut inv: Vec<Vec<f64>> = (0..size).map(|i| (0..size).map(|j| if i == j { 1.0 } else { 0.0 }).collect()).collect();
+    let scale: Vec<f64> = (0..size).map(|i| m.get(i).and_then(|r| r.get(i)).copied().unwrap_or(0.0).abs()).collect();
+    steps.push(step(
+        "Its inverse, by Gauss–Jordan elimination: beside it the identity matrix, then row operations until the left side is the identity; the right side is then the inverse:",
+        side_by_side(&a, &inv),
+    ));
+    let at = |a: &Vec<Vec<f64>>, r: usize, c: usize| a.get(r).and_then(|row| row.get(c)).copied().unwrap_or(0.0);
+    for col in 0..size {
+        let pivot_row = (col..size).max_by(|&x, &y| at(&a, x, col).abs().total_cmp(&at(&a, y, col).abs()))?;
+        let pivot = at(&a, pivot_row, col);
+        if pivot.abs() <= 1e-10 * scale.get(col).copied().unwrap_or(0.0).max(f64::MIN_POSITIVE) {
+            steps.push(say("A pivot is 0: a predictor is a combination of the others, and there is no inverse."));
+            return None;
+        }
+        let mut what = Vec::new();
+        if pivot_row != col {
+            a.swap(col, pivot_row);
+            inv.swap(col, pivot_row);
+            what.push(format!("swap rows {} and {} (the larger pivot first)", col + 1, pivot_row + 1));
+        }
+        for j in 0..size {
+            if let Some(x) = a.get_mut(col).and_then(|r| r.get_mut(j)) {
+                *x /= pivot;
+            }
+            if let Some(x) = inv.get_mut(col).and_then(|r| r.get_mut(j)) {
+                *x /= pivot;
+            }
+        }
+        what.push(format!("divide row {} by {}", col + 1, number_text(pivot)));
+        for row in 0..size {
+            let factor = at(&a, row, col);
+            if row == col || factor == 0.0 {
+                continue;
+            }
+            for j in 0..size {
+                let (ac, ic) = (at(&a, col, j), at(&inv, col, j));
+                if let Some(x) = a.get_mut(row).and_then(|r| r.get_mut(j)) {
+                    *x -= factor * ac;
+                }
+                if let Some(x) = inv.get_mut(row).and_then(|r| r.get_mut(j)) {
+                    *x -= factor * ic;
+                }
+            }
+            what.push(format!("subtract {} times row {} from row {}", number_text(factor), col + 1, row + 1));
+        }
+        steps.push(step(&format!("Column {}: {}:", col + 1, what.join("; ")), side_by_side(&a, &inv)));
+    }
+    Some(inv)
+}
+
+/// `REGRESSION`: least squares on the deviations from the means, as the engine computes it: the
+/// cross-products, the slopes from `Sxx b = Sxy` (Sxx inverted by Gauss–Jordan with two
+/// predictors or more), the constant, the sums of squares, F, R², and each coefficient's
+/// standard error, t, significance, standardized beta and interval.
+pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) -> Result<Explanation, StatsError> {
+    let (yi, yvar) = numeric(ds, &options.dependent)?;
+    let xs = options.predictors.iter().map(|name| numeric(ds, name)).collect::<Result<Vec<_>, _>>()?;
+    let p = xs.len();
+    let cases: Vec<(f64, Vec<f64>, f64)> = (0..ds.n_cases())
+        .filter_map(|c| {
+            let w = ds.case_weight(c);
+            let y = valid(ds, yi, c)?;
+            let x = xs.iter().map(|(i, _)| valid(ds, *i, c)).collect::<Option<Vec<f64>>>()?;
+            (w > 0.0).then_some((y, x, w))
+        })
+        .collect();
+    let at = |m: &[Vec<f64>], j: usize, k: usize| m.get(j).and_then(|r| r.get(k)).copied().unwrap_or(0.0);
+    let item = |v: &[f64], j: usize| v.get(j).copied().unwrap_or(0.0);
+    let w = weighted(ds);
+    let mut steps = Vec::new();
+    let big_n: f64 = cases.iter().map(|(_, _, w)| w).sum();
+    let legend: Vec<String> = xs.iter().enumerate().map(|(j, (_, v))| format!("x{} is {}", j + 1, v.display_name())).collect();
+    steps.push(step(
+        &format!(
+            "The cases valid on y ({}) and on every predictor ({}){}:",
+            yvar.display_name(),
+            legend.join(", "),
+            if w { ", weighted" } else { "" }
+        ),
+        equals(vec![var("N"), n(big_n)]),
+    ));
+    let df_residual = big_n - p as f64 - 1.0;
+    if p == 0 || df_residual <= 0.0 {
+        steps.push(say("It needs more cases than predictors plus one."));
+        return Ok(Explanation { title: "Regression".into(), sections: vec![("The model".into(), steps)] });
+    }
+    let x_name = |j: usize| if p == 1 { var("x") } else { sub(var("x"), text(&(j + 1).to_string())) };
+    let column = |j: usize| cases.iter().map(|(_, x, w)| (x.get(j).copied().unwrap_or(0.0), *w)).collect::<Vec<_>>();
+    let ys: Vec<(f64, f64)> = cases.iter().map(|(y, _, w)| (*y, *w)).collect();
+    // The means.
+    let mean_of = |values: &[(f64, f64)], name: Math| -> (Math, f64) {
+        let total: f64 = values.iter().map(|(x, w)| x * w).sum();
+        let mean = total / big_n;
+        let each: Vec<Math> = values.iter().map(|(x, wi)| weighted_term(w, *wi, val(*x))).collect();
+        (equals(vec![bar(name), frac(terms(each, full), n(big_n)), frac(n(total), n(big_n)), n(mean)]), mean)
+    };
+    let (y_math, my) = mean_of(&ys, var("y"));
+    let mut means = vec![y_math];
+    let mut mx = Vec::new();
+    for j in 0..p {
+        let (math, m) = mean_of(&column(j), x_name(j));
+        means.push(math);
+        mx.push(m);
+    }
+    steps.extend(several("The means:", means));
+    let mut sections = vec![("The data".to_string(), steps)];
+
+    // The cross-products of the deviations.
+    let mut steps = Vec::new();
+    let product = |a: &[(f64, f64)], ma: f64, b: &[(f64, f64)], mb: f64, name: Math| -> (Math, f64) {
+        let total: f64 = a.iter().zip(b).map(|((x, wi), (y, _))| wi * (x - ma) * (y - mb)).sum();
+        let each: Vec<Math> = a
+            .iter()
+            .zip(b)
+            .map(|((x, wi), (y, _))| {
+                weighted_term(w, *wi, row(vec![paren(row(vec![val(*x), text("−"), n(ma)])), paren(row(vec![val(*y), text("−"), n(mb)]))]))
+            })
+            .collect();
+        (equals(vec![name, terms(each, full), n(total)]), total)
+    };
+    let sname = |a: &str, b: &str| sub(var("S"), text(&format!("{a}{b}")));
+    let tag = |j: usize| if p == 1 { "x".to_string() } else { format!("{}", j + 1) };
+    let mut sxx = vec![vec![0.0; p]; p];
+    let mut sxy = vec![0.0; p];
+    let mut maths = Vec::new();
+    for j in 0..p {
+        for k in j..p {
+            let (math, total) = product(&column(j), item(&mx, j), &column(k), item(&mx, k), sname(&tag(j), &tag(k)));
+            maths.push(math);
+            for (r, c) in [(j, k), (k, j)] {
+                if let Some(x) = sxx.get_mut(r).and_then(|row| row.get_mut(c)) {
+                    *x = total;
+                }
+            }
+        }
+    }
+    for j in 0..p {
+        let (math, total) = product(&column(j), item(&mx, j), &ys, my, sname(&tag(j), "y"));
+        maths.push(math);
+        if let Some(x) = sxy.get_mut(j) {
+            *x = total;
+        }
+    }
+    let (syy_math, syy) = product(&ys, my, &ys, my, sname("y", "y"));
+    maths.push(syy_math);
+    steps.extend(several("The sums of the products of the deviations from the means, for each pair of variables:", maths));
+    sections.push(("Sums of products".into(), steps));
+
+    // The slopes.
+    let mut steps = Vec::new();
+    let inverse = if p == 1 {
+        let s = at(&sxx, 0, 0);
+        if s <= 0.0 {
+            steps.push(say("The predictor doesn't vary, so there is no slope."));
+            sections.push(("The coefficients".into(), steps));
+            return Ok(Explanation { title: "Regression".into(), sections });
+        }
+        steps.push(step(
+            "The slope divides the products of x and y by the squares of x:",
+            equals(vec![var("b"), frac(sname("x", "y"), sname("x", "x")), frac(n(item(&sxy, 0)), n(s)), approx(item(&sxy, 0) / s)]),
+        ));
+        vec![vec![1.0 / s]]
+    } else {
+        steps.extend(several(
+            "The slopes solve the normal equations, Sxx b = Sxy, with these matrices:",
+            vec![
+                equals(vec![sub(var("S"), text("xx")), matrix(numbers(&sxx))]),
+                equals(vec![sub(var("S"), text("xy")), matrix(sxy.iter().map(|x| vec![n(*x)]).collect())]),
+            ],
+        ));
+        let Some(inverse) = gauss_jordan_steps(&sxx, &mut steps) else {
+            sections.push(("The coefficients".into(), steps));
+            return Ok(Explanation { title: "Regression".into(), sections });
+        };
+        steps.push(step("The inverse:", equals(vec![sup(sub(var("S"), text("xx")), text("−1")), matrix(numbers(&inverse))])));
+        let mut maths = Vec::new();
+        for (j, row_of) in inverse.iter().enumerate() {
+            let b: f64 = row_of.iter().zip(&sxy).map(|(a, s)| a * s).sum();
+            maths.push(equals(vec![
+                sub(var("b"), text(&(j + 1).to_string())),
+                plus((0..p).map(|k| row(vec![val(at(&inverse, j, k)), text("·"), val(item(&sxy, k))])).collect()),
+                approx(b),
+            ]));
+        }
+        steps.extend(several("Each slope is a row of the inverse times Sxy:", maths));
+        inverse
+    };
+    let b: Vec<f64> = (0..p).map(|j| (0..p).map(|k| at(&inverse, j, k) * item(&sxy, k)).sum()).collect();
+    let b_name = |j: usize| if p == 1 { var("b") } else { sub(var("b"), text(&(j + 1).to_string())) };
+    let constant = my - b.iter().zip(&mx).map(|(b, m)| b * m).sum::<f64>();
+    steps.push(step(
+        "The constant puts the line through the means:",
+        equals(vec![
+            var("a"),
+            row(vec![bar(var("y")), text("−"), plus((0..p).map(|j| row(vec![b_name(j), bar(x_name(j))])).collect())]),
+            row(vec![n(my), text("−"), paren(plus((0..p).map(|j| row(vec![val(item(&b, j)), text("·"), val(item(&mx, j))])).collect()))]),
+            approx(constant),
+        ]),
+    ));
+    sections.push(("The coefficients".into(), steps));
+
+    // The analysis of variance and the model summary.
+    let mut steps = Vec::new();
+    let ss_regression: f64 = b.iter().zip(&sxy).map(|(b, s)| b * s).sum();
+    let ss_residual = (syy - ss_regression).max(0.0);
+    steps.extend(several(
+        "The sum of squares the model explains, the rest left in the residuals, and the total:",
+        vec![
+            equals(vec![
+                sub(var("SS"), text("regression")),
+                sum(None, None, row(vec![indexed("b", "j"), sub(var("S"), var("jy"))])),
+                plus((0..p).map(|j| row(vec![val(item(&b, j)), text("·"), val(item(&sxy, j))])).collect()),
+                approx(ss_regression),
+            ]),
+            equals(vec![
+                sub(var("SS"), text("residual")),
+                row(vec![sname("y", "y"), text("−"), sub(var("SS"), text("regression"))]),
+                row(vec![n(syy), text("−"), n(ss_regression)]),
+                approx(ss_residual),
+            ]),
+            equals(vec![sub(var("SS"), text("total")), sname("y", "y"), approx(syy)]),
+        ],
+    ));
+    let (df_regression, df_total) = (p as f64, big_n - 1.0);
+    let (ms_regression, ms_residual) = (ss_regression / df_regression, ss_residual / df_residual);
+    steps.extend(several(
+        "Their degrees of freedom (predictors; cases minus predictors minus 1) and mean squares:",
+        vec![
+            equals(vec![sub(var("df"), text("regression")), n(df_regression)]),
+            equals(vec![sub(var("df"), text("residual")), row(vec![n(big_n), text("−"), n(df_regression), text("−"), text("1")]), n(df_residual)]),
+            equals(vec![sub(var("MS"), text("regression")), frac(n(ss_regression), n(df_regression)), approx(ms_regression)]),
+            equals(vec![sub(var("MS"), text("residual")), frac(n(ss_residual), n(df_residual)), approx(ms_residual)]),
+        ],
+    ));
+    let f = ms_regression / ms_residual;
+    steps.push(step("F compares them:", equals(vec![var("F"), frac(n(ms_regression), n(ms_residual)), approx(f)])));
+    if let Some(sig) = dist::f_sig(f, df_regression, df_residual) {
+        steps.push(step(
+            &format!(
+                "Its significance, from the F distribution with {} and {} degrees of freedom:",
+                number_text(df_regression),
+                number_text(df_residual)
+            ),
+            equals(vec![var("p"), approx(sig)]),
+        ));
+    }
+    let r2 = if syy > 0.0 { ss_regression / syy } else { 0.0 };
+    let adjusted = 1.0 - (1.0 - r2) * df_total / df_residual;
+    steps.extend(several(
+        "The share of the variance the model explains, its square root, the share adjusted for the number of predictors, and the residuals' standard deviation:",
+        vec![
+            equals(vec![sup(var("R"), text("2")), frac(sub(var("SS"), text("regression")), sub(var("SS"), text("total"))), frac(n(ss_regression), n(syy)), approx(r2)]),
+            equals(vec![var("R"), sqrt(n(r2)), approx(r2.sqrt())]),
+            equals(vec![
+                sup(sub(var("R"), text("adj")), text("2")),
+                row(vec![text("1"), text("−"), paren(row(vec![text("1"), text("−"), n(r2)])), text("·"), frac(n(df_total), n(df_residual))]),
+                approx(adjusted),
+            ]),
+            equals(vec![text("SE of the estimate"), sqrt(n(ms_residual)), approx(ms_residual.sqrt())]),
+        ],
+    ));
+    sections.push(("The analysis of variance and the model summary".into(), steps));
+
+    // Each coefficient.
+    let mut steps = Vec::new();
+    let t_crit = options.ci.and_then(|level| dist::t_quantile(0.5 + level / 2.0, df_residual));
+    if let (Some(level), Some(tc)) = (options.ci, t_crit) {
+        steps.push(step(
+            &format!(
+                "For the {}% intervals, the t that leaves {}% in each tail at {} degrees of freedom:",
+                number_text(level * 100.0),
+                number_text((1.0 - level) / 2.0 * 100.0),
+                number_text(df_residual)
+            ),
+            equals(vec![sub(var("t"), num(0.5 + level / 2.0, 4)), approx(tc)]),
+        ));
+    }
+    let coefficient = |name: Math, value: f64, se_math: Vec<Math>, se: f64, extra: Vec<Math>| -> Vec<Math> {
+        let t = value / se;
+        let mut maths = vec![equals([vec![sub(var("SE"), name.clone())], se_math, vec![approx(se)]].concat())];
+        maths.push(equals(vec![var("t"), frac(n(value), n(se)), approx(t)]));
+        if let Some(sig) = dist::t_sig(t, df_residual) {
+            maths.push(equals(vec![var("p"), approx(sig)]));
+        }
+        maths.extend(extra);
+        if let Some(tc) = t_crit {
+            maths.push(equals(vec![text("Lower"), row(vec![n(value), text("−"), n(tc), text("·"), n(se)]), approx(value - tc * se)]));
+            maths.push(equals(vec![text("Upper"), row(vec![n(value), text("+"), n(tc), text("·"), n(se)]), approx(value + tc * se)]));
+        }
+        maths
+    };
+    let quad: f64 = (0..p).map(|j| (0..p).map(|k| item(&mx, j) * at(&inverse, j, k) * item(&mx, k)).sum::<f64>()).sum();
+    let se_constant = (ms_residual * (1.0 / big_n + quad)).sqrt();
+    let quad_math = if p == 1 {
+        frac(sup(bar(var("x")), text("2")), sname("x", "x"))
+    } else {
+        row(vec![sup(bar(var("x")), text("T")), sup(sub(var("S"), text("xx")), text("−1")), bar(var("x"))])
+    };
+    steps.extend(several(
+        &format!("The constant, a = {}: its standard error, from the residuals' mean square and the means of the predictors:", number_text(constant)),
+        coefficient(
+            var("a"),
+            constant,
+            vec![
+                sqrt(row(vec![sub(var("MS"), text("residual")), paren(row(vec![frac(text("1"), var("N")), text("+"), quad_math]))])),
+                sqrt(row(vec![n(ms_residual), text("·"), paren(row(vec![frac(text("1"), n(big_n)), text("+"), n(quad)]))])),
+            ],
+            se_constant,
+            Vec::new(),
+        ),
+    ));
+    let sd_y = (syy / df_total).sqrt();
+    for j in 0..p {
+        let se = (ms_residual * at(&inverse, j, j)).sqrt();
+        let sd_x = (at(&sxx, j, j) / df_total).sqrt();
+        let beta = item(&b, j) * sd_x / sd_y;
+        let diagonal = if p == 1 {
+            frac(text("1"), sname("x", "x"))
+        } else {
+            sub(paren(sup(sub(var("S"), text("xx")), text("−1"))), text(&format!("{}{}", j + 1, j + 1)))
+        };
+        let beta_math = equals(vec![
+            text("Beta"),
+            row(vec![b_name(j), text("·"), frac(sub(var("s"), x_name(j)), sub(var("s"), var("y")))]),
+            row(vec![val(item(&b, j)), text("·"), frac(sqrt(frac(n(at(&sxx, j, j)), n(df_total))), sqrt(frac(n(syy), n(df_total))))]),
+            approx(beta),
+        ]);
+        let name = xs.get(j).map_or(String::new(), |(_, v)| v.display_name().to_string());
+        steps.extend(several(
+            &format!(
+                "{name}, b = {}: its standard error from the inverse's diagonal, t, significance, and the beta in standard deviations:",
+                number_text(item(&b, j))
+            ),
+            coefficient(
+                b_name(j),
+                item(&b, j),
+                vec![
+                    sqrt(row(vec![sub(var("MS"), text("residual")), text("·"), diagonal])),
+                    sqrt(row(vec![n(ms_residual), text("·"), n(at(&inverse, j, j))])),
+                ],
+                se,
+                vec![beta_math],
+            ),
+        ));
+    }
+    sections.push(("Each coefficient".into(), steps));
+    Ok(Explanation { title: "Regression".into(), sections })
+}
+
 /// `CROSSTABS`' chi-square tests for each row × column pair: the counts and their totals, the
 /// expected counts, Pearson's chi-square, the likelihood ratio, for a 2 × 2 table the
 /// continuity correction and Fisher's exact test, and the linear-by-linear association.
@@ -1905,7 +2281,7 @@ fn fisher_steps([a, b, c, d]: [f64; 4], full: bool) -> Vec<Step> {
 }
 
 fn number_text(x: f64) -> String {
-    mksigma_output::math::number(x, PLACES)
+    mksigma_output::math::number(x, places(x))
 }
 
 /// `x` to four decimals, then to `places` as the table shows it (when that differs).
@@ -2441,6 +2817,47 @@ mod tests {
         // before: 4 4 5 6 6 7 8; the median at (7 + 1) · 0.5 = 4, between 6 and 6.
         let tex = latex(&examine(&ds, &["before".into()], None, false).unwrap());
         assert!(tex.contains("= 8 \\cdot 0.5 = 4") && tex.contains("\\text{Median} = 6 + 0 \\cdot \\left( 6 - 6 \\right) = 6"), "{tex}");
+    }
+
+    #[test]
+    fn regression_by_hand_agrees_with_the_tables() {
+        let ds = sample();
+        for predictors in [vec!["age"], vec!["age", "income"]] {
+            let options = crate::RegressionOptions {
+                dependent: "score".into(),
+                predictors: predictors.iter().map(|p| p.to_string()).collect(),
+                ci: Some(0.95),
+            };
+            let tex = latex(&regression(&ds, &options, false).unwrap());
+            let items = crate::regression(&ds, &options).unwrap();
+            for t in tables(&items) {
+                for (_, cells) in &t.rows {
+                    for cell in cells {
+                        let x = match cell {
+                            Cell::Num { value, .. } => *value,
+                            Cell::Int(k) => *k as f64,
+                            _ => continue,
+                        };
+                        let shown = number(x, 3);
+                        assert!(tex.contains(&format!("\\approx {shown}")) || tex.contains(&format!("= {shown}")), "{x} of {} in {tex}", t.title);
+                    }
+                }
+            }
+            if predictors.len() == 2 {
+                assert!(tex.contains("\\begin{array}{cc|cc}"), "Gauss–Jordan's augmented matrix: {tex}");
+            }
+        }
+        // x = 1..5, y = 2 4 5 4 5: Sxy = 6, Sxx = 10, b = 0.6, a = 4 − 0.6 · 3 = 2.2.
+        let mut ds = Dataset::new();
+        for name in ["y", "x"] {
+            ds.add_variable(Variable::numeric(name)).unwrap();
+        }
+        for (y, x) in [(2.0, 1.0), (4.0, 2.0), (5.0, 3.0), (4.0, 4.0), (5.0, 5.0)] {
+            ds.push_case(vec![Value::Num(y), Value::Num(x)]).unwrap();
+        }
+        let options = crate::RegressionOptions { dependent: "y".into(), predictors: vec!["x".into()], ci: None };
+        let tex = latex(&regression(&ds, &options, false).unwrap());
+        assert!(tex.contains("\\frac{6}{10} = 0.6") && tex.contains("= 2.2"), "{tex}");
     }
 
     #[test]
