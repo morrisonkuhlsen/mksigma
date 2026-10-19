@@ -661,6 +661,8 @@ impl Session {
             Command::Frequencies { .. } => Some((run, Some(table.title.clone()))),
             // Every table of a t test: the groups, the test, a pair's correlation.
             Command::TTest { .. } => Some((run, None)),
+            // With its chi-square tests: the crosstabulations and the tests, not the summary.
+            Command::Crosstabs { chisq: true, .. } if table.title != "Case Processing Summary" => Some((run, None)),
             _ => None,
         }
     }
@@ -705,6 +707,7 @@ impl Session {
                 explain::frequencies(&ds, if own.is_empty() { variables } else { &own }, freq_order(order), full)?
             }
             Command::TTest { test, ci } => explain::t_test(&ds, &t_test_of(test), *ci, full)?,
+            Command::Crosstabs { rows, columns, .. } => explain::crosstabs(&ds, rows, columns, full)?,
             _ => return Err(EngineError::Invalid("this item has no calculation by hand".into())),
         };
         let mut explanation = explanation;
@@ -1164,6 +1167,22 @@ mod tests {
         s.run_syntax("DESCRIPTIVES age.").unwrap();
         let last = s.output.items.len() - 1;
         assert!(tex(&s, last).contains("\\frac{285}{8} = 35.625"));
+    }
+
+    #[test]
+    fn explains_crosstabs_with_their_chi_square() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("COMPUTE older = age > 35.\nCOMPUTE high = score > 70.\nCROSSTABS older BY high /STATISTICS=CHISQ.\nCROSSTABS older BY high.")
+            .unwrap();
+        let can: Vec<(String, bool)> = (0..s.output.items.len())
+            .filter_map(|i| match &s.output.items[i] {
+                Item::Table(t) => Some((t.title.clone(), s.can_explain(i))),
+                _ => None,
+            })
+            .collect();
+        // The summary has none, nor a crosstabulation without the tests.
+        assert_eq!(can.iter().filter(|(_, c)| *c).count(), 2, "{can:?}");
+        assert!(can.iter().all(|(t, c)| !(t == "Case Processing Summary" && *c)));
     }
 
     #[test]

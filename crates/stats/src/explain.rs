@@ -153,7 +153,7 @@ pub fn descriptives(ds: &Dataset, variables: &[String], full: bool) -> Result<Ex
 
 /// Pearson's r of `(x, y, weight)` pairs, step by step, then its t and significance; `how`
 /// says which cases they are.
-fn pearson(pairs: &[(f64, f64, f64)], w: bool, how: &str, one_tailed: bool, full: bool) -> Vec<Step> {
+fn pearson(pairs: &[(f64, f64, f64)], w: bool, how: &str, one_tailed: bool, full: bool, test: bool) -> Vec<Step> {
     let mut steps = Vec::new();
     let total: f64 = pairs.iter().map(|(_, _, w)| w).sum();
     steps.push(step(&format!("The cases {how}{}:", if w { ", weighted" } else { "" }), equals(vec![var("N"), n(total)])));
@@ -205,7 +205,7 @@ fn pearson(pairs: &[(f64, f64, f64)], w: bool, how: &str, one_tailed: bool, full
             row(vec![n(r), text("≈"), num(r, 3)]),
         ]),
     ));
-    if total > 2.0 && r.abs() < 1.0 {
+    if test && total > 2.0 && r.abs() < 1.0 {
         let df = total - 2.0;
         let t = r * (df / (1.0 - r * r)).sqrt();
         steps.push(step(
@@ -262,7 +262,7 @@ pub fn correlations(
             let pairs: Vec<(f64, f64, f64)> =
                 (0..ds.n_cases()).filter(|&c| usable(c)).filter_map(|c| Some((valid(ds, *ri, c)?, valid(ds, *ci, c)?, ds.case_weight(c)))).collect();
             let how = if listwise { "valid on every variable listed (listwise)" } else { "valid on both (pairwise)" };
-            let steps = pearson(&pairs, w, how, one_tailed, full);
+            let steps = pearson(&pairs, w, how, one_tailed, full, true);
             sections.push((format!("{} with {}", rvar.display_name(), cvar.display_name()), steps));
         }
     }
@@ -595,7 +595,7 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                 }
                 sections.push((pair.clone(), steps));
                 let x_and_y = format!("x is {}, y is {}; the cases valid on both", avar.display_name(), bvar.display_name());
-                sections.push((format!("Pair {}: the correlation", p + 1), pearson(&rows, w, &x_and_y, false, full)));
+                sections.push((format!("Pair {}: the correlation", p + 1), pearson(&rows, w, &x_and_y, false, full, true)));
             }
         }
     }
@@ -676,6 +676,320 @@ fn levene_steps(groups: &[Vec<(f64, f64)>; 2], means: [f64; 2], w: bool, full: b
             "0.05 or below: the variances differ, so the row with equal variances not assumed is the one to read."
         }));
     }
+    steps
+}
+
+/// `CROSSTABS`' chi-square tests for each row × column pair: the counts and their totals, the
+/// expected counts, Pearson's chi-square, the likelihood ratio, for a 2 × 2 table the
+/// continuity correction and Fisher's exact test, and the linear-by-linear association.
+pub fn crosstabs(ds: &Dataset, rows: &[String], columns: &[String], full: bool) -> Result<Explanation, StatsError> {
+    let lookup = |name: &String| ds.variable(name).ok_or_else(|| StatsError::UnknownVariable(name.clone()));
+    let mut sections = Vec::new();
+    for row_name in rows {
+        let (ri, row_var) = lookup(row_name)?;
+        for column_name in columns {
+            let (ci, column_var) = lookup(column_name)?;
+            let counts = crate::crosstabs::count(ds, ri, ci);
+            sections
+                .push((format!("{} * {}", row_var.display_name(), column_var.display_name()), chi_square_steps(row_var, column_var, &counts, full)));
+        }
+    }
+    Ok(Explanation { title: "Crosstabs".into(), sections })
+}
+
+fn chi_square_steps(
+    row_var: &mksigma_core::Variable,
+    column_var: &mksigma_core::Variable,
+    counts: &crate::crosstabs::Counts,
+    full: bool,
+) -> Vec<Step> {
+    let (nr, nc) = (counts.rows.len(), counts.columns.len());
+    let labels = |var: &mksigma_core::Variable, values: &[mksigma_core::Value]| {
+        values.iter().enumerate().map(|(k, v)| format!("{} = {}", k + 1, value_text(var, v))).collect::<Vec<_>>().join(", ")
+    };
+    let mut steps = vec![say(&format!(
+        "The cases valid on both variables, counted in each cell (O; weighted counts are rounded to whole numbers). Rows: {}; columns: {}.",
+        labels(row_var, &counts.rows),
+        labels(column_var, &counts.columns),
+    ))];
+    if nr < 2 || nc < 2 {
+        steps.push(say("One of the variables has a single value here, so there are no chi-square tests."));
+        return steps;
+    }
+    let big_n = counts.total();
+    let cell = |letter: &str, r: usize, c: usize| sub(var(letter), text(&format!("{}{}", r + 1, c + 1)));
+    let row_totals: Vec<Math> = (0..nr)
+        .map(|r| {
+            equals(vec![sub(var("R"), text(&(r + 1).to_string())), plus((0..nc).map(|c| n(counts.get(r, c))).collect()), n(counts.row_total(r))])
+        })
+        .collect();
+    steps.extend(several("Each row's total adds its counts:", row_totals));
+    let column_totals: Vec<Math> = (0..nc)
+        .map(|c| {
+            equals(vec![sub(var("C"), text(&(c + 1).to_string())), plus((0..nr).map(|r| n(counts.get(r, c))).collect()), n(counts.column_total(c))])
+        })
+        .collect();
+    steps.extend(several("And each column's:", column_totals));
+    steps.push(step("The total:", equals(vec![var("N"), plus((0..nr).map(|r| n(counts.row_total(r))).collect()), n(big_n)])));
+    let cells: Vec<(usize, usize)> = (0..nr).flat_map(|r| (0..nc).map(move |c| (r, c))).collect();
+    let expected: Vec<Math> = cells
+        .iter()
+        .map(|&(r, c)| {
+            equals(vec![
+                cell("E", r, c),
+                frac(row(vec![sub(var("R"), text(&(r + 1).to_string())), text("·"), sub(var("C"), text(&(c + 1).to_string()))]), var("N")),
+                frac(row(vec![n(counts.row_total(r)), text("·"), n(counts.column_total(c))]), n(big_n)),
+                n(counts.expected(r, c)),
+            ])
+        })
+        .collect();
+    steps.extend(several("The count each cell would expect if the variables were independent:", expected));
+
+    let df = ((nr - 1) * (nc - 1)) as f64;
+    let chi2: f64 = cells.iter().map(|&(r, c)| (counts.get(r, c) - counts.expected(r, c)).powi(2) / counts.expected(r, c)).sum();
+    let symbol = || frac(sup(paren(row(vec![var("O"), text("−"), var("E")])), text("2")), var("E"));
+    let each: Vec<Math> = cells
+        .iter()
+        .map(|&(r, c)| frac(sup(paren(row(vec![n(counts.get(r, c)), text("−"), n(counts.expected(r, c))])), text("2")), n(counts.expected(r, c))))
+        .collect();
+    let parts: Vec<Math> = cells.iter().map(|&(r, c)| n((counts.get(r, c) - counts.expected(r, c)).powi(2) / counts.expected(r, c))).collect();
+    steps.push(step(
+        "Pearson's chi-square adds each cell's squared distance from its expected count, relative to it:",
+        equals(vec![sup(var("χ"), text("2")), sum(None, None, symbol()), terms(each, full), terms(parts, full), approx(chi2)]),
+    ));
+    steps.push(step(
+        "Its degrees of freedom:",
+        equals(vec![
+            var("df"),
+            row(vec![paren(row(vec![var("r"), text("−"), text("1")])), paren(row(vec![var("c"), text("−"), text("1")]))]),
+            row(vec![paren(row(vec![n(nr as f64), text("−"), text("1")])), text("·"), paren(row(vec![n(nc as f64), text("−"), text("1")]))]),
+            n(df),
+        ]),
+    ));
+    let chi_sig = |x: f64, df: f64, what: &str| {
+        dist::chi_square_sig(x, df).map(|p| {
+            step(
+                &format!(
+                    "{what}: the probability of a chi-square at least this large with {} degrees of freedom, from that distribution:",
+                    number_text(df)
+                ),
+                equals(vec![var("p"), approx(p)]),
+            )
+        })
+    };
+    steps.extend(chi_sig(chi2, df, "Its significance"));
+
+    let lr: f64 =
+        cells.iter().map(|&(r, c)| (counts.get(r, c), counts.expected(r, c))).filter(|(o, _)| *o > 0.0).map(|(o, e)| 2.0 * o * (o / e).ln()).sum();
+    let lr_terms: Vec<Math> = cells
+        .iter()
+        .filter(|&&(r, c)| counts.get(r, c) > 0.0)
+        .map(|&(r, c)| row(vec![n(counts.get(r, c)), text("·"), text("ln"), frac(n(counts.get(r, c)), n(counts.expected(r, c)))]))
+        .collect();
+    steps.push(step(
+        "The likelihood ratio, over the cells with a count:",
+        equals(vec![
+            sup(var("G"), text("2")),
+            row(vec![text("2"), sum(None, None, row(vec![var("O"), text("·"), text("ln"), frac(var("O"), var("E"))]))]),
+            row(vec![text("2"), paren(terms(lr_terms, full))]),
+            approx(lr),
+        ]),
+    ));
+    steps.extend(chi_sig(lr, df, "Its significance"));
+
+    if nr == 2 && nc == 2 {
+        let (a, b, c, d) = (counts.get(0, 0), counts.get(0, 1), counts.get(1, 0), counts.get(1, 1));
+        let (r1, r2, c1, c2) = (a + b, c + d, a + c, b + d);
+        let inner = ((a * d - b * c).abs() - big_n / 2.0).max(0.0);
+        let yates = big_n * inner.powi(2) / (r1 * r2 * c1 * c2);
+        steps.push(step(
+            "The continuity correction (Yates), for a 2 × 2 table with cells a b / c d:",
+            equals(vec![
+                sup(sub(var("χ"), text("Yates")), text("2")),
+                frac(
+                    row(vec![
+                        var("N"),
+                        sup(
+                            paren(row(vec![
+                                text("|"),
+                                var("a"),
+                                var("d"),
+                                text("−"),
+                                var("b"),
+                                var("c"),
+                                text("|"),
+                                text("−"),
+                                frac(var("N"), text("2")),
+                            ])),
+                            text("2"),
+                        ),
+                    ]),
+                    row(vec![sub(var("R"), text("1")), sub(var("R"), text("2")), sub(var("C"), text("1")), sub(var("C"), text("2"))]),
+                ),
+                frac(
+                    row(vec![
+                        n(big_n),
+                        text("·"),
+                        sup(
+                            paren(row(vec![
+                                text("|"),
+                                n(a),
+                                text("·"),
+                                n(d),
+                                text("−"),
+                                n(b),
+                                text("·"),
+                                n(c),
+                                text("|"),
+                                text("−"),
+                                n(big_n / 2.0),
+                            ])),
+                            text("2"),
+                        ),
+                    ]),
+                    row(vec![n(r1), text("·"), n(r2), text("·"), n(c1), text("·"), n(c2)]),
+                ),
+                approx(yates),
+            ]),
+        ));
+        steps.extend(chi_sig(yates, 1.0, "Its significance"));
+        steps.extend(fisher_steps([a, b, c, d], full));
+    }
+    // Linear-by-linear: the correlation of the row and column values, each cell counted O times.
+    let scores = |values: &[mksigma_core::Value]| values.iter().map(mksigma_core::Value::as_num).collect::<Option<Vec<f64>>>();
+    if row_var.var_type == mksigma_core::VarType::Numeric
+        && column_var.var_type == mksigma_core::VarType::Numeric
+        && let (Some(rs), Some(cs)) = (scores(&counts.rows), scores(&counts.columns))
+    {
+        let pairs: Vec<(f64, f64, f64)> =
+            cells.iter().filter(|&&(r, c)| counts.get(r, c) > 0.0).filter_map(|&(r, c)| Some((*rs.get(r)?, *cs.get(c)?, counts.get(r, c)))).collect();
+        steps.push(say("The linear-by-linear association uses the correlation r of the row and column values, each cell counted as often as its count (the w below):"));
+        steps.extend(pearson(&pairs, true, "in the table", false, full, false));
+        let mx = pairs.iter().map(|(x, _, w)| x * w).sum::<f64>() / big_n;
+        let my = pairs.iter().map(|(_, y, w)| y * w).sum::<f64>() / big_n;
+        let sxy: f64 = pairs.iter().map(|(x, y, w)| w * (x - mx) * (y - my)).sum();
+        let sxx: f64 = pairs.iter().map(|(x, _, w)| w * (x - mx).powi(2)).sum();
+        let syy: f64 = pairs.iter().map(|(_, y, w)| w * (y - my).powi(2)).sum();
+        let r = sxy / (sxx * syy).sqrt();
+        if r.is_finite() {
+            let m2 = (big_n - 1.0) * r * r;
+            steps.push(step(
+                "The association, with 1 degree of freedom:",
+                equals(vec![
+                    sup(var("M"), text("2")),
+                    row(vec![paren(row(vec![var("N"), text("−"), text("1")])), sup(var("r"), text("2"))]),
+                    row(vec![paren(row(vec![n(big_n), text("−"), text("1")])), text("·"), sup(val(r), text("2"))]),
+                    approx(m2),
+                ]),
+            ));
+            steps.extend(chi_sig(m2, 1.0, "Its significance"));
+        }
+    }
+    steps
+}
+
+/// Fisher's exact test for `[a, b, c, d]`: every table with the same totals, its probability
+/// from the hypergeometric distribution, and the ones at most as likely as this table.
+fn fisher_steps([a, b, c, d]: [f64; 4], full: bool) -> Vec<Step> {
+    let (r1, r2, c1, c2, big_n) = (a + b, c + d, a + c, b + d, a + b + c + d);
+    let ln_fact = |x: f64| statrs::function::gamma::ln_gamma(x + 1.0);
+    let p_of = |x: f64| {
+        (ln_fact(r1) + ln_fact(r2) + ln_fact(c1) + ln_fact(c2)
+            - ln_fact(big_n)
+            - ln_fact(x)
+            - ln_fact(r1 - x)
+            - ln_fact(c1 - x)
+            - ln_fact(r2 - c1 + x))
+        .exp()
+    };
+    let fact = |x: f64| row(vec![n(x), text("!")]);
+    let mut steps = vec![step(
+        "Fisher's exact test: with the totals fixed, the probability of a table whose first cell is x:",
+        equals(vec![
+            row(vec![var("P"), paren(var("x"))]),
+            frac(
+                row(vec![
+                    sub(var("R"), text("1")),
+                    text("!"),
+                    sub(var("R"), text("2")),
+                    text("!"),
+                    sub(var("C"), text("1")),
+                    text("!"),
+                    sub(var("C"), text("2")),
+                    text("!"),
+                ]),
+                row(vec![
+                    var("N"),
+                    text("!"),
+                    var("x"),
+                    text("!"),
+                    paren(row(vec![sub(var("R"), text("1")), text("−"), var("x")])),
+                    text("!"),
+                    paren(row(vec![sub(var("C"), text("1")), text("−"), var("x")])),
+                    text("!"),
+                    paren(row(vec![sub(var("R"), text("2")), text("−"), sub(var("C"), text("1")), text("+"), var("x")])),
+                    text("!"),
+                ]),
+            ),
+        ]),
+    )];
+    let observed = p_of(a);
+    steps.push(step(
+        "This table's:",
+        equals(vec![
+            row(vec![var("P"), paren(n(a))]),
+            frac(
+                row(vec![fact(r1), text("·"), fact(r2), text("·"), fact(c1), text("·"), fact(c2)]),
+                row(vec![fact(big_n), text("·"), fact(a), text("·"), fact(b), text("·"), fact(c), text("·"), fact(d)]),
+            ),
+            n(observed),
+        ]),
+    ));
+    let (low, high) = ((c1 - r2).max(0.0) as i64, r1.min(c1) as i64);
+    let (mut two, mut lower, mut upper) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut two_sum, mut lower_sum, mut upper_sum) = (0.0, 0.0, 0.0);
+    let mut all = Vec::new();
+    for x in low..=high {
+        let x = x as f64;
+        let p = p_of(x);
+        all.push(equals(vec![row(vec![var("P"), paren(n(x))]), n(p)]));
+        if p <= observed * (1.0 + 1e-7) {
+            two.push(n(p));
+            two_sum += p;
+        }
+        if x <= a {
+            lower.push(n(p));
+            lower_sum += p;
+        }
+        if x >= a {
+            upper.push(n(p));
+            upper_sum += p;
+        }
+    }
+    let mut listed = Vec::new();
+    for (k, m) in all.into_iter().enumerate() {
+        if k > 0 {
+            listed.push(text(",   "));
+        }
+        listed.push(m);
+    }
+    if !full && listed.len() > SHOWN * 2 {
+        let count = listed.len();
+        let mut short: Vec<Math> = listed.iter().take(10).cloned().collect();
+        short.push(text("⋯"));
+        short.extend(listed.iter().skip(count - 3).cloned());
+        listed = short;
+    }
+    steps.push(step(&format!("Every table with these totals, x from {low} to {high}:"), row(listed)));
+    steps.push(step(
+        "Two-sided: the tables at most as likely as this one, added up:",
+        equals(vec![var("p"), terms(two, full), approx(two_sum.min(1.0))]),
+    ));
+    let (one, one_sum, side) = if lower_sum <= upper_sum { (lower, lower_sum, "x at most") } else { (upper, upper_sum, "x at least") };
+    steps.push(step(
+        &format!("One-sided: the smaller tail, the tables with {side} {}:", number_text(a)),
+        equals(vec![var("p"), terms(one, full), approx(one_sum.min(1.0))]),
+    ));
     steps
 }
 
@@ -1056,6 +1370,40 @@ mod tests {
         assert!(tex.contains("2 \\cdot 4 + 1 \\cdot 5 + 2 \\cdot 6 + 1 \\cdot 7 + 1 \\cdot 8 = 40"), "{tex}");
         // Two values share the largest frequency: the smallest is shown.
         assert!(tex.contains("\\text{Mode} = 4"), "{tex}");
+    }
+
+    #[test]
+    fn chi_square_by_hand_agrees_with_the_table() {
+        // Drug: 12 improved, 3 not; placebo: 5 and 10.
+        let mut ds = Dataset::new();
+        for name in ["treatment", "improved"] {
+            ds.add_variable(Variable::numeric(name)).unwrap();
+        }
+        for (t, i, k) in [(1.0, 1.0, 12), (1.0, 2.0, 3), (2.0, 1.0, 5), (2.0, 2.0, 10)] {
+            for _ in 0..k {
+                ds.push_case(vec![Value::Num(t), Value::Num(i)]).unwrap();
+            }
+        }
+        let (rows, columns): (Vec<String>, Vec<String>) = (vec!["treatment".into()], vec!["improved".into()]);
+        let tex = latex(&crosstabs(&ds, &rows, &columns, false).unwrap());
+        let options = crate::CrosstabsOptions { rows, columns, cells: crate::CrosstabsCells::default(), chisq: true };
+        let items = crate::crosstabs(&ds, &options).unwrap();
+        let t = tables(&items).into_iter().find(|t| t.title == "Chi-Square Tests").unwrap();
+        // Every value, significance and exact significance of the table.
+        for (name, cells) in &t.rows {
+            if name == "N of Valid Cases" {
+                continue;
+            }
+            for k in [0, 2, 3, 4] {
+                if let Some(cell @ Cell::Num { .. }) = cells.get(k) {
+                    ends_on(&tex, &[cell]);
+                }
+            }
+        }
+        // Expected 15 · 17 / 30 = 8.5; Yates 30 (|12 · 10 − 3 · 5| − 15)² / (15 · 15 · 17 · 13).
+        assert!(tex.contains("\\frac{15 \\cdot 17}{30} = 8.5"), "{tex}");
+        assert!(tex.contains("\\left| 12 \\cdot 10 - 3 \\cdot 5 \\right|") || tex.contains("| 12 \\cdot 10 - 3 \\cdot 5 |"), "{tex}");
+        assert!(tex.contains("\\frac{15 ! \\cdot 15 ! \\cdot 17 ! \\cdot 13 !}{30 ! \\cdot 12 ! \\cdot 3 ! \\cdot 5 ! \\cdot 10 !}"), "{tex}");
     }
 
     #[test]

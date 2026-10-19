@@ -33,9 +33,9 @@ pub struct Options {
 }
 
 /// Counts of one row × column table over the cases valid on both.
-struct Counts {
-    rows: Vec<Value>,
-    columns: Vec<Value>,
+pub(crate) struct Counts {
+    pub(crate) rows: Vec<Value>,
+    pub(crate) columns: Vec<Value>,
     /// `cells[r][c]`, rounded when weighted.
     cells: Vec<Vec<f64>>,
     /// Weighted cases with a missing value on either variable.
@@ -43,20 +43,20 @@ struct Counts {
 }
 
 impl Counts {
-    fn row_total(&self, r: usize) -> f64 {
+    pub(crate) fn row_total(&self, r: usize) -> f64 {
         self.cells.get(r).map_or(0.0, |row| row.iter().sum())
     }
-    fn column_total(&self, c: usize) -> f64 {
+    pub(crate) fn column_total(&self, c: usize) -> f64 {
         self.cells.iter().filter_map(|row| row.get(c)).sum()
     }
-    fn total(&self) -> f64 {
+    pub(crate) fn total(&self) -> f64 {
         self.cells.iter().flatten().sum()
     }
-    fn expected(&self, r: usize, c: usize) -> f64 {
+    pub(crate) fn expected(&self, r: usize, c: usize) -> f64 {
         let n = self.total();
         if n > 0.0 { self.row_total(r) * self.column_total(c) / n } else { 0.0 }
     }
-    fn get(&self, r: usize, c: usize) -> f64 {
+    pub(crate) fn get(&self, r: usize, c: usize) -> f64 {
         self.cells.get(r).and_then(|row| row.get(c)).copied().unwrap_or(0.0)
     }
 }
@@ -69,7 +69,7 @@ fn compare(a: &Value, b: &Value) -> std::cmp::Ordering {
     }
 }
 
-fn count(ds: &Dataset, row: usize, column: usize) -> Counts {
+pub(crate) fn count(ds: &Dataset, row: usize, column: usize) -> Counts {
     let mut pairs: Vec<(Value, Value, f64)> = Vec::new();
     let mut missing = 0.0;
     for case in 0..ds.n_cases() {

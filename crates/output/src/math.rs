@@ -142,6 +142,7 @@ impl Math {
                     "σ" => Some("\\sigma"),
                     "ν" => Some("\\nu"),
                     "α" => Some("\\alpha"),
+                    "χ" => Some("\\chi"),
                     _ => None,
                 };
                 if let Some(g) = greek {
@@ -161,7 +162,7 @@ impl Math {
                 "≤" => "\\le".into(),
                 "≥" => "\\ge".into(),
                 "±" => "\\pm".into(),
-                "|" => "|".into(),
+                "|" | "!" => s.clone(),
                 s if s.parse::<f64>().is_ok() => s.to_string(),
                 s => format!("\\text{{{}}}", latex_text(s)),
             },
