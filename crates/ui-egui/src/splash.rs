@@ -1,14 +1,31 @@
 //! The splash screen: a small window of its own, without decorations, before the main one, as
-//! desktop suites have. Morrison Kühlsen's ink with a brand stripe, the σ large and faint as
-//! artwork, MK Sigma's name, motto and version, a bar that fills while it shows, and the
-//! house's logo. It closes by itself after a moment; a click or Esc closes it sooner.
+//! desktop suites have. The house's spiral staircase as artwork under Morrison Kühlsen's ink,
+//! MK Sigma's name, motto and version, a bar that fills while it shows with the program's
+//! components named in turn, and the house's logo. It closes by itself after a moment; a click
+//! or Esc closes it sooner.
 
 use crate::backstage::{BRAND, INK, ON_INK, ON_INK_SOFT};
 
 /// The window's size, in points.
 pub const SIZE: [f32; 2] = [680.0, 400.0];
 /// Seconds it stays.
-const HOLD: f64 = 2.0;
+const HOLD: f64 = 2.4;
+
+/// The program's components, named in turn as the bar fills.
+const COMPONENTS: [&str; 12] = [
+    "the syntax parser",
+    "the SPSS data reader and writer",
+    "the delimited text reader",
+    "descriptive statistics and frequencies",
+    "crosstabs and chi-square tests",
+    "t tests, ANOVA and post hoc tests",
+    "correlations and regression",
+    "nonparametric tests",
+    "charts",
+    "the Output Viewer and its exports",
+    "slicers, cross-filtering and dashboards",
+    "the calculations by hand (Σ)",
+];
 
 #[derive(Debug, Default)]
 pub struct SplashScreen {
@@ -45,12 +62,15 @@ impl SplashScreen {
 fn paint(painter: &egui::Painter, ctx: &egui::Context, rect: egui::Rect, progress: f32) {
     let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
     painter.rect_filled(rect, 0.0, INK);
-    // The artwork: the σ, large and faint, running off the right edge.
-    if let Some(texture) = crate::logo::texture(ctx) {
-        let side = rect.height() * 1.25;
-        let art = egui::Rect::from_center_size(egui::pos2(rect.right() - side * 0.22, rect.center().y + side * 0.06), egui::vec2(side, side));
-        painter.with_clip_rect(rect).image(texture.id(), art, uv, egui::Color32::from_white_alpha(20));
+    // The artwork over the whole window, then the ink over it: dense on the left where the
+    // words are, gone by the middle; and a little at the foot, under the house's logo.
+    if let Some(texture) = crate::logo::spiral(ctx) {
+        painter.image(texture.id(), rect, uv, egui::Color32::WHITE);
     }
+    let ink = |alpha: u8| egui::Color32::from_rgba_unmultiplied(INK.r(), INK.g(), INK.b(), alpha);
+    let split = rect.left() + rect.width() * 0.62;
+    gradient(painter, egui::Rect::from_min_max(rect.min, egui::pos2(split, rect.bottom())), [ink(242), ink(0)], true);
+    gradient(painter, egui::Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - 120.0), rect.max), [ink(0), ink(170)], false);
     // The brand's stripe along the top.
     painter.rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), 5.0)), 0.0, BRAND);
 
@@ -84,7 +104,9 @@ fn paint(painter: &egui::Painter, ctx: &egui::Context, rect: egui::Rect, progres
 
     // The status line over the progress bar, at the foot.
     let bar = egui::Rect::from_min_size(egui::pos2(left, rect.bottom() - 40.0), egui::vec2(260.0, 3.0));
-    painter.text(bar.left_top() - egui::vec2(0.0, 10.0), egui::Align2::LEFT_BOTTOM, "Starting…", egui::FontId::proportional(12.0), ON_INK_SOFT);
+    let shown = ((progress * COMPONENTS.len() as f32) as usize).min(COMPONENTS.len() - 1);
+    let status = COMPONENTS.get(shown).map_or_else(String::new, |c| format!("Loading {c}…"));
+    painter.text(bar.left_top() - egui::vec2(0.0, 10.0), egui::Align2::LEFT_BOTTOM, status, egui::FontId::proportional(12.0), ON_INK_SOFT);
     painter.rect_filled(bar, 1.5, egui::Color32::from_white_alpha(28));
     painter.rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * progress, bar.height())), 1.5, BRAND);
 
@@ -103,4 +125,21 @@ fn paint(painter: &egui::Painter, ctx: &egui::Context, rect: egui::Rect, progres
         egui::FontId::proportional(11.5),
         ON_INK_SOFT,
     );
+}
+
+/// `rect` filled from `colors[0]` to `colors[1]`, left to right when `across`, else top to bottom.
+fn gradient(painter: &egui::Painter, rect: egui::Rect, colors: [egui::Color32; 2], across: bool) {
+    let [a, b] = colors;
+    let (tl, tr, bl, br) = if across { (a, b, a, b) } else { (a, a, b, b) };
+    let mut mesh = egui::Mesh::default();
+    let uv = egui::epaint::WHITE_UV;
+    mesh.vertices.extend([
+        egui::epaint::Vertex { pos: rect.left_top(), uv, color: tl },
+        egui::epaint::Vertex { pos: rect.right_top(), uv, color: tr },
+        egui::epaint::Vertex { pos: rect.left_bottom(), uv, color: bl },
+        egui::epaint::Vertex { pos: rect.right_bottom(), uv, color: br },
+    ]);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(1, 3, 2);
+    painter.add(mesh);
 }

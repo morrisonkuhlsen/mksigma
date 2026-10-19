@@ -1,9 +1,12 @@
 //! MK Sigma's logo, a σ, from the author's own site (github.com/morrisonkuhlsen, favicon.png):
 //! the window icon and the mark at the start of the title row. And the Morrison Kühlsen logo
-//! (morrisonkuhlsen.com, its header's SVG drawn in white), in the File backstage.
+//! (morrisonkuhlsen.com, its header's SVG drawn in white), in the File backstage. And the
+//! spiral staircase from the house's own site (github.com/morrisonkuhlsen, spiral.avif, cropped
+//! to the splash screen's shape), the splash screen's artwork.
 
 const PNG: &[u8] = include_bytes!("../assets/mksigma.png");
 const MORRISON_KUHLSEN: &[u8] = include_bytes!("../assets/morrison-kuhlsen.png");
+const SPIRAL: &[u8] = include_bytes!("../assets/spiral.png");
 
 /// The logo as RGBA pixels with its width and height, or `None` if it can't be decoded.
 pub fn rgba() -> Option<(Vec<u8>, u32, u32)> {
@@ -43,6 +46,11 @@ pub(crate) fn morrison_kuhlsen(ctx: &egui::Context) -> Option<egui::TextureHandl
     cached(ctx, "morrison-kuhlsen-logo", MORRISON_KUHLSEN)
 }
 
+/// The splash screen's artwork.
+pub(crate) fn spiral(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    cached(ctx, "spiral", SPIRAL)
+}
+
 fn cached(ctx: &egui::Context, name: &str, png: &[u8]) -> Option<egui::TextureHandle> {
     let id = egui::Id::new(name);
     if let Some(texture) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
@@ -66,5 +74,8 @@ mod tests {
         let (rgba, width, height) = super::decode(super::MORRISON_KUHLSEN).unwrap();
         assert_eq!(rgba.len(), (width * height * 4) as usize);
         assert!(width > height * 2, "a wide wordmark");
+        // A palette PNG, expanded.
+        let (rgba, width, height) = super::decode(super::SPIRAL).unwrap();
+        assert_eq!((width, height, rgba.len()), (1020, 600, 1020 * 600 * 4));
     }
 }
