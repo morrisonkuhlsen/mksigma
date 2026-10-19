@@ -944,6 +944,405 @@ fn posthoc_steps(test: crate::PostHoc, stats: &[(f64, f64, f64)], mse: f64, df: 
     steps
 }
 
+/// Each distinct value once, ascending, with its weight and the rank it gets: ties share the
+/// mean of the ranks they span.
+fn ranked(values: &[(f64, f64)]) -> Vec<(f64, f64, f64)> {
+    let mut sorted: Vec<(f64, f64)> = values.to_vec();
+    sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out: Vec<(f64, f64, f64)> = Vec::new();
+    for (x, w) in sorted {
+        match out.last_mut() {
+            Some((v, weight, _)) if *v == x => *weight += w,
+            _ => out.push((x, w, 0.0)),
+        }
+    }
+    let mut below = 0.0;
+    for (_, w, rank) in out.iter_mut() {
+        *rank = below + (*w + 1.0) / 2.0;
+        below += *w;
+    }
+    out
+}
+
+/// The rank of `x` among `ranked`.
+fn rank_of(ranked: &[(f64, f64, f64)], x: f64) -> f64 {
+    ranked.iter().find(|(v, _, _)| *v == x).map_or(0.0, |(_, _, r)| *r)
+}
+
+/// The ranks, step by step: each distinct value, and for a tie the mean of the ranks it spans.
+fn rank_steps(intro: &str, ranked: &[(f64, f64, f64)], full: bool) -> Vec<Step> {
+    let mut below = 0.0;
+    let mut items = Vec::new();
+    for (k, (x, w, rank)) in ranked.iter().enumerate() {
+        if k > 0 {
+            items.push(text(",   "));
+        }
+        let (first, last) = (below + 1.0, below + w);
+        items.push(if *w > 1.0 {
+            row(vec![val(*x), text("→"), equals(vec![frac(row(vec![n(first), text("+"), n(last)]), text("2")), n(*rank)])])
+        } else {
+            row(vec![val(*x), text("→"), n(*rank)])
+        });
+        below += w;
+    }
+    if !full && items.len() > SHOWN * 2 {
+        let count = items.len();
+        let mut short: Vec<Math> = items.iter().take(10).cloned().collect();
+        short.push(text("⋯"));
+        short.extend(items.iter().skip(count - 3).cloned());
+        items = short;
+    }
+    vec![step(intro, row(items))]
+}
+
+/// The correction for ties: Σ(t³ − t) over the values that t cases share.
+fn ties_step(ranked: &[(f64, f64, f64)], full: bool) -> (Step, f64) {
+    let tied: Vec<f64> = ranked.iter().map(|(_, w, _)| *w).filter(|w| *w > 1.0).collect();
+    let total: f64 = tied.iter().map(|t| t.powi(3) - t).sum();
+    let math = if tied.is_empty() {
+        equals(vec![var("T"), text("0")])
+    } else {
+        equals(vec![
+            var("T"),
+            sum(None, None, paren(row(vec![sup(var("t"), text("3")), text("−"), var("t")]))),
+            terms(tied.iter().map(|t| paren(row(vec![sup(n(*t), text("3")), text("−"), n(*t)]))).collect(), full),
+            n(total),
+        ])
+    };
+    let text_of = if tied.is_empty() {
+        "No values are tied, so there is no correction for ties:"
+    } else {
+        "The correction for ties, over the values that t cases share:"
+    };
+    (step(text_of, math), total)
+}
+
+/// The significance of `z` from the standard normal distribution, two-tailed.
+fn z_significance(z: f64) -> Option<Step> {
+    let p = crate::npar::two_sided(z)?;
+    Some(step(
+        "Its significance (two-tailed) is the probability of a z at least this far from 0 in the standard normal distribution:",
+        equals(vec![var("p"), approx(p)]),
+    ))
+}
+
+/// A sum of ranks, term by term, and the mean rank: the sum over the cases.
+fn rank_sum(name: Math, size_name: Math, ranks: Vec<(f64, f64)>, full: bool) -> (Math, f64) {
+    let total: f64 = ranks.iter().map(|(r, w)| r * w).sum();
+    let size: f64 = ranks.iter().map(|(_, w)| w).sum();
+    let each: Vec<Math> = ranks.iter().map(|(r, w)| if *w == 1.0 { n(*r) } else { row(vec![n(*w), text("·"), n(*r)]) }).collect();
+    let sum_math = equals(vec![name.clone(), terms(each, full), n(total)]);
+    if size <= 0.0 {
+        return (sum_math, total);
+    }
+    let mean = equals(vec![bar(name), frac(n(total), n(size)), approx_to(total / size, 2)]);
+    (row(vec![equals(vec![size_name, n(size)]), text(",   "), sum_math, text(",   "), mean]), total)
+}
+
+/// `NPAR TESTS`: Mann-Whitney, Wilcoxon signed ranks and Kruskal-Wallis, rank by rank.
+pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result<Explanation, StatsError> {
+    use crate::NparTest;
+    let mut sections = Vec::new();
+    for test in tests {
+        match test {
+            NparTest::MannWhitney { variables, group, first, second } => {
+                let (gi, gvar) = numeric(ds, group)?;
+                for name in variables {
+                    let (vi, variable) = numeric(ds, name)?;
+                    let data = crate::npar::group_values(ds, vi, gi, |g| g == *first || g == *second);
+                    let ranked = ranked(&data.iter().map(|(x, w, _)| (*x, *w)).collect::<Vec<_>>());
+                    let label = |g: f64| value_text(gvar, &mksigma_core::Value::Num(g));
+                    let mut steps = rank_steps(
+                        &format!(
+                            "Both groups ({} = {} and {}) together, ranked from the smallest value:",
+                            gvar.display_name(),
+                            label(*first),
+                            label(*second)
+                        ),
+                        &ranked,
+                        full,
+                    );
+                    let group_ranks =
+                        |g: f64| data.iter().filter(|(_, _, gg)| *gg == g).map(|(x, w, _)| (rank_of(&ranked, *x), *w)).collect::<Vec<_>>();
+                    let (r1_math, r1) = rank_sum(sub(var("R"), text("1")), sub(var("n"), text("1")), group_ranks(*first), full);
+                    let (r2_math, r2) = rank_sum(sub(var("R"), text("2")), sub(var("n"), text("2")), group_ranks(*second), full);
+                    let size = |g: f64| data.iter().filter(|(_, _, gg)| *gg == g).map(|(_, w, _)| w).sum::<f64>();
+                    let (n1, n2) = (size(*first), size(*second));
+                    let big_n = n1 + n2;
+                    steps.extend(several(
+                        &format!("Each group's size, sum of ranks and mean rank: group 1 is {}, group 2 is {}:", label(*first), label(*second)),
+                        vec![r1_math, r2_math, equals(vec![var("N"), row(vec![n(n1), text("+"), n(n2)]), n(big_n)])],
+                    ));
+                    let u1 = r1 - n1 * (n1 + 1.0) / 2.0;
+                    let u2 = n1 * n2 - u1;
+                    steps.extend(several(
+                        "U counts the pairs, one case from each group, in which group 1's value is the higher; the test takes the smaller U:",
+                        vec![
+                            equals(vec![
+                                sub(var("U"), text("1")),
+                                row(vec![
+                                    sub(var("R"), text("1")),
+                                    text("−"),
+                                    frac(
+                                        row(vec![sub(var("n"), text("1")), paren(row(vec![sub(var("n"), text("1")), text("+"), text("1")]))]),
+                                        text("2"),
+                                    ),
+                                ]),
+                                row(vec![n(r1), text("−"), frac(row(vec![n(n1), text("·"), n(n1 + 1.0)]), text("2"))]),
+                                n(u1),
+                            ]),
+                            equals(vec![
+                                sub(var("U"), text("2")),
+                                row(vec![sub(var("n"), text("1")), sub(var("n"), text("2")), text("−"), sub(var("U"), text("1"))]),
+                                row(vec![n(n1), text("·"), n(n2), text("−"), n(u1)]),
+                                n(u2),
+                            ]),
+                        ],
+                    ));
+                    let (u, w) = if u1 <= u2 { (u1, r1) } else { (u2, r2) };
+                    steps.extend(several(
+                        "Mann-Whitney's U, and Wilcoxon's W, the sum of ranks of the group that U belongs to:",
+                        vec![equals(vec![var("U"), n(u)]), equals(vec![var("W"), n(w)])],
+                    ));
+                    let (ties, t) = ties_step(&ranked, full);
+                    steps.push(ties);
+                    let variance = n1 * n2 / (big_n * (big_n - 1.0)) * ((big_n.powi(3) - big_n) / 12.0 - t / 12.0);
+                    steps.push(step(
+                        "U's variance, with the ties taken out:",
+                        equals(vec![
+                            sup(sub(var("σ"), var("U")), text("2")),
+                            row(vec![
+                                frac(
+                                    row(vec![sub(var("n"), text("1")), sub(var("n"), text("2"))]),
+                                    row(vec![var("N"), paren(row(vec![var("N"), text("−"), text("1")]))]),
+                                ),
+                                paren(row(vec![
+                                    frac(row(vec![sup(var("N"), text("3")), text("−"), var("N")]), text("12")),
+                                    text("−"),
+                                    frac(var("T"), text("12")),
+                                ])),
+                            ]),
+                            row(vec![
+                                frac(row(vec![n(n1), text("·"), n(n2)]), row(vec![n(big_n), text("·"), n(big_n - 1.0)])),
+                                paren(row(vec![
+                                    frac(row(vec![sup(n(big_n), text("3")), text("−"), n(big_n)]), text("12")),
+                                    text("−"),
+                                    frac(n(t), text("12")),
+                                ])),
+                            ]),
+                            n(variance),
+                        ]),
+                    ));
+                    let z = (u - n1 * n2 / 2.0) / variance.sqrt();
+                    if z.is_finite() {
+                        steps.push(step(
+                            "z measures U's distance from its expected value, half the product of the groups' sizes, in standard deviations:",
+                            equals(vec![
+                                var("Z"),
+                                frac(
+                                    row(vec![var("U"), text("−"), frac(row(vec![sub(var("n"), text("1")), sub(var("n"), text("2"))]), text("2"))]),
+                                    sqrt(sup(sub(var("σ"), var("U")), text("2"))),
+                                ),
+                                frac(row(vec![n(u), text("−"), n(n1 * n2 / 2.0)]), sqrt(n(variance))),
+                                approx(z),
+                            ]),
+                        ));
+                        steps.extend(z_significance(z));
+                    }
+                    sections.push((format!("Mann-Whitney: {} by {}", variable.display_name(), gvar.display_name()), steps));
+                }
+            }
+            NparTest::Wilcoxon { pairs } => {
+                for (a, b) in pairs {
+                    let ((ai, avar), (bi, bvar)) = (numeric(ds, a)?, numeric(ds, b)?);
+                    let rows: Vec<(f64, f64, f64)> = (0..ds.n_cases())
+                        .filter_map(|c| {
+                            let w = ds.case_weight(c);
+                            (w > 0.0).then_some((valid(ds, ai, c)?, valid(ds, bi, c)?, w))
+                        })
+                        .collect();
+                    let mut listed = Vec::new();
+                    for (k, (x, y, _)) in rows.iter().enumerate() {
+                        if k > 0 {
+                            listed.push(text(",   "));
+                        }
+                        listed.push(equals(vec![row(vec![val(*y), text("−"), val(*x)]), val(y - x)]));
+                    }
+                    if !full && listed.len() > SHOWN * 2 {
+                        let count = listed.len();
+                        let mut short: Vec<Math> = listed.iter().take(10).cloned().collect();
+                        short.push(text("⋯"));
+                        short.extend(listed.iter().skip(count - 3).cloned());
+                        listed = short;
+                    }
+                    let mut steps = vec![step(
+                        &format!(
+                            "The differences, case by case ({} minus {}); those of 0 are ties and leave the test:",
+                            bvar.display_name(),
+                            avar.display_name()
+                        ),
+                        row(listed),
+                    )];
+                    let nonzero: Vec<(f64, f64)> = rows.iter().map(|(x, y, w)| (y - x, *w)).filter(|(d, _)| *d != 0.0).collect();
+                    let ranked = ranked(&nonzero.iter().map(|(d, w)| (d.abs(), *w)).collect::<Vec<_>>());
+                    steps.extend(rank_steps("The differences' sizes, ranked from the smallest:", &ranked, full));
+                    let side = |negative: bool| {
+                        nonzero.iter().filter(|(d, _)| (*d < 0.0) == negative).map(|(d, w)| (rank_of(&ranked, d.abs()), *w)).collect::<Vec<_>>()
+                    };
+                    let (neg_math, tn) = rank_sum(sub(var("T"), text("−")), sub(var("n"), text("−")), side(true), full);
+                    let (pos_math, tp) = rank_sum(sub(var("T"), text("+")), sub(var("n"), text("+")), side(false), full);
+                    let big_n: f64 = nonzero.iter().map(|(_, w)| w).sum();
+                    let zero: f64 = rows.iter().filter(|(x, y, _)| y == x).map(|(_, _, w)| w).sum();
+                    steps.extend(several(
+                        "How many differences are negative and positive, their sums of ranks and mean ranks; then the ties, and all the cases:",
+                        vec![
+                            neg_math,
+                            pos_math,
+                            equals(vec![text("Ties"), n(zero)]),
+                            equals(vec![text("Total"), row(vec![n(big_n), text("+"), n(zero)]), n(big_n + zero)]),
+                        ],
+                    ));
+                    let (ties, t) = ties_step(&ranked, full);
+                    steps.push(ties);
+                    let variance = big_n * (big_n + 1.0) * (2.0 * big_n + 1.0) / 24.0 - t / 48.0;
+                    steps.push(step(
+                        &format!("The variance of the smaller sum, over the n = {} differences that aren't 0:", number_text(big_n)),
+                        equals(vec![
+                            sup(var("σ"), text("2")),
+                            row(vec![
+                                frac(
+                                    row(vec![
+                                        var("n"),
+                                        paren(row(vec![var("n"), text("+"), text("1")])),
+                                        paren(row(vec![text("2"), var("n"), text("+"), text("1")])),
+                                    ]),
+                                    text("24"),
+                                ),
+                                text("−"),
+                                frac(var("T"), text("48")),
+                            ]),
+                            row(vec![
+                                frac(row(vec![n(big_n), text("·"), n(big_n + 1.0), text("·"), n(2.0 * big_n + 1.0)]), text("24")),
+                                text("−"),
+                                frac(n(t), text("48")),
+                            ]),
+                            n(variance),
+                        ]),
+                    ));
+                    let smaller = tn.min(tp);
+                    let z = (smaller - big_n * (big_n + 1.0) / 4.0) / variance.sqrt();
+                    if z.is_finite() {
+                        steps.push(step(
+                            "z measures the smaller sum's distance from its expected value, n(n + 1) / 4:",
+                            equals(vec![
+                                var("Z"),
+                                frac(
+                                    row(vec![
+                                        text("min"),
+                                        paren(row(vec![sub(var("T"), text("−")), text(","), sub(var("T"), text("+"))])),
+                                        text("−"),
+                                        frac(row(vec![var("n"), paren(row(vec![var("n"), text("+"), text("1")]))]), text("4")),
+                                    ]),
+                                    var("σ"),
+                                ),
+                                frac(row(vec![n(smaller), text("−"), n(big_n * (big_n + 1.0) / 4.0)]), sqrt(n(variance))),
+                                approx(z),
+                            ]),
+                        ));
+                        steps.extend(z_significance(z));
+                    }
+                    sections.push((format!("Wilcoxon: {} − {}", bvar.display_name(), avar.display_name()), steps));
+                }
+            }
+            NparTest::KruskalWallis { variables, group, low, high } => {
+                let (gi, gvar) = numeric(ds, group)?;
+                for name in variables {
+                    let (vi, variable) = numeric(ds, name)?;
+                    let data = crate::npar::group_values(ds, vi, gi, |g| *low <= g && g <= *high);
+                    let ranked = ranked(&data.iter().map(|(x, w, _)| (*x, *w)).collect::<Vec<_>>());
+                    let mut steps = rank_steps(
+                        &format!(
+                            "Every group ({} from {} to {}) together, ranked from the smallest value:",
+                            gvar.display_name(),
+                            number_text(*low),
+                            number_text(*high)
+                        ),
+                        &ranked,
+                        full,
+                    );
+                    let mut levels: Vec<f64> = data.iter().map(|(_, _, g)| *g).collect();
+                    levels.sort_by(f64::total_cmp);
+                    levels.dedup();
+                    let mut groups = Vec::new();
+                    let mut sums = Vec::new();
+                    for (k, level) in levels.iter().enumerate() {
+                        let ranks: Vec<(f64, f64)> = data.iter().filter(|(_, _, g)| g == level).map(|(x, w, _)| (rank_of(&ranked, *x), *w)).collect();
+                        let size: f64 = ranks.iter().map(|(_, w)| w).sum();
+                        let tag = (k + 1).to_string();
+                        let (math, total) = rank_sum(sub(var("R"), text(&tag)), sub(var("n"), text(&tag)), ranks, full);
+                        sums.push(math);
+                        groups.push((size, total));
+                    }
+                    let names: Vec<String> =
+                        levels.iter().enumerate().map(|(k, l)| format!("{} is {}", k + 1, value_text(gvar, &mksigma_core::Value::Num(*l)))).collect();
+                    let big_n: f64 = groups.iter().map(|(s, _)| s).sum();
+                    sums.push(equals(vec![var("N"), plus(groups.iter().map(|(s, _)| n(*s)).collect()), n(big_n)]));
+                    steps.extend(several(&format!("Each group's size, sum of ranks and mean rank (group {}):", names.join(", ")), sums));
+                    let inner: f64 = groups.iter().map(|(s, r)| r * r / s).sum();
+                    let raw = 12.0 / (big_n * (big_n + 1.0)) * inner - 3.0 * (big_n + 1.0);
+                    steps.push(step(
+                        "H before the correction for ties:",
+                        equals(vec![
+                            var("H"),
+                            row(vec![
+                                frac(text("12"), row(vec![var("N"), paren(row(vec![var("N"), text("+"), text("1")]))])),
+                                sum(None, None, frac(sup(indexed("R", "k"), text("2")), indexed("n", "k"))),
+                                text("−"),
+                                text("3"),
+                                paren(row(vec![var("N"), text("+"), text("1")])),
+                            ]),
+                            row(vec![
+                                frac(text("12"), row(vec![n(big_n), text("·"), n(big_n + 1.0)])),
+                                paren(plus(groups.iter().map(|(s, r)| frac(sup(n(*r), text("2")), n(*s))).collect())),
+                                text("−"),
+                                text("3"),
+                                text("·"),
+                                n(big_n + 1.0),
+                            ]),
+                            n(raw),
+                        ]),
+                    ));
+                    let (ties, t) = ties_step(&ranked, full);
+                    steps.push(ties);
+                    let correction = 1.0 - t / (big_n.powi(3) - big_n);
+                    let h = raw / correction;
+                    let df = levels.len() as f64 - 1.0;
+                    steps.push(step(
+                        "Corrected for ties:",
+                        equals(vec![
+                            var("H"),
+                            frac(var("H"), row(vec![text("1"), text("−"), frac(var("T"), row(vec![sup(var("N"), text("3")), text("−"), var("N")]))])),
+                            frac(n(raw), row(vec![text("1"), text("−"), frac(n(t), row(vec![sup(n(big_n), text("3")), text("−"), n(big_n)]))])),
+                            approx(h),
+                        ]),
+                    ));
+                    if h.is_finite() && df >= 1.0 {
+                        steps.push(step("Its degrees of freedom, the groups minus 1:", equals(vec![var("df"), n(df)])));
+                        if let Some(p) = dist::chi_square_sig(h, df) {
+                            steps.push(step(
+                                &format!("Its significance, from the chi-square distribution with {} degrees of freedom:", number_text(df)),
+                                equals(vec![var("p"), approx(p)]),
+                            ));
+                        }
+                    }
+                    sections.push((format!("Kruskal-Wallis: {} by {}", variable.display_name(), gvar.display_name()), steps));
+                }
+            }
+        }
+    }
+    Ok(Explanation { title: "NPar Tests".into(), sections })
+}
+
 /// `CROSSTABS`' chi-square tests for each row × column pair: the counts and their totals, the
 /// expected counts, Pearson's chi-square, the likelihood ratio, for a 2 × 2 table the
 /// continuity correction and Fisher's exact test, and the linear-by-linear association.
@@ -1714,6 +2113,61 @@ mod tests {
         // SSB = 3 · (4 + 4 + 0) = 24, SSW = 2 + 2 + 2 = 6, F = (24 / 2) / (6 / 6) = 12.
         assert!(tex.contains("= 24\n") || tex.contains("= 24"), "{tex}");
         assert!(tex.contains("\\frac{12}{1} = 12"), "{tex}");
+    }
+
+    fn npar_data() -> Dataset {
+        let mut ds = Dataset::new();
+        for name in ["x", "g", "after"] {
+            ds.add_variable(Variable::numeric(name)).unwrap();
+        }
+        // Group 1: 1 2 2 3; group 2: 3 4 5 5 6. Ties: 2 2, 3 3 and 5 5.
+        for (x, g, a) in [
+            (1.0, 1.0, 2.0),
+            (2.0, 1.0, 4.0),
+            (2.0, 1.0, 1.0),
+            (3.0, 1.0, 3.0),
+            (3.0, 2.0, 6.0),
+            (4.0, 2.0, 2.0),
+            (5.0, 2.0, 8.0),
+            (5.0, 2.0, 4.0),
+            (6.0, 2.0, 9.0),
+        ] {
+            ds.push_case(vec![Value::Num(x), Value::Num(g), Value::Num(a)]).unwrap();
+        }
+        ds
+    }
+
+    #[test]
+    fn nonparametric_tests_by_hand_agree_with_the_tables() {
+        let ds = npar_data();
+        for test in [
+            crate::NparTest::MannWhitney { variables: vec!["x".into()], group: "g".into(), first: 1.0, second: 2.0 },
+            crate::NparTest::KruskalWallis { variables: vec!["x".into()], group: "g".into(), low: 1.0, high: 2.0 },
+            crate::NparTest::Wilcoxon { pairs: vec![("x".into(), "after".into())] },
+        ] {
+            let tex = latex(&npar_tests(&ds, std::slice::from_ref(&test), false).unwrap());
+            let items = crate::npar_tests(&ds, &[test]).unwrap();
+            for t in tables(&items) {
+                for (_, cells) in &t.rows {
+                    for cell in cells {
+                        let (x, places) = match cell {
+                            Cell::Num { value, decimals } => (*value, *decimals as usize),
+                            Cell::Int(k) => (*k as f64, 0),
+                            _ => continue,
+                        };
+                        let shown = number(x, places);
+                        let found = tex.contains(&format!("\\approx {shown}")) || tex.contains(&format!("= {shown}"));
+                        assert!(found, "{x} of {} in {tex}", t.title);
+                    }
+                }
+            }
+        }
+        // Mann-Whitney's ranks: 1 → 1, 2 → (2 + 3) / 2 = 2.5, 3 → (4 + 5) / 2 = 4.5.
+        let test = crate::NparTest::MannWhitney { variables: vec!["x".into()], group: "g".into(), first: 1.0, second: 2.0 };
+        let tex = latex(&npar_tests(&ds, &[test], false).unwrap());
+        assert!(tex.contains("2 \\to \\frac{2 + 3}{2} = 2.5") && tex.contains("3 \\to \\frac{4 + 5}{2} = 4.5"), "{tex}");
+        // Three ties of two: T = 3 · (2³ − 2) = 18.
+        assert!(tex.contains("= 18"), "{tex}");
     }
 
     #[test]

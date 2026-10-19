@@ -663,7 +663,7 @@ impl Session {
             Command::TTest { .. } => Some((run, None)),
             // With its chi-square tests: the crosstabulations and the tests, not the summary.
             Command::Crosstabs { chisq: true, .. } if table.title != "Case Processing Summary" => Some((run, None)),
-            Command::Oneway { .. } => Some((run, None)),
+            Command::Oneway { .. } | Command::NparTests(_) => Some((run, None)),
             _ => None,
         }
     }
@@ -709,6 +709,7 @@ impl Session {
             }
             Command::TTest { test, ci } => explain::t_test(&ds, &t_test_of(test), *ci, full)?,
             Command::Crosstabs { rows, columns, .. } => explain::crosstabs(&ds, rows, columns, full)?,
+            Command::NparTests(specs) => explain::npar_tests(&ds, &npar_of(specs), full)?,
             Command::Oneway { .. } => match oneway_options(&command) {
                 Some(options) => explain::oneway(&ds, &options, full)?,
                 None => return Err(EngineError::Invalid("this item has no calculation by hand".into())),
@@ -959,6 +960,23 @@ fn oneway_options(command: &Command) -> Option<mksigma_stats::OnewayOptions> {
     })
 }
 
+fn npar_of(specs: &[mksigma_syntax::NparSpec]) -> Vec<mksigma_stats::NparTest> {
+    use mksigma_stats::NparTest;
+    use mksigma_syntax::NparSpec;
+    specs
+        .iter()
+        .map(|s| match s {
+            NparSpec::MannWhitney { variables, group, first, second } => {
+                NparTest::MannWhitney { variables: variables.clone(), group: group.clone(), first: *first, second: *second }
+            }
+            NparSpec::Wilcoxon { pairs } => NparTest::Wilcoxon { pairs: pairs.clone() },
+            NparSpec::KruskalWallis { variables, group, low, high } => {
+                NparTest::KruskalWallis { variables: variables.clone(), group: group.clone(), low: *low, high: *high }
+            }
+        })
+        .collect()
+}
+
 fn freq_statistics(statistics: &[mksigma_syntax::FreqStatistic]) -> Vec<mksigma_stats::FrequenciesStatistic> {
     use mksigma_stats::FrequenciesStatistic as S;
     use mksigma_syntax::FreqStatistic;
@@ -1089,23 +1107,7 @@ fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
             };
             items.extend(mksigma_stats::correlations(ds, &options)?);
         }
-        Command::NparTests(specs) => {
-            use mksigma_stats::NparTest;
-            use mksigma_syntax::NparSpec;
-            let tests: Vec<NparTest> = specs
-                .iter()
-                .map(|s| match s {
-                    NparSpec::MannWhitney { variables, group, first, second } => {
-                        NparTest::MannWhitney { variables: variables.clone(), group: group.clone(), first: *first, second: *second }
-                    }
-                    NparSpec::Wilcoxon { pairs } => NparTest::Wilcoxon { pairs: pairs.clone() },
-                    NparSpec::KruskalWallis { variables, group, low, high } => {
-                        NparTest::KruskalWallis { variables: variables.clone(), group: group.clone(), low: *low, high: *high }
-                    }
-                })
-                .collect();
-            items.extend(mksigma_stats::npar_tests(ds, &tests)?);
-        }
+        Command::NparTests(specs) => items.extend(mksigma_stats::npar_tests(ds, &npar_of(specs))?),
         Command::Logistic { dependent, covariates, ci, iterations, cut } => {
             let options = mksigma_stats::LogisticOptions {
                 dependent: dependent.clone(),
@@ -1194,6 +1196,16 @@ mod tests {
         // The summary has none, nor a crosstabulation without the tests.
         assert_eq!(can.iter().filter(|(_, c)| *c).count(), 2, "{can:?}");
         assert!(can.iter().all(|(t, c)| !(t == "Case Processing Summary" && *c)));
+    }
+
+    #[test]
+    fn explains_nonparametric_tests() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("COMPUTE older = age > 35.\nNPAR TESTS /M-W=score BY older(0 1) /WILCOXON=age WITH score (PAIRED).").unwrap();
+        let tables: Vec<usize> = (0..s.output.items.len()).filter(|&i| matches!(s.output.items[i], Item::Table(_))).collect();
+        assert_eq!(tables.len(), 4);
+        let e = s.explain(tables[0], false).unwrap();
+        assert_eq!(e.sections.len(), 2, "both tests: {:?}", e.sections);
     }
 
     #[test]
