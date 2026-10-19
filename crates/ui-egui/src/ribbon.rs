@@ -8,6 +8,7 @@ use crate::output::ExportFormat;
 use crate::procedure::Kind;
 use crate::suggest::Procedure;
 use crate::theme::{self, Tokens};
+use mksigma_i18n::tr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
@@ -20,14 +21,21 @@ pub enum Tab {
     View,
 }
 
-const TABS: [(Tab, &str); 6] = [
-    (Tab::Home, "Home"),
-    (Tab::Data, "Data"),
-    (Tab::Transform, "Transform"),
-    (Tab::Analyze, "Analyze"),
-    (Tab::Graphs, "Graphs"),
-    (Tab::View, "View"),
-];
+const TABS: [Tab; 6] = [Tab::Home, Tab::Data, Tab::Transform, Tab::Analyze, Tab::Graphs, Tab::View];
+
+impl Tab {
+    /// Its name in the interface's language.
+    fn name(self) -> String {
+        match self {
+            Tab::Home => tr!("tab-home"),
+            Tab::Data => tr!("tab-data"),
+            Tab::Transform => tr!("tab-transform"),
+            Tab::Analyze => tr!("tab-analyze"),
+            Tab::Graphs => tr!("tab-graphs"),
+            Tab::View => tr!("tab-view"),
+        }
+    }
+}
 
 /// What was asked for in the title row or the ribbon this frame.
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +63,8 @@ pub(crate) enum Action {
     Dialog(Kind),
     /// Run this syntax (a control that writes a command, such as the Output style's).
     Syntax(String),
+    /// Speak this language.
+    Language(mksigma_i18n::Lang),
 }
 
 /// What the buttons show: what can be undone, whether there is Output, the current view.
@@ -157,47 +167,48 @@ pub(crate) fn title_bar(ui: &mut egui::Ui, state: &State) -> Option<Action> {
         }
     }
     row.add_space(10.0);
-    row.label(egui::RichText::new("AutoSave").size(12.5).color(t.text_dim));
+    row.label(egui::RichText::new(tr!("autosave")).size(12.5).color(t.text_dim));
     row.add_space(4.0);
-    let tip =
-        if state.autosave { "AutoSave is on: every change is saved to the file" } else { "AutoSave: save the data to its file after every change" };
-    if switch(&mut row, state.autosave, "AutoSave").on_hover_text(tip).clicked() {
+    let tip = if state.autosave { &tr!("autosave-on-tip") } else { &tr!("autosave-off-tip") };
+    if switch(&mut row, state.autosave, &tr!("autosave")).on_hover_text(tip).clicked() {
         action = Some(Action::ToggleAutoSave);
     }
     row.add_space(8.0);
-    if icon_button(&mut row, Icon::Save, "Save", true).clicked() {
+    if icon_button(&mut row, Icon::Save, &tr!("save"), true).clicked() {
         action = Some(Action::Save);
     }
-    let undo = state.undo.map_or_else(|| "Undo".to_string(), |l| format!("Undo {}", short(l)));
+    let undo = state.undo.map_or_else(|| tr!("undo"), |l| tr!("undo-named", what = short(l)));
     if icon_button(&mut row, Icon::Undo, &undo, state.undo.is_some()).clicked() && state.undo.is_some() {
         action = Some(Action::Undo);
     }
-    let redo = state.redo.map_or_else(|| "Redo".to_string(), |l| format!("Redo {}", short(l)));
+    let redo = state.redo.map_or_else(|| tr!("redo"), |l| tr!("redo-named", what = short(l)));
     if icon_button(&mut row, Icon::Redo, &redo, state.redo.is_some()).clicked() && state.redo.is_some() {
         action = Some(Action::Redo);
     }
     row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        if icon_button(ui, Icon::Search, "Search commands and variables (Ctrl+F)", true).clicked() {
+        if icon_button(ui, Icon::Search, &tr!("search-tip"), true).clicked() {
             action = Some(Action::Search);
         }
-        let export = icon_button(ui, Icon::Share, "Export the Output", state.has_output);
+        let export = icon_button(ui, Icon::Share, &tr!("export-output-tip"), state.has_output);
         egui::Popup::menu(&export).show(|ui| {
-            if ui.button("Export Output as HTML…").clicked() {
+            if ui.button(tr!("export-html-menu")).clicked() {
                 action = Some(Action::Export(ExportFormat::Html));
             }
-            if ui.button("Export Output as PDF…").clicked() {
+            if ui.button(tr!("export-pdf-menu")).clicked() {
                 action = Some(Action::Export(ExportFormat::Pdf));
             }
         });
-        let theme = icon_button(ui, Icon::Contrast, "Dark Mode", true);
+        let theme = icon_button(ui, Icon::Contrast, &tr!("theme-tip"), true);
         if theme.clicked() {
             action = Some(Action::Theme(if t.dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark }));
         }
         theme.context_menu(|ui| {
-            for (preference, name) in
-                [(egui::ThemePreference::Light, "Light"), (egui::ThemePreference::Dark, "Dark"), (egui::ThemePreference::System, "System")]
-            {
+            for (preference, name) in [
+                (egui::ThemePreference::Light, &tr!("theme-light")),
+                (egui::ThemePreference::Dark, &tr!("theme-dark")),
+                (egui::ThemePreference::System, &tr!("theme-system")),
+            ] {
                 if ui.button(name).clicked() {
                     action = Some(Action::Theme(preference));
                 }
@@ -222,14 +233,15 @@ pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, collapsed: &mut bool, sta
         let widgets = &mut ui.visuals_mut().widgets;
         widgets.inactive.bg_stroke = egui::Stroke::NONE;
         widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-        let file = egui::RichText::new("File").size(14.0).color(t.accent);
+        let file = egui::RichText::new(tr!("file")).size(14.0).color(t.accent);
         // File opens the backstage over the window: open, save, export, recent files.
-        if ui.add(egui::Button::new(file).frame(false).min_size(egui::vec2(0.0, 28.0))).on_hover_text("Open, save, export and recent files").clicked()
-        {
+        if ui.add(egui::Button::new(file).frame(false).min_size(egui::vec2(0.0, 28.0))).on_hover_text(tr!("file-tip")).clicked() {
             action = Some(Action::File);
         }
         ui.add_space(6.0);
-        for (which, name) in TABS {
+        for which in TABS {
+            let name = which.name();
+            let name = name.as_str();
             let on = *tab == which;
             let text = egui::RichText::new(name).size(14.0).color(if on { t.text } else { t.text_dim });
             let response = ui.add(egui::Button::new(if on { text.strong() } else { text }).frame(false).min_size(egui::vec2(0.0, 28.0)));
@@ -247,8 +259,7 @@ pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, collapsed: &mut bool, sta
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(4.0);
-            let (icon, name) =
-                if *collapsed { (Icon::ChevronDown, "Show the ribbon (Ctrl+F1)") } else { (Icon::ChevronUp, "Hide the ribbon (Ctrl+F1)") };
+            let (icon, name) = if *collapsed { (Icon::ChevronDown, &tr!("ribbon-show")) } else { (Icon::ChevronUp, &tr!("ribbon-hide")) };
             if icon_button(ui, icon, name, true).clicked() {
                 *collapsed = !*collapsed;
             }
@@ -281,76 +292,91 @@ fn buttons(ui: &mut egui::Ui, tab: Tab, state: &State) -> Option<Action> {
     let suggest = |p| Action::Suggest(p);
     match tab {
         Tab::Home => {
-            go(ui, Icon::Open, "Open", "Open a data file (Ctrl+O)", true, false, Action::Open);
-            go(ui, Icon::Save, "Save", "Save the data (Ctrl+S)", true, false, Action::Save);
+            go(ui, Icon::Open, &tr!("open"), &tr!("open-tip"), true, false, Action::Open);
+            go(ui, Icon::Save, &tr!("save"), &tr!("save-tip"), true, false, Action::Save);
             divider(ui);
-            go(ui, Icon::Undo, "Undo", state.undo.unwrap_or("Nothing to undo"), state.undo.is_some(), false, Action::Undo);
-            go(ui, Icon::Redo, "Redo", state.redo.unwrap_or("Nothing to redo"), state.redo.is_some(), false, Action::Redo);
+            go(ui, Icon::Undo, &tr!("undo"), state.undo.unwrap_or(&tr!("nothing-to-undo")), state.undo.is_some(), false, Action::Undo);
+            go(ui, Icon::Redo, &tr!("redo"), state.redo.unwrap_or(&tr!("nothing-to-redo")), state.redo.is_some(), false, Action::Redo);
             divider(ui);
-            go(ui, Icon::Run, "Run Syntax", "Run every command in the syntax editor", true, false, Action::Run);
+            go(ui, Icon::Run, &tr!("run-syntax"), &tr!("run-syntax-tip"), true, false, Action::Run);
             divider(ui);
-            go(ui, Icon::Web, "Export HTML", "Save the Output as a web page", state.has_output, false, Action::Export(ExportFormat::Html));
-            go(ui, Icon::Pdf, "Export PDF", "Save the Output as a PDF document", state.has_output, false, Action::Export(ExportFormat::Pdf));
-            let tip = "Save the Output as a LaTeX document: booktabs tables, pgfplots charts";
-            go(ui, Icon::Latex, "Export LaTeX", tip, state.has_output, false, Action::Export(ExportFormat::Latex));
-            go(ui, Icon::Eraser, "Clear Output", "Remove every item from the Output", state.has_output, false, Action::ClearOutput);
+            go(ui, Icon::Web, &tr!("export-html"), &tr!("export-html-tip"), state.has_output, false, Action::Export(ExportFormat::Html));
+            go(ui, Icon::Pdf, &tr!("export-pdf"), &tr!("export-pdf-tip"), state.has_output, false, Action::Export(ExportFormat::Pdf));
+            let tip = &tr!("export-latex-tip");
+            go(ui, Icon::Latex, &tr!("export-latex"), tip, state.has_output, false, Action::Export(ExportFormat::Latex));
+            go(ui, Icon::Eraser, &tr!("clear-output"), &tr!("clear-output-tip"), state.has_output, false, Action::ClearOutput);
         }
         Tab::Data => {
-            go(ui, Icon::InsertCase, "Insert Case", "Add a blank case at the end", true, false, Action::InsertCase);
-            go(ui, Icon::InsertVariable, "Insert Variable", "Add a numeric variable", true, false, Action::InsertVariable);
+            go(ui, Icon::InsertCase, &tr!("insert-case"), &tr!("insert-case-tip"), true, false, Action::InsertCase);
+            go(ui, Icon::InsertVariable, &tr!("insert-variable"), &tr!("insert-variable-tip"), true, false, Action::InsertVariable);
             divider(ui);
-            go(ui, Icon::Labels, "Value Labels", "Show value labels instead of values", true, state.value_labels, Action::ToggleLabels);
-            go(ui, Icon::Dictionary, "Dictionary", "Show every variable's definition in the Output", true, false, suggest(Procedure::Dictionary));
+            go(ui, Icon::Labels, &tr!("value-labels"), &tr!("value-labels-tip"), true, state.value_labels, Action::ToggleLabels);
+            go(ui, Icon::Dictionary, &tr!("dictionary"), &tr!("dictionary-tip"), true, false, suggest(Procedure::Dictionary));
         }
         Tab::Transform => {
-            let tip = "Adds a command to the syntax editor to complete and run";
-            go(ui, Icon::Compute, "Compute", tip, true, false, suggest(Procedure::Compute));
-            go(ui, Icon::Recode, "Recode", tip, true, false, suggest(Procedure::Recode));
-            go(ui, Icon::Filter, "Select Cases", tip, true, false, suggest(Procedure::SelectCases));
+            let tip = &tr!("suggest-tip");
+            go(ui, Icon::Compute, &tr!("compute"), tip, true, false, suggest(Procedure::Compute));
+            go(ui, Icon::Recode, &tr!("recode"), tip, true, false, suggest(Procedure::Recode));
+            go(ui, Icon::Filter, &tr!("select-cases"), tip, true, false, suggest(Procedure::SelectCases));
         }
         Tab::Analyze => {
-            let dialog = "Opens its dialog: pick the variables and options";
-            go(ui, Icon::Table, "Descriptives", dialog, true, false, Action::Dialog(Kind::Descriptives));
-            go(ui, Icon::Frequencies, "Frequencies", dialog, true, false, Action::Dialog(Kind::Frequencies));
-            go(ui, Icon::Boxplot, "Explore", dialog, true, false, Action::Dialog(Kind::Explore));
+            let dialog = &tr!("dialog-tip");
+            go(ui, Icon::Table, &tr!("descriptives"), dialog, true, false, Action::Dialog(Kind::Descriptives));
+            go(ui, Icon::Frequencies, &tr!("frequencies"), dialog, true, false, Action::Dialog(Kind::Frequencies));
+            go(ui, Icon::Boxplot, &tr!("explore"), dialog, true, false, Action::Dialog(Kind::Explore));
             divider(ui);
-            go(ui, Icon::Crosstabs, "Crosstabs", dialog, true, false, Action::Dialog(Kind::Crosstabs));
-            go(ui, Icon::TTest, "T-Test", dialog, true, false, Action::Dialog(Kind::TTest));
-            go(ui, Icon::Anova, "One-Way ANOVA", dialog, true, false, Action::Dialog(Kind::Oneway));
+            go(ui, Icon::Crosstabs, &tr!("crosstabs"), dialog, true, false, Action::Dialog(Kind::Crosstabs));
+            go(ui, Icon::TTest, &tr!("t-test"), dialog, true, false, Action::Dialog(Kind::TTest));
+            go(ui, Icon::Anova, &tr!("oneway"), dialog, true, false, Action::Dialog(Kind::Oneway));
             divider(ui);
-            go(ui, Icon::Correlations, "Correlate", dialog, true, false, Action::Dialog(Kind::Correlations));
-            go(ui, Icon::Regression, "Regression", dialog, true, false, Action::Dialog(Kind::Regression));
-            go(ui, Icon::Logistic, "Logistic", dialog, true, false, Action::Dialog(Kind::Logistic));
+            go(ui, Icon::Correlations, &tr!("correlate"), dialog, true, false, Action::Dialog(Kind::Correlations));
+            go(ui, Icon::Regression, &tr!("regression"), dialog, true, false, Action::Dialog(Kind::Regression));
+            go(ui, Icon::Logistic, &tr!("logistic"), dialog, true, false, Action::Dialog(Kind::Logistic));
             divider(ui);
-            go(ui, Icon::Ranks, "Nonparametric", dialog, true, false, Action::Dialog(Kind::Nonparametric));
+            go(ui, Icon::Ranks, &tr!("nonparametric"), dialog, true, false, Action::Dialog(Kind::Nonparametric));
         }
         Tab::Graphs => {
-            let dialog = "Opens its dialog: pick the variables";
-            go(ui, Icon::Histogram, "Histogram", dialog, true, false, Action::Dialog(Kind::Histogram));
-            go(ui, Icon::Bars, "Bar", dialog, true, false, Action::Dialog(Kind::Bar));
-            go(ui, Icon::Scatter, "Scatter", dialog, true, false, Action::Dialog(Kind::Scatter));
-            go(ui, Icon::Boxplot, "Boxplot", dialog, true, false, Action::Dialog(Kind::Boxplot));
+            let dialog = &tr!("chart-dialog-tip");
+            go(ui, Icon::Histogram, &tr!("histogram"), dialog, true, false, Action::Dialog(Kind::Histogram));
+            go(ui, Icon::Bars, &tr!("bar"), dialog, true, false, Action::Dialog(Kind::Bar));
+            go(ui, Icon::Scatter, &tr!("scatter"), dialog, true, false, Action::Dialog(Kind::Scatter));
+            go(ui, Icon::Boxplot, &tr!("boxplot"), dialog, true, false, Action::Dialog(Kind::Boxplot));
         }
         Tab::View => {
-            go(ui, Icon::Grid, "Data View", "Cases and their values", true, state.view == View::Data, Action::View(View::Data));
-            go(
-                ui,
-                Icon::List,
-                "Variable View",
-                "The variables and their definitions",
-                true,
-                state.view == View::Variables,
-                Action::View(View::Variables),
-            );
+            go(ui, Icon::Grid, &tr!("data-view"), &tr!("data-view-tip"), true, state.view == View::Data, Action::View(View::Data));
+            go(ui, Icon::List, &tr!("variable-view"), &tr!("variable-view-tip"), true, state.view == View::Variables, Action::View(View::Variables));
             divider(ui);
-            go(ui, Icon::Labels, "Value Labels", "Show value labels instead of values", true, state.value_labels, Action::ToggleLabels);
+            go(ui, Icon::Labels, &tr!("value-labels"), &tr!("value-labels-tip"), true, state.value_labels, Action::ToggleLabels);
             divider(ui);
             if let Some(syntax) = output_style(ui, &state.style) {
                 action = Some(Action::Syntax(syntax));
             }
+            divider(ui);
+            if let Some(lang) = language(ui) {
+                action = Some(Action::Language(lang));
+            }
         }
     }
     action
+}
+
+/// The interface's language.
+fn language(ui: &mut egui::Ui) -> Option<mksigma_i18n::Lang> {
+    let t = Tokens::get(ui.ctx());
+    let current = mksigma_i18n::current();
+    let mut chosen = None;
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.label(egui::RichText::new(tr!("language-menu")).size(11.0).color(t.text_dim));
+        egui::ComboBox::from_id_salt("language").selected_text(current.name()).width(150.0).show_ui(ui, |ui| {
+            for lang in mksigma_i18n::Lang::ALL {
+                if ui.selectable_label(lang == current, lang.name()).clicked() && lang != current {
+                    chosen = Some(lang);
+                }
+            }
+        });
+    });
+    chosen
 }
 
 /// The Output style's controls: font, size, palette, decimals. A change is the `OUTPUT STYLE`
@@ -365,10 +391,9 @@ fn output_style(ui: &mut egui::Ui, style: &mksigma_engine::output::Style) -> Opt
     };
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
-        ui.label(egui::RichText::new("Output Style").size(11.0).color(t.text_dim))
-            .on_hover_text("How tables and charts look on screen and in every export");
+        ui.label(egui::RichText::new(tr!("output-style")).size(11.0).color(t.text_dim)).on_hover_text(tr!("output-style-tip"));
         egui::Grid::new("output-style").num_columns(4).spacing([6.0, 4.0]).show(ui, |ui| {
-            ui.label("Font");
+            ui.label(tr!("font"));
             egui::ComboBox::from_id_salt("style-font").selected_text(title(style.family.name())).width(80.0).show_ui(ui, |ui| {
                 for f in Family::ALL {
                     if ui.selectable_label(style.family == f, title(f.name())).clicked() && style.family != f {
@@ -376,7 +401,7 @@ fn output_style(ui: &mut egui::Ui, style: &mksigma_engine::output::Style) -> Opt
                     }
                 }
             });
-            ui.label("Size");
+            ui.label(tr!("size"));
             egui::ComboBox::from_id_salt("style-size").selected_text(format!("{} pt", style.size)).width(64.0).show_ui(ui, |ui| {
                 for size in [8u8, 9, 10, 11, 12, 14, 16, 18] {
                     if ui.selectable_label(style.size == size, format!("{size} pt")).clicked() && style.size != size {
@@ -385,7 +410,7 @@ fn output_style(ui: &mut egui::Ui, style: &mksigma_engine::output::Style) -> Opt
                 }
             });
             ui.end_row();
-            ui.label("Palette");
+            ui.label(tr!("palette"));
             egui::ComboBox::from_id_salt("style-palette").selected_text(title(style.palette.name())).width(80.0).show_ui(ui, |ui| {
                 for p in Palette::ALL {
                     let label = ui
@@ -401,11 +426,11 @@ fn output_style(ui: &mut egui::Ui, style: &mksigma_engine::output::Style) -> Opt
                     }
                 }
             });
-            ui.label("Decimals");
-            let shown = style.decimals.map_or("Auto".to_string(), |d| d.to_string());
+            ui.label(tr!("decimals"));
+            let shown = style.decimals.map_or(tr!("decimals-auto"), |d| d.to_string());
             egui::ComboBox::from_id_salt("style-decimals").selected_text(shown).width(64.0).show_ui(ui, |ui| {
                 for d in std::iter::once(None).chain((0..=6).map(Some)) {
-                    let name = d.map_or("Auto".to_string(), |d: u8| d.to_string());
+                    let name = d.map_or(tr!("decimals-auto"), |d: u8| d.to_string());
                     if ui.selectable_label(style.decimals == d, &name).clicked() && style.decimals != d {
                         syntax = Some(format!("OUTPUT STYLE /DECIMALS={}.", d.map_or("AUTO".to_string(), |d| d.to_string())));
                     }
@@ -418,46 +443,46 @@ fn output_style(ui: &mut egui::Ui, style: &mksigma_engine::output::Style) -> Opt
 }
 
 /// Every button the ribbon and the File menu have, by name, for the search box.
-pub(crate) fn commands() -> Vec<(&'static str, Action)> {
+pub(crate) fn commands() -> Vec<(String, Action)> {
     use Procedure as P;
     vec![
-        ("Open…", Action::Open),
-        ("Save", Action::Save),
-        ("Save As…", Action::SaveAs),
-        ("Save Dashboard…", Action::SaveDashboard),
-        ("Undo", Action::Undo),
-        ("Redo", Action::Redo),
-        ("Run Syntax", Action::Run),
-        ("Export Output as HTML…", Action::Export(ExportFormat::Html)),
-        ("Export Output as PDF…", Action::Export(ExportFormat::Pdf)),
-        ("Export Output as LaTeX…", Action::Export(ExportFormat::Latex)),
-        ("Clear Output", Action::ClearOutput),
-        ("Insert Case", Action::InsertCase),
-        ("Insert Variable", Action::InsertVariable),
-        ("Value Labels", Action::ToggleLabels),
-        ("Data View", Action::View(View::Data)),
-        ("Variable View", Action::View(View::Variables)),
-        ("Display Dictionary", Action::Suggest(P::Dictionary)),
-        ("Compute Variable", Action::Suggest(P::Compute)),
-        ("Recode", Action::Suggest(P::Recode)),
-        ("Select Cases", Action::Suggest(P::SelectCases)),
-        ("Descriptives", Action::Dialog(Kind::Descriptives)),
-        ("Frequencies", Action::Dialog(Kind::Frequencies)),
-        ("Explore", Action::Dialog(Kind::Explore)),
-        ("Crosstabs", Action::Dialog(Kind::Crosstabs)),
-        ("Independent-Samples T-Test", Action::Dialog(Kind::TTest)),
-        ("One-Way ANOVA", Action::Dialog(Kind::Oneway)),
-        ("Bivariate Correlations", Action::Dialog(Kind::Correlations)),
-        ("Linear Regression", Action::Dialog(Kind::Regression)),
-        ("Binary Logistic Regression", Action::Dialog(Kind::Logistic)),
-        ("Nonparametric Tests (Mann-Whitney)", Action::Dialog(Kind::Nonparametric)),
-        ("Histogram", Action::Dialog(Kind::Histogram)),
-        ("Bar Chart", Action::Dialog(Kind::Bar)),
-        ("Scatterplot", Action::Dialog(Kind::Scatter)),
-        ("Boxplot", Action::Dialog(Kind::Boxplot)),
-        ("AutoSave", Action::ToggleAutoSave),
-        ("Light Theme", Action::Theme(egui::ThemePreference::Light)),
-        ("Dark Theme", Action::Theme(egui::ThemePreference::Dark)),
+        (tr!("open-ellipsis"), Action::Open),
+        (tr!("save"), Action::Save),
+        (tr!("save-as-ellipsis"), Action::SaveAs),
+        (tr!("save-dashboard-ellipsis"), Action::SaveDashboard),
+        (tr!("undo"), Action::Undo),
+        (tr!("redo"), Action::Redo),
+        (tr!("run-syntax"), Action::Run),
+        (tr!("export-html-menu"), Action::Export(ExportFormat::Html)),
+        (tr!("export-pdf-menu"), Action::Export(ExportFormat::Pdf)),
+        (tr!("export-latex-menu"), Action::Export(ExportFormat::Latex)),
+        (tr!("clear-output"), Action::ClearOutput),
+        (tr!("insert-case"), Action::InsertCase),
+        (tr!("insert-variable"), Action::InsertVariable),
+        (tr!("value-labels"), Action::ToggleLabels),
+        (tr!("data-view"), Action::View(View::Data)),
+        (tr!("variable-view"), Action::View(View::Variables)),
+        (tr!("display-dictionary"), Action::Suggest(P::Dictionary)),
+        (tr!("compute-variable"), Action::Suggest(P::Compute)),
+        (tr!("recode"), Action::Suggest(P::Recode)),
+        (tr!("select-cases"), Action::Suggest(P::SelectCases)),
+        (tr!("descriptives"), Action::Dialog(Kind::Descriptives)),
+        (tr!("frequencies"), Action::Dialog(Kind::Frequencies)),
+        (tr!("explore"), Action::Dialog(Kind::Explore)),
+        (tr!("crosstabs"), Action::Dialog(Kind::Crosstabs)),
+        (tr!("t-test-independent"), Action::Dialog(Kind::TTest)),
+        (tr!("oneway"), Action::Dialog(Kind::Oneway)),
+        (tr!("correlations-bivariate"), Action::Dialog(Kind::Correlations)),
+        (tr!("regression-linear"), Action::Dialog(Kind::Regression)),
+        (tr!("logistic-binary"), Action::Dialog(Kind::Logistic)),
+        (tr!("nonparametric-tests"), Action::Dialog(Kind::Nonparametric)),
+        (tr!("histogram"), Action::Dialog(Kind::Histogram)),
+        (tr!("bar-chart"), Action::Dialog(Kind::Bar)),
+        (tr!("scatterplot"), Action::Dialog(Kind::Scatter)),
+        (tr!("boxplot"), Action::Dialog(Kind::Boxplot)),
+        (tr!("autosave"), Action::ToggleAutoSave),
+        (tr!("theme-light-full"), Action::Theme(egui::ThemePreference::Light)),
+        (tr!("theme-dark-full"), Action::Theme(egui::ThemePreference::Dark)),
     ]
 }
 

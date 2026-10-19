@@ -7,12 +7,14 @@
 use std::path::{Path, PathBuf};
 
 use mksigma_engine::Session;
+use mksigma_i18n::tr;
 
 mod backstage;
 mod edit;
 mod explain;
 mod icons;
 pub mod logo;
+pub use mksigma_i18n as i18n;
 mod math;
 mod output;
 mod procedure;
@@ -47,6 +49,8 @@ pub type PickSave = Box<dyn Fn(&str) -> Option<PathBuf>>;
 /// The recent files kept from earlier runs, and keeping them.
 pub type LoadRecent = Box<dyn Fn() -> Vec<PathBuf>>;
 pub type SaveRecent = Box<dyn Fn(&[PathBuf])>;
+pub type LoadLanguage = Box<dyn Fn() -> Option<String>>;
+pub type SaveLanguage = Box<dyn Fn(&str)>;
 
 /// What the app provides from the platform.
 #[derive(Default)]
@@ -64,6 +68,10 @@ pub struct Services {
     pub load_recent: Option<LoadRecent>,
     /// Keeps the recent files for later runs.
     pub save_recent: Option<SaveRecent>,
+    /// The language chosen in an earlier run (its code), if any.
+    pub load_language: Option<LoadLanguage>,
+    /// Keeps the chosen language for later runs.
+    pub save_language: Option<SaveLanguage>,
 }
 
 /// How many recent files the backstage lists.
@@ -134,9 +142,13 @@ pub(crate) const ROW_HEIGHT: f32 = 20.0;
 impl SigmaApp {
     pub fn new(services: Services) -> Self {
         let (session, status) = match Session::with_sample() {
-            Ok(s) => (s, Some(Status::Info("Sample dataset. Use File > Open… or drop a .sav file on the window.".into()))),
+            Ok(s) => (s, Some(Status::Info(tr!("status-sample-start")))),
             Err(e) => (Session::new(), Some(Status::Error(e.to_string()))),
         };
+        // The language of an earlier run.
+        if let Some(lang) = services.load_language.as_ref().and_then(|load| load()).and_then(|code| mksigma_i18n::Lang::from_code(&code)) {
+            mksigma_i18n::set(lang);
+        }
         Self {
             session,
             view: View::Data,
@@ -161,6 +173,14 @@ impl SigmaApp {
             title: String::new(),
             themed: false,
             explain: None,
+        }
+    }
+
+    /// Speaks `lang` from now on, and remembers it.
+    pub fn set_language(&mut self, lang: mksigma_i18n::Lang) {
+        mksigma_i18n::set(lang);
+        if let Some(save) = &self.services.save_language {
+            save(lang.code());
         }
     }
 
@@ -206,7 +226,7 @@ impl SigmaApp {
         self.syntax = text.clone();
         let is_dashboard = mksigma_engine::check_syntax(&text).is_ok() && text.to_ascii_uppercase().contains("DASHBOARD");
         if !is_dashboard {
-            self.status = Some(Status::Info(format!("{name} is in the syntax editor: Run runs it")));
+            self.status = Some(Status::Info(tr!("status-in-syntax-editor", name = name.as_str())));
             return;
         }
         self.session.clear_output();
@@ -217,7 +237,7 @@ impl SigmaApp {
         if ok {
             self.remember(path);
             self.output_state.dashboard = true;
-            self.status = Some(Status::Info(format!("Opened the dashboard {name}")));
+            self.status = Some(Status::Info(tr!("status-opened-dashboard", name = name.as_str())));
         }
     }
 
@@ -271,9 +291,9 @@ impl SigmaApp {
                 self.backstage = Some(page);
                 self.pending = None;
             }
-            A::Blank | A::Close => self.new_data(Session::new(), "New dataset: add variables in Variable View, or open a file."),
+            A::Blank | A::Close => self.new_data(Session::new(), &tr!("status-new-dataset")),
             A::Sample => match Session::with_sample() {
-                Ok(s) => self.new_data(s, "Sample dataset."),
+                Ok(s) => self.new_data(s, &tr!("status-sample")),
                 Err(e) => self.status = Some(Status::Error(e.to_string())),
             },
             A::Discard => {
@@ -319,13 +339,11 @@ impl SigmaApp {
     /// analyses, the slicers and the tiles.
     pub fn save_dashboard(&mut self, path: &Path) {
         let Some(syntax) = self.session.dashboard_syntax() else {
-            self.status = Some(Status::Error(
-                "The data didn't come from a file it could be read again from: open it with File > Open, or save it first".into(),
-            ));
+            self.status = Some(Status::Error(tr!("status-dashboard-needs-file")));
             return;
         };
         match std::fs::write(path, syntax) {
-            Ok(()) => self.status = Some(Status::Info(format!("Saved the dashboard to {}", path.display()))),
+            Ok(()) => self.status = Some(Status::Info(tr!("status-saved-dashboard", path = path.display().to_string()))),
             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
         }
     }
@@ -339,10 +357,11 @@ impl SigmaApp {
 
     /// Writes the Output as a self-contained HTML page or a PDF document.
     pub fn export(&mut self, path: &Path, format: ExportFormat) {
-        let mut title = self.file_name.as_deref().map_or_else(|| "MK Sigma Output".to_string(), |f| format!("{f} — Output"));
+        let mut title = self.file_name.as_deref().map_or_else(|| tr!("export-title-output"), |f| tr!("export-title-output-of", file = f));
         // A filtered Output says so, or a reader would take its items for all the cases.
         if let Some(filters) = self.session.filter_description() {
-            title.push_str(&format!(" (filtered by {filters})"));
+            title.push(' ');
+            title.push_str(&tr!("export-title-filtered", filters = filters));
         }
         let bytes = match format {
             ExportFormat::Html => self.session.output.to_html(&title).into_bytes(),
@@ -350,14 +369,14 @@ impl SigmaApp {
             ExportFormat::Latex => self.session.output.to_latex(&title).into_bytes(),
         };
         match std::fs::write(path, bytes) {
-            Ok(()) => self.status = Some(Status::Info(format!("Exported the Output to {}", path.display()))),
+            Ok(()) => self.status = Some(Status::Info(tr!("status-exported-output", path = path.display().to_string()))),
             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
         }
     }
 
     /// Writes the dashboard as a self-contained web page: its tiles in a grid, as filtered now.
     pub fn export_dashboard(&mut self, path: &Path) {
-        let title = self.file_name.as_deref().map_or_else(|| "MK Sigma Dashboard".to_string(), |f| format!("{f} — Dashboard"));
+        let title = self.file_name.as_deref().map_or_else(|| tr!("export-title-dashboard"), |f| tr!("export-title-dashboard-of", file = f));
         // Interactive when the engine was built for WebAssembly: slicers and cross-filtering
         // work in the page, which holds the data. Otherwise the cards as they are now.
         let interactive = !mksigma_web::ENGINE.is_empty();
@@ -373,9 +392,9 @@ impl SigmaApp {
             let (board, wide) = self.session.dashboard_output();
             board.to_dashboard_html(&title, self.session.filter_description().as_deref(), &wide)
         };
-        let what = if interactive { "an interactive dashboard (it holds the data)" } else { "the dashboard" };
+        let what = if interactive { tr!("status-exported-interactive") } else { tr!("status-exported-static") };
         match std::fs::write(path, html) {
-            Ok(()) => self.status = Some(Status::Info(format!("Exported {what} to {}", path.display()))),
+            Ok(()) => self.status = Some(Status::Info(tr!("status-exported-dashboard", what = what, path = path.display().to_string()))),
             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
         }
     }
@@ -430,7 +449,7 @@ impl SigmaApp {
         let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
         match written {
             Ok(()) => {
-                let summary = format!("Saved {name}");
+                let summary = tr!("status-saved", name = name.as_str());
                 self.status =
                     Some(if warnings.is_empty() { Status::Info(summary) } else { Status::Warning(format!("{summary}. {}", warnings.join("; "))) });
                 self.file_name = Some(name);
@@ -453,7 +472,7 @@ impl SigmaApp {
         match self.session.open_sav(bytes) {
             Ok(warnings) => {
                 let ds = &self.session.dataset;
-                let summary = format!("{name}: {} cases, {} variables", ds.n_cases(), ds.variables().len());
+                let summary = tr!("status-opened", name = name, cases = ds.n_cases(), variables = ds.variables().len());
                 self.status =
                     Some(if warnings.is_empty() { Status::Info(summary) } else { Status::Warning(format!("{summary}. {}", warnings.join("; "))) });
                 self.file_name = Some(name.to_string());
@@ -511,7 +530,7 @@ impl SigmaApp {
         let label = self.session.undo_label().map(str::to_string);
         self.editing = None;
         match self.session.undo() {
-            Ok(true) => self.status = label.map(|l| Status::Info(format!("Undid {l}"))),
+            Ok(true) => self.status = label.map(|l| Status::Info(tr!("status-undid", what = l))),
             Ok(false) => {}
             Err(e) => self.status = Some(Status::Error(e.to_string())),
         }
@@ -521,7 +540,7 @@ impl SigmaApp {
         let label = self.session.redo_label().map(str::to_string);
         self.editing = None;
         match self.session.redo() {
-            Ok(true) => self.status = label.map(|l| Status::Info(format!("Redid {l}"))),
+            Ok(true) => self.status = label.map(|l| Status::Info(tr!("status-redid", what = l))),
             Ok(false) => {}
             Err(e) => self.status = Some(Status::Error(e.to_string())),
         }
@@ -541,7 +560,7 @@ impl SigmaApp {
         match self.session.open_text(bytes, &options) {
             Ok(warnings) => {
                 let ds = &self.session.dataset;
-                let summary = format!("{name}: {} cases, {} variables", ds.n_cases(), ds.variables().len());
+                let summary = tr!("status-opened", name = name, cases = ds.n_cases(), variables = ds.variables().len());
                 self.status =
                     Some(if warnings.is_empty() { Status::Info(summary) } else { Status::Warning(format!("{summary}. {}", warnings.join("; "))) });
                 self.file_name = Some(name.to_string());
@@ -592,7 +611,8 @@ impl SigmaApp {
             self.themed = true;
         }
         self.handle_input(ui.ctx());
-        let title = format!("{}{} — MK Sigma", if self.session.modified { "• " } else { "" }, self.file_name.as_deref().unwrap_or("Untitled"));
+        let untitled = tr!("untitled");
+        let title = format!("{}{} — MK Sigma", if self.session.modified { "• " } else { "" }, self.file_name.as_deref().unwrap_or(&untitled));
         if title != self.title {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.title = title;
@@ -602,7 +622,7 @@ impl SigmaApp {
         ui.painter().rect_filled(ui.max_rect().expand(8.0), 0.0, t.window);
         ui.spacing_mut().item_spacing.y = 0.0;
 
-        let document = format!("{}{}", if self.session.modified { "• " } else { "" }, self.file_name.as_deref().unwrap_or("Untitled"));
+        let document = format!("{}{}", if self.session.modified { "• " } else { "" }, self.file_name.as_deref().unwrap_or(&untitled));
         let state = ribbon::State {
             title: &document,
             undo: self.session.undo_label(),
@@ -712,7 +732,7 @@ impl SigmaApp {
                 && (var.name.to_lowercase().contains(&needle) || var.label.as_deref().is_some_and(|l| l.to_lowercase().contains(&needle)))
             {
                 let label = var.label.as_deref().map_or_else(|| var.name.clone(), |l| format!("{} — {l}", var.name));
-                results.push((format!("Variable: {label}"), ribbon::Action::View(View::Variables)));
+                results.push((tr!("search-variable", label = label), ribbon::Action::View(View::Variables)));
             }
         }
         results.truncate(10);
@@ -725,7 +745,7 @@ impl SigmaApp {
                 ui.set_width(width);
                 ui.horizontal(|ui| {
                     icons::show(ui, Icon::Search, 16.0);
-                    let edit = ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search commands and variables").desired_width(f32::INFINITY));
+                    let edit = ui.add(egui::TextEdit::singleline(&mut query).hint_text(tr!("search-hint")).desired_width(f32::INFINITY));
                     if !edit.has_focus() && !edit.lost_focus() {
                         edit.request_focus();
                     }
@@ -740,7 +760,7 @@ impl SigmaApp {
                     }
                 }
                 if results.is_empty() {
-                    ui.label(egui::RichText::new("Nothing found").color(t.text_dim));
+                    ui.label(egui::RichText::new(tr!("search-nothing")).color(t.text_dim));
                 }
             });
         });
@@ -824,6 +844,7 @@ impl SigmaApp {
             Action::View(view) => self.view = view,
             Action::Suggest(procedure) => self.paste(procedure),
             Action::Theme(preference) => ctx.set_theme(preference),
+            Action::Language(lang) => self.set_language(lang),
             Action::SaveDashboard => self.save_dashboard_dialog(),
             Action::File => self.backstage = Some(backstage::Page::Home),
             Action::Dialog(kind) => self.procedure_dialog = Some(procedure::Dialog::new(kind)),
@@ -856,7 +877,7 @@ impl SigmaApp {
                 Err(e) => Status::Error(format!("{e} ({})", suggestion.syntax)),
             }
         } else {
-            Status::Info("Added a command to the syntax editor: replace the placeholder names, then Run.".to_string())
+            Status::Info(tr!("status-template-added"))
         });
     }
 
@@ -868,12 +889,12 @@ impl SigmaApp {
         let mut row =
             ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(8.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Min)));
         row.spacing_mut().item_spacing.x = 2.0;
-        for (view, icon, name) in [(View::Data, Icon::Grid, "Data View"), (View::Variables, Icon::List, "Variable View")] {
+        for (view, icon, name) in [(View::Data, Icon::Grid, tr!("data-view")), (View::Variables, Icon::List, tr!("variable-view"))] {
             let on = self.view == view;
             let galley = row.painter().layout_no_wrap(name.to_string(), egui::FontId::proportional(13.0), if on { t.accent } else { t.text_dim });
             let size = egui::vec2(galley.size().x + 40.0, SHEET_TABS_HEIGHT - 4.0);
             let (tab, response) = row.allocate_exact_size(size, egui::Sense::click());
-            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, name));
+            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &name));
             let painter = row.painter();
             if on {
                 painter.rect_filled(tab, egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, t.ribbon);
@@ -921,7 +942,7 @@ impl SigmaApp {
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         for file in dropped {
             let path = file.path();
-            let name = path.file_name().map_or_else(|| "dropped file".to_string(), |n| n.to_string_lossy().into_owned());
+            let name = path.file_name().map_or_else(|| tr!("dropped-file"), |n| n.to_string_lossy().into_owned());
             if is_text(path) && path.exists() {
                 self.open_path(path);
                 continue;
@@ -968,9 +989,9 @@ impl SigmaApp {
             ui.spacing_mut().item_spacing.y = 4.0;
             ui.horizontal(|ui| {
                 icons::show(ui, Icon::List, 14.0);
-                ui.label(egui::RichText::new("Syntax").strong());
+                ui.label(egui::RichText::new(tr!("syntax")).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ribbon::accent_button(ui, Icon::Run, "Run").on_hover_text("Run every command in the editor").clicked() {
+                    if ribbon::accent_button(ui, Icon::Run, &tr!("run")).on_hover_text(tr!("run-tip")).clicked() {
                         self.run_syntax();
                     }
                 });
@@ -1009,7 +1030,7 @@ impl SigmaApp {
         let steps = self.session.steps();
         let count = steps.len();
         egui::CollapsingHeader::new(format!("Applied steps ({count})")).id_salt("steps").default_open(true).show(ui, |ui| {
-            if steps.iter().any(|s| s.enabled && s.syntax().is_some()) && ui.small_button("Paste steps into syntax").clicked() {
+            if steps.iter().any(|s| s.enabled && s.syntax().is_some()) && ui.small_button(tr!("steps-paste")).clicked() {
                 paste = true;
             }
             egui::ScrollArea::vertical().id_salt("steps-list").max_height(110.0).stick_to_bottom(true).show(ui, |ui| {
@@ -1017,14 +1038,14 @@ impl SigmaApp {
                 for (i, step) in steps.iter().enumerate() {
                     ui.horizontal(|ui| {
                         let mut enabled = step.enabled;
-                        if ui.checkbox(&mut enabled, "").on_hover_text("Apply this step").changed() {
+                        if ui.checkbox(&mut enabled, "").on_hover_text(tr!("step-apply")).changed() {
                             commits.push(Commit::EnableStep(i, enabled));
                         }
                         // A step that failed the last replay: red number, the reason on hover.
                         let number = egui::RichText::new(format!("{:>2}", i + 1));
                         match &step.error {
                             Some(error) => {
-                                ui.label(number.color(ui.visuals().error_fg_color)).on_hover_text(format!("Skipped: {error}"));
+                                ui.label(number.color(ui.visuals().error_fg_color)).on_hover_text(tr!("step-skipped", error = error.to_string()));
                             }
                             None => {
                                 ui.label(number.weak());
@@ -1043,13 +1064,13 @@ impl SigmaApp {
                             ui.add_sized([text_width, ROW_HEIGHT], egui::Label::new(text).truncate());
                         }
                         // Plain words: the default font has no arrow or cross glyphs.
-                        if ui.add_enabled(i > 0, egui::Button::new("up").small()).on_hover_text("Move this step earlier").clicked() {
+                        if ui.add_enabled(i > 0, egui::Button::new(tr!("step-up")).small()).on_hover_text(tr!("step-up-tip")).clicked() {
                             commits.push(Commit::MoveStep(i, true));
                         }
-                        if ui.add_enabled(i + 1 < count, egui::Button::new("down").small()).on_hover_text("Move this step later").clicked() {
+                        if ui.add_enabled(i + 1 < count, egui::Button::new(tr!("step-down")).small()).on_hover_text(tr!("step-down-tip")).clicked() {
                             commits.push(Commit::MoveStep(i, false));
                         }
-                        if ui.small_button("remove").on_hover_text("Remove this step").clicked() {
+                        if ui.small_button(tr!("step-remove")).on_hover_text(tr!("step-remove-tip")).clicked() {
                             commits.push(Commit::RemoveStep(i));
                         }
                     });
@@ -1080,7 +1101,7 @@ impl SigmaApp {
                 explain::Outcome::Export(tex, name) => {
                     if let Some(path) = self.services.pick_export.as_ref().and_then(|pick| pick(&name)) {
                         match std::fs::write(&path, tex) {
-                            Ok(()) => self.status = Some(Status::Info(format!("Exported the calculation to {}", path.display()))),
+                            Ok(()) => self.status = Some(Status::Info(tr!("status-exported-calculation", path = path.display().to_string()))),
                             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
                         }
                     }
@@ -1101,7 +1122,7 @@ impl SigmaApp {
                         self.syntax.push('\n');
                     }
                     self.syntax.push_str(&syntax);
-                    self.status = Some(Status::Info("Pasted into the syntax editor: Run runs it.".into()));
+                    self.status = Some(Status::Info(tr!("status-pasted")));
                 }
             }
         }
@@ -1128,38 +1149,39 @@ impl SigmaApp {
         ui.painter().hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, t.border));
         let mut row = ui
             .new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let ready = tr!("status-ready");
         let (text, color) = match &self.status {
             Some(Status::Info(s)) => (s.as_str(), t.text_dim),
             Some(Status::Warning(s)) => (s.as_str(), t.warn),
             Some(Status::Error(s)) => (s.as_str(), t.danger),
-            None => ("Ready", t.text_dim),
+            None => (ready.as_str(), t.text_dim),
         };
         let ds = &self.session.dataset;
-        let mut facts = vec![format!("{} cases", ds.n_cases()), format!("{} variables", ds.variables().len())];
+        let mut facts = vec![tr!("fact-cases", n = ds.n_cases()), tr!("fact-variables", n = ds.variables().len())];
         if let Some(w) = ds.weight.and_then(|w| ds.variables().get(w)) {
-            facts.push(format!("Weighted by {}", w.name));
+            facts.push(tr!("fact-weighted", name = w.name.as_str()));
         }
         let mut zoom = self.zoom;
         row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             // Zoom: − slider + and the percentage (click it for 100%).
             let percent = ui.add(egui::Label::new(egui::RichText::new(format!("{zoom}%")).color(t.text_dim).size(12.0)).sense(egui::Sense::click()));
-            if percent.on_hover_text("Zoom to 100%").clicked() {
+            if percent.on_hover_text(tr!("zoom-reset")).clicked() {
                 zoom = 100;
             }
-            if zoom_button(ui, Icon::Plus, "Zoom In") {
+            if zoom_button(ui, Icon::Plus, &tr!("zoom-in")) {
                 zoom = (zoom / 10 * 10 + 10).min(200);
             }
             ui.spacing_mut().slider_width = 110.0;
-            ui.add(egui::Slider::new(&mut zoom, 50..=200).show_value(false)).on_hover_text("Zoom");
-            if zoom_button(ui, Icon::Minus, "Zoom Out") {
+            ui.add(egui::Slider::new(&mut zoom, 50..=200).show_value(false)).on_hover_text(tr!("zoom"));
+            if zoom_button(ui, Icon::Minus, &tr!("zoom-out")) {
                 zoom = (zoom.div_ceil(10) * 10).saturating_sub(10).max(50);
             }
             ui.add_space(16.0);
             ui.label(egui::RichText::new(facts.join("   ·   ")).color(t.text_dim).size(12.0));
             if let Some(filters) = self.session.filter_description() {
                 ui.add_space(12.0);
-                ui.label(egui::RichText::new(format!("Filtered by {filters}")).color(t.accent).size(12.0));
+                ui.label(egui::RichText::new(tr!("fact-filtered", filters = filters.as_str())).color(t.accent).size(12.0));
             }
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.add(egui::Label::new(egui::RichText::new(text).color(color).size(12.0)).truncate());

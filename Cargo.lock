@@ -1794,6 +1794,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mksigma-i18n"
+version = "0.1.0"
+
+[[package]]
 name = "mksigma-mcp"
 version = "0.1.0"
 dependencies = [
@@ -1839,6 +1843,7 @@ dependencies = [
  "egui",
  "egui_kittest",
  "mksigma-engine",
+ "mksigma-i18n",
  "mksigma-output",
  "mksigma-web",
  "png",

@@ -2,7 +2,7 @@
 //! touching the screen.
 //!
 //! `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav] [--variables] [--labels]
-//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--tab NAME] [--splash] [--explain ITEM [--every-term]] [--backstage] [--dialog KIND [--dialog-vars 'SLOT:VAR...']]
+//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--tab NAME] [--splash] [--lang CODE] [--explain ITEM [--every-term]] [--backstage] [--dialog KIND [--dialog-vars 'SLOT:VAR...']]
 //!  [--size 1280x800] out.png` (`--disable` switches off applied step N, counting from 1, after
 //!  `--run`; `--select` cross-filters by category PART of Output item ITEM, both counting from 1:
 //!  a bar, bin or box, or a table row; `--pin` pins Output item ITEM to the dashboard and
@@ -57,6 +57,11 @@ fn main() -> Result<(), String> {
             "--dashboard" => app.output_state.dashboard = true,
             "--no-ribbon" => app.ribbon_collapsed = true,
             "--splash" => splash = true,
+            "--lang" => {
+                i += 1;
+                let code = args.get(i).ok_or("--lang needs a language code")?;
+                mksigma_ui_egui::i18n::set(mksigma_ui_egui::i18n::Lang::from_code(code).ok_or("--lang: en or pt-BR")?);
+            }
             "--explain" => {
                 i += 1;
                 explain =

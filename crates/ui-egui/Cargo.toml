@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 mksigma-engine = { workspace = true }
+mksigma-i18n = { workspace = true }
 mksigma-output = { workspace = true }
 mksigma-web = { workspace = true }
 egui = { workspace = true }

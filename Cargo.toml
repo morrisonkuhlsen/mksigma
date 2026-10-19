@@ -12,6 +12,7 @@ rust-version = "1.90"
 [workspace.dependencies]
 # internal
 mksigma-core = { path = "crates/core" }
+mksigma-i18n = { path = "crates/i18n" }
 mksigma-sav = { path = "crates/sav" }
 mksigma-csv = { path = "crates/csv" }
 mksigma-stats = { path = "crates/stats" }

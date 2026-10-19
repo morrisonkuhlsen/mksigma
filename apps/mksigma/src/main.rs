@@ -45,8 +45,13 @@ fn now() -> i64 {
 }
 
 /// Where the recent files are kept: the platform's per-user configuration folder.
-#[allow(clippy::disallowed_methods)] // the desktop app is native only
 fn recent_file() -> Option<std::path::PathBuf> {
+    settings_file("recent.txt")
+}
+
+/// A file in the platform's per-user configuration folder, under `mksigma`.
+#[allow(clippy::disallowed_methods)] // the desktop app is native only
+fn settings_file(name: &str) -> Option<std::path::PathBuf> {
     let base = if cfg!(target_os = "windows") {
         std::env::var_os("APPDATA").map(std::path::PathBuf::from)
     } else if cfg!(target_os = "macos") {
@@ -56,10 +61,22 @@ fn recent_file() -> Option<std::path::PathBuf> {
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
     };
-    base.map(|b| b.join("mksigma").join("recent.txt"))
+    base.map(|b| b.join("mksigma").join(name))
+}
+
+/// The interface's language: the one chosen in an earlier run, else the system's.
+#[allow(clippy::disallowed_methods)] // the desktop app is native only
+fn language() -> mksigma_ui_egui::i18n::Lang {
+    use mksigma_ui_egui::i18n::Lang;
+    let saved = settings_file("language.txt").and_then(|f| std::fs::read_to_string(f).ok()).and_then(|code| Lang::from_code(&code));
+    saved.unwrap_or_else(|| {
+        let locale = ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty())).unwrap_or_default();
+        Lang::from_locale(&locale)
+    })
 }
 
 fn main() -> eframe::Result {
+    mksigma_ui_egui::i18n::set(language());
     // Without its splash the program still starts.
     let _ = splash();
     let services = Services {
@@ -93,6 +110,13 @@ fn main() -> eframe::Result {
                 .and_then(|f| std::fs::read_to_string(f).ok())
                 .map(|text| text.lines().filter(|l| !l.trim().is_empty()).map(std::path::PathBuf::from).collect())
                 .unwrap_or_default()
+        })),
+        load_language: None,
+        save_language: Some(Box::new(|code: &str| {
+            if let Some(file) = settings_file("language.txt") {
+                let _ = file.parent().map(std::fs::create_dir_all);
+                let _ = std::fs::write(file, code);
+            }
         })),
         save_recent: Some(Box::new(|files: &[std::path::PathBuf]| {
             if let Some(file) = recent_file() {
