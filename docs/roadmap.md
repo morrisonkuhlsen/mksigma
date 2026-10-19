@@ -216,6 +216,31 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   Newton–Raphson's iterations); then the charts (a histogram's bins, a bar's mean, a box's
   hinges).
 
+## Next: languages
+- The interface, the Output (table titles, row and column labels, notes, warnings), the Σ
+  explanations and the error messages in the user's language: English and Português (Brasil)
+  first, Español next. Command syntax stays English in every language, as in SPSS, so syntax
+  files and dashboards run anywhere.
+- One message catalog per language (Fluent `.ftl` files, embedded), read through a small L0
+  crate that every layer uses; a test fails when a key is missing from a language or a
+  placeholder differs. View ▸ Language switches at once (the Output is rebuilt from its runs),
+  remembered with the recent files; the first run follows the system's language.
+- Numbers follow the language when shown (decimal comma in Portuguese), never in syntax or
+  saved files.
+
+## Next: Learn, the study section
+- A Learn page (in the File backstage and beside every table and dialog) with an article per
+  procedure and per concept: what it answers, its assumptions, how to read its table, the
+  formulas, and a worked example on the sample data with a button that runs it. Concepts:
+  variables and levels of measurement, distributions, sampling, the p-value, confidence
+  intervals, effect sizes, power, assumptions and what to do when they fail; and a "Which
+  test?" guide from the question and the data's levels to the procedure.
+- Σ shows the calculation on the user's own data; Learn explains the idea. Each links to the
+  other.
+- Written for MK Sigma (never copied from SPSS's or any manual), in both languages, as
+  Markdown in the repository with formulas in the same notation as Σ; the same articles in
+  the exported web pages. Sources cited per article.
+
 ## Later
 - Multiple related tables (star-schema data model) and measures
 - Connectors: PostgreSQL, SQLite, Parquet, HTTP/JSON
