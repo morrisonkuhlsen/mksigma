@@ -9,6 +9,7 @@ description = "MK Sigma reader for delimited text data (CSV, TSV): GET DATA /TYP
 workspace = true
 
 [dependencies]
+mksigma-i18n = { workspace = true }
 mksigma-core = { workspace = true }
 thiserror = { workspace = true }
 encoding_rs = { workspace = true }

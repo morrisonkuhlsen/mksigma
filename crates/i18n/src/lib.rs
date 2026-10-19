@@ -177,6 +177,23 @@ pub fn message_in(lang: Lang, id: &str, args: &[(&str, Arg)]) -> String {
     }
 }
 
+/// The message `id` in this thread's language (or English), if a catalog has it.
+pub fn lookup(id: &str) -> Option<String> {
+    let lang = current();
+    let pieces = lang.catalog().get(id).or_else(|| Lang::En.catalog().get(id))?;
+    let mut out = String::new();
+    render(lang, pieces, &[], &mut out);
+    Some(out)
+}
+
+/// A fixed English phrase written in code (what a command expected, say) in this thread's
+/// language: the message `phrase-<the phrase's words>` if a catalog has one, else the phrase.
+pub fn phrase(english: &str) -> String {
+    let id: String = english.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let id = id.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+    lookup(&format!("phrase-{id}")).unwrap_or_else(|| english.to_string())
+}
+
 /// A number as a placeholder shows it: whole numbers without decimals.
 fn show(x: f64) -> String {
     if x.fract() == 0.0 && x.abs() < 1e15 { format!("{}", x as i64) } else { format!("{x}") }

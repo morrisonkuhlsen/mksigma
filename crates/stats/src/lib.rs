@@ -37,9 +37,9 @@ pub use frequencies::{Options as FrequenciesOptions, Order as FrequenciesOrder, 
 
 #[derive(Debug, Error, PartialEq)]
 pub enum StatsError {
-    #[error("variable {0} does not exist")]
+    #[error("{}", mksigma_i18n::tr!("err-unknown-variable", name = .0.as_str()))]
     UnknownVariable(String),
-    #[error("variable {0} is not numeric")]
+    #[error("{}", mksigma_i18n::tr!("err-not-numeric", name = .0.as_str()))]
     NotNumeric(String),
 }
 

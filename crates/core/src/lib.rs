@@ -319,25 +319,25 @@ impl Variable {
 
 #[derive(Debug, Clone, Error, PartialEq)]
 pub enum DatasetError {
-    #[error("a variable named {0} already exists")]
+    #[error("{}", mksigma_i18n::tr!("err-duplicate-name", name = .0.as_str()))]
     DuplicateName(String),
-    #[error("variables can only be added to an empty dataset")]
+    #[error("{}", mksigma_i18n::tr!("err-not-empty"))]
     NotEmpty,
-    #[error("a case has {got} values but the dataset has {expected} variables")]
+    #[error("{}", mksigma_i18n::tr!("err-case-width", got = *got, expected = *expected))]
     CaseWidth { expected: usize, got: usize },
-    #[error("{0} is not a valid variable name")]
+    #[error("{}", mksigma_i18n::tr!("err-invalid-name", name = .0.as_str()))]
     InvalidName(String),
-    #[error("there is no variable {0}")]
+    #[error("{}", mksigma_i18n::tr!("err-no-variable", n = *.0))]
     NoVariable(usize),
-    #[error("there is no case {0}")]
+    #[error("{}", mksigma_i18n::tr!("err-no-case", n = *.0))]
     NoCase(usize),
-    #[error("{0} is a string variable and needs text")]
+    #[error("{}", mksigma_i18n::tr!("err-needs-text", name = .0.as_str()))]
     NeedsText(String),
-    #[error("{0} is a numeric variable and needs a number")]
+    #[error("{}", mksigma_i18n::tr!("err-needs-number", name = .0.as_str()))]
     NeedsNumber(String),
-    #[error("a new variable needs {expected} values, one per case, not {got}")]
+    #[error("{}", mksigma_i18n::tr!("err-column-length", expected = *expected, got = *got))]
     ColumnLength { expected: usize, got: usize },
-    #[error("a dictionary must keep the same variables and types")]
+    #[error("{}", mksigma_i18n::tr!("err-dictionary-mismatch"))]
     DictionaryMismatch,
 }
 

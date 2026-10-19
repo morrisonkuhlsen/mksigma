@@ -129,15 +129,15 @@ impl FreqStatistic {
 
 #[derive(Debug, Clone, Error, PartialEq)]
 pub enum SyntaxError {
-    #[error("unknown command: {0}")]
+    #[error("{}", mksigma_i18n::tr!("err-unknown-command", name = .0.as_str()))]
     UnknownCommand(String),
-    #[error("{command}: expected {expected}")]
+    #[error("{}", mksigma_i18n::tr!("err-expected", command = *command, expected = mksigma_i18n::phrase(expected)))]
     Expected { command: &'static str, expected: &'static str },
-    #[error("unexpected character {0:?}")]
+    #[error("{}", mksigma_i18n::tr!("err-unexpected-char", char = format!("{:?}", .0)))]
     UnexpectedChar(char),
-    #[error("a quoted string is not closed")]
+    #[error("{}", mksigma_i18n::tr!("err-unclosed-string"))]
     UnterminatedString,
-    #[error("{command}: {what} is not supported yet")]
+    #[error("{}", mksigma_i18n::tr!("err-unsupported", command = *command, what = mksigma_i18n::phrase(what)))]
     Unsupported { command: &'static str, what: String },
 }
 

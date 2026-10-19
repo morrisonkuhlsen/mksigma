@@ -1768,6 +1768,7 @@ dependencies = [
 name = "mksigma-core"
 version = "0.1.0"
 dependencies = [
+ "mksigma-i18n",
  "thiserror 2.0.21",
 ]
 
@@ -1777,6 +1778,7 @@ version = "0.1.0"
 dependencies = [
  "encoding_rs",
  "mksigma-core",
+ "mksigma-i18n",
  "thiserror 2.0.21",
 ]
 
@@ -1820,6 +1822,7 @@ version = "0.1.0"
 dependencies = [
  "encoding_rs",
  "mksigma-core",
+ "mksigma-i18n",
  "thiserror 2.0.21",
 ]
 
@@ -1838,6 +1841,7 @@ dependencies = [
 name = "mksigma-syntax"
 version = "0.1.0"
 dependencies = [
+ "mksigma-i18n",
  "thiserror 2.0.21",
 ]
 

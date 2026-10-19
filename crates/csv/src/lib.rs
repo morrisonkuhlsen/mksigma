@@ -16,11 +16,11 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Error, PartialEq)]
 pub enum CsvError {
-    #[error("the file has no data")]
+    #[error("{}", mksigma_i18n::tr!("err-csv-empty"))]
     Empty,
-    #[error("a record has more than {MAX_FIELDS} fields")]
+    #[error("{}", mksigma_i18n::tr!("err-csv-fields", max = MAX_FIELDS))]
     TooManyFields,
-    #[error("{0} is not a character encoding")]
+    #[error("{}", mksigma_i18n::tr!("err-csv-encoding", name = .0.as_str()))]
     Encoding(String),
     #[error("{0}")]
     Variables(String),

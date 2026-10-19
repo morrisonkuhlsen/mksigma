@@ -4,6 +4,7 @@
 //! dataset as it was. Each returns the `Edit`s that undo and redo it.
 
 use mksigma_core::{Dataset, Format, FormatKind, Measure, MissingValues, Value, VarType, Variable, is_valid_name};
+use mksigma_i18n::tr;
 use mksigma_syntax::{Command, Level, Literal, MissingSpec};
 
 use crate::EngineError;
@@ -42,8 +43,8 @@ fn value_for(var: &Variable, literal: &Literal) -> Result<Value, EngineError> {
     match (var.var_type, literal) {
         (VarType::Numeric, Literal::Num(x)) => Ok(Value::Num(*x)),
         (VarType::String(_), Literal::Str(s)) => Ok(Value::Str(s.clone())),
-        (VarType::Numeric, Literal::Str(s)) => Err(EngineError::Invalid(format!("{} is numeric; '{s}' is text", var.name))),
-        (VarType::String(_), Literal::Num(x)) => Err(EngineError::Invalid(format!("{} is a string variable; quote the value ('{x}')", var.name))),
+        (VarType::Numeric, Literal::Str(s)) => Err(EngineError::Invalid(tr!("err-numeric-gets-text", name = var.name.as_str(), value = s.as_str()))),
+        (VarType::String(_), Literal::Num(x)) => Err(EngineError::Invalid(tr!("err-string-quote", name = var.name.as_str(), value = format!("{x}")))),
     }
 }
 
@@ -73,11 +74,11 @@ fn changes(ds: &Dataset, command: &Command) -> Result<Vec<Change>, EngineError> 
                         MissingSpec::Discrete(list) => MissingValues::Discrete(list.iter().map(|l| value_for(var, l)).collect::<Result<_, _>>()?),
                         MissingSpec::Range { low, high, discrete } => {
                             if var.var_type != VarType::Numeric {
-                                return Err(EngineError::Invalid(format!("{} is a string variable; ranges need numbers", var.name)));
+                                return Err(EngineError::Invalid(tr!("err-string-range", name = var.name.as_str())));
                             }
                             let (low, high) = (low.unwrap_or(f64::MIN), high.unwrap_or(f64::MAX));
                             if low > high {
-                                return Err(EngineError::Invalid(format!("{low} THRU {high} is an empty range")));
+                                return Err(EngineError::Invalid(tr!("err-empty-range", low = format!("{low}"), high = format!("{high}"))));
                             }
                             MissingValues::Range { low, high, discrete: *discrete }
                         }
@@ -94,7 +95,7 @@ fn changes(ds: &Dataset, command: &Command) -> Result<Vec<Change>, EngineError> 
                         Level::Nominal => Measure::Nominal,
                         Level::Ordinal => Measure::Ordinal,
                         Level::Scale if var.var_type == VarType::Numeric => Measure::Scale,
-                        Level::Scale => return Err(EngineError::Invalid(format!("{} is a string variable and can't be Scale", var.name))),
+                        Level::Scale => return Err(EngineError::Invalid(tr!("err-string-scale", name = var.name.as_str()))),
                     };
                     out.push(Change::Measure(i, measure));
                 }
@@ -106,7 +107,7 @@ fn changes(ds: &Dataset, command: &Command) -> Result<Vec<Change>, EngineError> 
                 for i in indexes(ds, names)? {
                     let var = variable(ds, i)?;
                     if var.var_type != VarType::Numeric || format.kind.is_string() {
-                        return Err(EngineError::Invalid(format!("FORMATS sets numeric formats; {} can't be {format}", var.name)));
+                        return Err(EngineError::Invalid(tr!("err-formats-numeric", name = var.name.as_str(), format = format.to_string())));
                     }
                     out.push(Change::Format(i, format));
                 }
@@ -173,7 +174,7 @@ pub(crate) fn set_cell(ds: &mut Dataset, case: usize, var: usize, input: &str) -
                 text.parse::<f64>()
                     .ok()
                     .filter(|x| x.is_finite())
-                    .ok_or_else(|| EngineError::Invalid(format!("{text} is not a number ({} is numeric)", v.name)))?,
+                    .ok_or_else(|| EngineError::Invalid(tr!("err-not-a-number", text = text, name = v.name.as_str())))?,
             ),
         },
         VarType::String(_) => Value::Str(input.trim_end().to_string()),
@@ -216,8 +217,8 @@ pub(crate) fn new_variables(ds: &mut Dataset, command: &Command) -> Result<Vec<E
                     v
                 }
                 (true, Some(f)) if f.kind == FormatKind::A && f.width <= 255 => Variable::string(name.clone(), f.width),
-                (true, _) => return Err(EngineError::Invalid(format!("STRING {name} needs a width from A1 to A255"))),
-                (false, Some(f)) => return Err(EngineError::Invalid(format!("NUMERIC {name} can't have the string format {f}"))),
+                (true, _) => return Err(EngineError::Invalid(tr!("err-string-width", name = name.as_str()))),
+                (false, Some(f)) => return Err(EngineError::Invalid(tr!("err-numeric-string-format", name = name.as_str(), format = f.to_string()))),
             };
             planned.push(var);
         }

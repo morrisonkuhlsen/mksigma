@@ -3,6 +3,7 @@
 //! so a filtered rerun or a rerun after new variables sees the current dictionary.
 
 use mksigma_core::Dataset;
+use mksigma_i18n::tr;
 use mksigma_syntax::{Command, NparSpec, TTestSpec};
 
 use crate::EngineError;
@@ -17,13 +18,13 @@ pub(crate) fn names(ds: &Dataset, list: &[String]) -> Result<Vec<String>, Engine
         if word.eq_ignore_ascii_case("ALL") {
             out.extend(all.iter().map(|n| n.to_string()));
         } else if word.eq_ignore_ascii_case("TO") {
-            return Err(EngineError::Invalid("TO needs a variable before and after it".into()));
+            return Err(EngineError::Invalid(tr!("err-to-needs-variables")));
         } else if words.peek().is_some_and(|w| w.eq_ignore_ascii_case("TO")) {
             words.next();
-            let last = words.next().ok_or_else(|| EngineError::Invalid(format!("{word} TO needs a variable after TO")))?;
+            let last = words.next().ok_or_else(|| EngineError::Invalid(tr!("err-to-needs-after", word = word)))?;
             let (from, to) = (index(word)?, index(last)?);
             if from > to {
-                return Err(EngineError::Invalid(format!("{word} comes after {last} in the file, so {word} TO {last} is empty")));
+                return Err(EngineError::Invalid(tr!("err-to-empty", first = word, last = last)));
             }
             out.extend(all.get(from..=to).unwrap_or_default().iter().map(|n| n.to_string()));
         } else {

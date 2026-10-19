@@ -23,13 +23,13 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Error, PartialEq)]
 pub enum SavError {
-    #[error("not an SPSS system file")]
+    #[error("{}", mksigma_i18n::tr!("err-not-sav"))]
     NotSav,
-    #[error("the file ends early (at byte {offset})")]
+    #[error("{}", mksigma_i18n::tr!("err-sav-truncated", offset = *offset))]
     Truncated { offset: usize },
-    #[error("invalid {what} at byte {offset}")]
+    #[error("{}", mksigma_i18n::tr!("err-sav-invalid", what = *what, offset = *offset))]
     Invalid { offset: usize, what: &'static str },
-    #[error("reading {0} is not supported yet")]
+    #[error("{}", mksigma_i18n::tr!("err-sav-unsupported", what = *.0))]
     Unsupported(&'static str),
     #[error(transparent)]
     Dataset(#[from] DatasetError),

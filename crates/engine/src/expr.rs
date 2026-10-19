@@ -13,6 +13,7 @@
 //!   least n of them (otherwise 1, or 2 for `SD` and `VARIANCE`).
 
 use mksigma_core::{Dataset, Format, Value, VarType};
+use mksigma_i18n::tr;
 use mksigma_syntax::{BinOp, Expr};
 
 use crate::EngineError;
@@ -112,8 +113,8 @@ impl Compiler<'_> {
     fn expect(&self, e: &Expr, want: Type, context: &str) -> Result<Node, EngineError> {
         let (node, got) = self.compile(e)?;
         if got != want {
-            let want = if want == Type::Num { "a number" } else { "text" };
-            return Err(invalid(format!("{context} needs {want}")));
+            let want = if want == Type::Num { tr!("err-want-number") } else { tr!("err-want-text") };
+            return Err(invalid(tr!("err-needs", context = context, want = want)));
         }
         Ok(node)
     }
@@ -148,8 +149,8 @@ impl Compiler<'_> {
                     BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge if both(Type::Str) => {
                         Node::CmpStr(*op, Box::new(left), Box::new(right))
                     }
-                    _ if lt != rt => return Err(invalid("can't compare or combine text with a number".into())),
-                    _ => return Err(invalid("arithmetic and AND/OR need numbers".into())),
+                    _ if lt != rt => return Err(invalid(tr!("err-text-with-number"))),
+                    _ => return Err(invalid(tr!("err-arithmetic-numbers"))),
                 };
                 (node, Type::Num)
             }
@@ -159,16 +160,17 @@ impl Compiler<'_> {
 
     fn call(&self, name: &str, min: Option<usize>, args: &[Expr]) -> Result<(Node, Type), EngineError> {
         let n = args.len();
-        let arity = |ok: bool, expected: &str| if ok { Ok(()) } else { Err(invalid(format!("{name} takes {expected}"))) };
+        let arity =
+            |ok: bool, expected: &str| if ok { Ok(()) } else { Err(invalid(tr!("err-takes", name = name, what = mksigma_i18n::phrase(expected)))) };
         if min.is_some() && !matches!(name, "SUM" | "MEAN" | "SD" | "VARIANCE" | "MIN" | "MAX") {
-            return Err(invalid(format!("{name} doesn't take a .n suffix")));
+            return Err(invalid(tr!("err-no-suffix", name = name)));
         }
-        let arg = |i: usize| args.get(i).ok_or_else(|| invalid(format!("{name} is missing an argument")));
+        let arg = |i: usize| args.get(i).ok_or_else(|| invalid(tr!("err-missing-argument", name = name)));
         let num = |i: usize| -> Result<Box<Node>, EngineError> { Ok(Box::new(self.expect(arg(i)?, Type::Num, name)?)) };
         let text = |i: usize| -> Result<Box<Node>, EngineError> { Ok(Box::new(self.expect(arg(i)?, Type::Str, name)?)) };
         let var_index = |what: &str| match args {
             [Expr::Var(v)] => self.variable(v),
-            _ => Err(invalid(format!("{name} takes {what}"))),
+            _ => Err(invalid(tr!("err-takes", name = name, what = mksigma_i18n::phrase(what)))),
         };
         Ok(match name {
             "ABS" | "SQRT" | "EXP" | "LN" | "LG10" => {
@@ -202,7 +204,7 @@ impl Compiler<'_> {
                 };
                 let default = if matches!(stat, Stat::Sd | Stat::Variance) { 2 } else { 1 };
                 let need = min.unwrap_or(default);
-                arity(n >= default.max(need) && need >= 1, &format!("at least {} numbers", default.max(need)))?;
+                arity(n >= default.max(need) && need >= 1, &tr!("err-at-least-numbers", n = default.max(need)))?;
                 (Node::Stat(stat, need, self.nums(args, name)?), Type::Num)
             }
             "NMISS" | "NVALID" => {
@@ -221,13 +223,13 @@ impl Compiler<'_> {
             }
             "VALUE" => match var_index("a numeric variable")? {
                 (i, Type::Num) => (Node::RawVar(i), Type::Num),
-                _ => return Err(invalid("VALUE takes a numeric variable".into())),
+                _ => return Err(invalid(tr!("err-value-numeric"))),
             },
             "RANGE" => {
                 arity(n >= 3 && n % 2 == 1, "a value and low, high pairs")?;
                 let pairs = args.get(1..).unwrap_or_default().chunks(2).map(|p| match p {
                     [lo, hi] => Ok((self.expect(lo, Type::Num, name)?, self.expect(hi, Type::Num, name)?)),
-                    _ => Err(invalid("RANGE takes low, high pairs".into())),
+                    _ => Err(invalid(tr!("err-range-pairs"))),
                 });
                 (Node::Range(num(0)?, pairs.collect::<Result<_, _>>()?), Type::Num)
             }
@@ -273,11 +275,11 @@ impl Compiler<'_> {
                 arity(n == 2, "a number and a format such as F8.2")?;
                 let format = match arg(1)? {
                     Expr::Var(f) => f.parse::<Format>().map_err(invalid)?,
-                    _ => return Err(invalid("STRING takes a format such as F8.2 as its second argument".into())),
+                    _ => return Err(invalid(tr!("err-string-format-argument"))),
                 };
                 (Node::ToString(num(0)?, format), Type::Str)
             }
-            _ => return Err(invalid(format!("unknown function {name}"))),
+            _ => return Err(invalid(tr!("err-unknown-function", name = name))),
         })
     }
 }

@@ -9,4 +9,5 @@ description = "MK Sigma command syntax: lexer and parser"
 workspace = true
 
 [dependencies]
+mksigma-i18n = { workspace = true }
 thiserror = { workspace = true }

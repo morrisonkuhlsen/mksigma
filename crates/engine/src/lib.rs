@@ -43,7 +43,7 @@ pub enum EngineError {
     Csv(#[from] mksigma_csv::CsvError),
     #[error("{0}")]
     File(String),
-    #[error("variable {0} does not exist")]
+    #[error("{}", mksigma_i18n::tr!("err-unknown-variable", name = .0.as_str()))]
     UnknownVariable(String),
     #[error("{0}")]
     Invalid(String),
@@ -218,7 +218,7 @@ impl Session {
             let (run, offset) = (analysis - 1, item - 1);
             let count = self.run_of.iter().filter(|r| **r == run).count();
             if offset >= count {
-                return Err(EngineError::Invalid(format!("analysis {analysis} has no output item {item}")));
+                return Err(EngineError::Invalid(tr!("err-analysis-no-item", analysis = analysis, item = item)));
             }
             out.push((run, offset));
             if is_wide {
@@ -450,7 +450,7 @@ impl Session {
         let numeric = var.var_type == mksigma_core::VarType::Numeric;
         let selection = match spec {
             SliceSpec::Off => None,
-            SliceSpec::Range { .. } if !numeric => return Err(EngineError::Invalid(format!("{variable} is a string variable: slice it by values"))),
+            SliceSpec::Range { .. } if !numeric => return Err(EngineError::Invalid(tr!("err-slice-string", name = variable.as_str()))),
             SliceSpec::Range { low, high } => Some(Selection::Range { low: *low, high: *high }),
             SliceSpec::Values(values) => Some(Selection::Values(
                 values
@@ -458,7 +458,11 @@ impl Session {
                     .map(|l| match (l, numeric) {
                         (Literal::Num(x), true) => Ok(Value::Num(*x)),
                         (Literal::Str(s), false) => Ok(Value::Str(s.clone())),
-                        _ => Err(EngineError::Invalid(format!("{variable} needs {} values", if numeric { "numeric" } else { "quoted string" }))),
+                        _ => Err(EngineError::Invalid(if numeric {
+                            tr!("err-slice-numeric-values", name = variable.as_str())
+                        } else {
+                            tr!("err-slice-string-values", name = variable.as_str())
+                        })),
                     })
                     .collect::<Result<_, _>>()?,
             )),
@@ -493,7 +497,7 @@ impl Session {
     /// Selects `category` of Output item `item` and filters the other items to its cases.
     /// Selecting the selected category again clears the filter.
     pub fn select_category(&mut self, item: usize, category: Category) -> Result<(), EngineError> {
-        let source = *self.run_of.get(item).ok_or_else(|| EngineError::Invalid(format!("there is no output item {}", item + 1)))?;
+        let source = *self.run_of.get(item).ok_or_else(|| EngineError::Invalid(tr!("err-no-output-item", n = item + 1)))?;
         let filter = CrossFilter { category, source };
         self.cross_filter = if self.cross_filter.as_ref() == Some(&filter) { None } else { Some(filter) };
         self.show_runs();
@@ -526,9 +530,9 @@ impl Session {
     /// whether it is pinned now.
     pub fn toggle_pin(&mut self, item: usize) -> Result<bool, EngineError> {
         if !matches!(self.output.items.get(item), Some(Item::Table(_) | Item::Chart(_))) {
-            return Err(EngineError::Invalid(format!("output item {} is not a table or a chart", item + 1)));
+            return Err(EngineError::Invalid(tr!("err-not-table-or-chart", n = item + 1)));
         }
-        let tile = self.locate(item).ok_or_else(|| EngineError::Invalid(format!("there is no output item {}", item + 1)))?;
+        let tile = self.locate(item).ok_or_else(|| EngineError::Invalid(tr!("err-no-output-item", n = item + 1)))?;
         match self.tiles.iter().position(|t| *t == tile) {
             Some(at) => {
                 self.tiles.remove(at);
@@ -566,10 +570,8 @@ impl Session {
 
     /// Makes the tile of Output item `item` take a whole row, or half of one.
     pub fn set_wide(&mut self, item: usize, wide: bool) -> Result<(), EngineError> {
-        let tile = self
-            .locate(item)
-            .filter(|t| self.tiles.contains(t))
-            .ok_or_else(|| EngineError::Invalid(format!("output item {} is not on the dashboard", item + 1)))?;
+        let tile =
+            self.locate(item).filter(|t| self.tiles.contains(t)).ok_or_else(|| EngineError::Invalid(tr!("err-not-on-dashboard", n = item + 1)))?;
         self.wide.retain(|t| *t != tile);
         if wide {
             self.wide.push(tile);
@@ -585,7 +587,7 @@ impl Session {
                 self.tiles.swap(tile, other);
                 Ok(())
             }
-            None => Err(EngineError::Invalid(format!("tile {} can't move {}", tile + 1, if earlier { "earlier" } else { "later" }))),
+            None => Err(EngineError::Invalid(if earlier { tr!("err-tile-earlier", n = tile + 1) } else { tr!("err-tile-later", n = tile + 1) })),
         }
     }
 
@@ -606,8 +608,8 @@ impl Session {
     fn show_runs(&mut self) {
         let (sliced, crossed) = self.filtered();
         let run_on = |ds: &Result<Dataset, EngineError>, command: &Command| match ds {
-            Ok(ds) => analyse(ds, command).unwrap_or_else(|e| vec![Item::Warning(format!("Filtered: {e}"))]),
-            Err(e) => vec![Item::Warning(format!("Filtered: {e}"))],
+            Ok(ds) => analyse(ds, command).unwrap_or_else(|e| vec![Item::Warning(tr!("err-filtered", error = e.to_string()))]),
+            Err(e) => vec![Item::Warning(tr!("err-filtered", error = e.to_string()))],
         };
         let mut items = Vec::new();
         let mut run_of = Vec::new();
@@ -690,8 +692,8 @@ impl Session {
     /// the slicers and the cross-filter as it is shown. `full` writes every term of each sum.
     pub fn explain(&self, item: usize, full: bool) -> Result<mksigma_output::math::Explanation, EngineError> {
         use mksigma_stats::explain;
-        let (run, title) = self.explained(item).ok_or_else(|| EngineError::Invalid("this item has no calculation by hand".into()))?;
-        let Some(r) = self.runs.get(run) else { return Err(EngineError::Invalid(format!("there is no output item {}", item + 1))) };
+        let (run, title) = self.explained(item).ok_or_else(|| EngineError::Invalid(tr!("err-no-explanation")))?;
+        let Some(r) = self.runs.get(run) else { return Err(EngineError::Invalid(tr!("err-no-output-item", n = item + 1))) };
         // As `show_runs` chose the cases of this run's items, and said in the title.
         let (sliced, crossed) = self.filtered();
         let mut filters: Vec<String> = self.slicers.iter().map(|s| s.describe(&self.dataset)).collect();
@@ -702,7 +704,7 @@ impl Session {
             (Some((source, ds)), _) if source != run => ds?,
             (_, Some(ds)) => ds?,
             _ if r.version != self.version => {
-                return Err(EngineError::Invalid("the data changed after this table was made: run it again to see its calculation".into()));
+                return Err(EngineError::Invalid(tr!("err-stale-table")));
             }
             _ => self.dataset.clone(),
         };
@@ -735,13 +737,14 @@ impl Session {
             }
             Command::Oneway { .. } => match oneway_options(&command) {
                 Some(options) => explain::oneway(&ds, &options, full)?,
-                None => return Err(EngineError::Invalid("this item has no calculation by hand".into())),
+                None => return Err(EngineError::Invalid(tr!("err-no-explanation"))),
             },
-            _ => return Err(EngineError::Invalid("this item has no calculation by hand".into())),
+            _ => return Err(EngineError::Invalid(tr!("err-no-explanation"))),
         };
         let mut explanation = explanation;
         if !filters.is_empty() {
-            explanation.title.push_str(&format!(" (filtered by {})", filters.join("; ")));
+            explanation.title.push(' ');
+            explanation.title.push_str(&tr!("export-title-filtered", filters = filters.join("; ")));
         }
         Ok(explanation)
     }
@@ -779,7 +782,7 @@ impl Session {
     /// Switches a step on or off and replays the steps.
     pub fn set_step_enabled(&mut self, index: usize, enabled: bool) -> Result<(), EngineError> {
         let mut steps = self.steps.clone();
-        let step = steps.get_mut(index).ok_or_else(|| EngineError::Invalid(format!("there is no step {}", index + 1)))?;
+        let step = steps.get_mut(index).ok_or_else(|| EngineError::Invalid(tr!("err-no-step", n = index + 1)))?;
         step.enabled = enabled;
         let label = format!("{} step {}", if enabled { "enable" } else { "disable" }, index + 1);
         self.change_steps(label, steps);
@@ -790,7 +793,7 @@ impl Session {
     pub fn remove_step(&mut self, index: usize) -> Result<(), EngineError> {
         let mut steps = self.steps.clone();
         if index >= steps.len() {
-            return Err(EngineError::Invalid(format!("there is no step {}", index + 1)));
+            return Err(EngineError::Invalid(tr!("err-no-step", n = index + 1)));
         }
         steps.remove(index);
         self.change_steps(format!("remove step {}", index + 1), steps);
@@ -801,7 +804,7 @@ impl Session {
     pub fn move_step(&mut self, index: usize, up: bool) -> Result<(), EngineError> {
         let other = if up { index.checked_sub(1) } else { index.checked_add(1).filter(|i| *i < self.steps.len()) };
         let Some(other) = other.filter(|_| index < self.steps.len()) else {
-            return Err(EngineError::Invalid(format!("step {} can't move {}", index + 1, if up { "up" } else { "down" })));
+            return Err(EngineError::Invalid(if up { tr!("err-step-up", n = index + 1) } else { tr!("err-step-down", n = index + 1) }));
         };
         let mut steps = self.steps.clone();
         steps.swap(index, other);
@@ -813,18 +816,18 @@ impl Session {
     pub fn replace_step(&mut self, index: usize, source: &str) -> Result<(), EngineError> {
         let parsed = mksigma_syntax::parse_with_source(source)?;
         let [(command, source)] = parsed.as_slice() else {
-            return Err(EngineError::Invalid("a step is one command".into()));
+            return Err(EngineError::Invalid(tr!("err-step-one-command")));
         };
         if !changes_data(command) {
-            return Err(EngineError::Invalid("a step changes the data; run analyses from the syntax editor".into()));
+            return Err(EngineError::Invalid(tr!("err-step-changes-data")));
         }
         if matches!(command, Command::GetData(_)) {
-            return Err(EngineError::Invalid("GET DATA starts new data; run it from the syntax editor".into()));
+            return Err(EngineError::Invalid(tr!("err-step-get-data")));
         }
         let mut steps = self.steps.clone();
-        let step = steps.get_mut(index).ok_or_else(|| EngineError::Invalid(format!("there is no step {}", index + 1)))?;
+        let step = steps.get_mut(index).ok_or_else(|| EngineError::Invalid(tr!("err-no-step", n = index + 1)))?;
         if step.syntax().is_none() {
-            return Err(EngineError::Invalid("only command steps can be rewritten".into()));
+            return Err(EngineError::Invalid(tr!("err-step-only-commands")));
         }
         step.kind = StepKind::Syntax(source.clone());
         self.change_steps(format!("edit step {}", index + 1), steps);

@@ -9,4 +9,5 @@ description = "MK Sigma core types: datasets, variables, values, missing values"
 workspace = true
 
 [dependencies]
+mksigma-i18n = { workspace = true }
 thiserror = { workspace = true }

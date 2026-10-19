@@ -9,6 +9,7 @@ description = "MK Sigma reader and writer for SPSS system files (.sav/.zsav), cl
 workspace = true
 
 [dependencies]
+mksigma-i18n = { workspace = true }
 mksigma-core = { workspace = true }
 thiserror = { workspace = true }
 encoding_rs = { workspace = true }

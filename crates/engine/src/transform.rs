@@ -3,6 +3,7 @@
 //! edits that undo it.
 
 use mksigma_core::{Dataset, Value, VarType, Variable, is_valid_name};
+use mksigma_i18n::tr;
 use mksigma_syntax::{Expr, Literal, RecodeFrom, RecodeGroup, RecodeTo};
 
 use crate::EngineError;
@@ -39,12 +40,10 @@ fn target(ds: &Dataset, name: &str, kind: Type, command: &str) -> Result<Result<
     match ds.variable(name) {
         Some((i, var)) => match (var.var_type, kind) {
             (VarType::Numeric, Type::Num) | (VarType::String(_), Type::Str) => Ok(Ok(i)),
-            (VarType::Numeric, Type::Str) => Err(EngineError::Invalid(format!("{command}: {name} is numeric but gets text"))),
-            (VarType::String(_), Type::Num) => Err(EngineError::Invalid(format!("{command}: {name} is a string variable but gets a number"))),
+            (VarType::Numeric, Type::Str) => Err(EngineError::Invalid(tr!("err-compute-numeric-text", command = command, name = name))),
+            (VarType::String(_), Type::Num) => Err(EngineError::Invalid(tr!("err-compute-string-number", command = command, name = name))),
         },
-        None if kind == Type::Str => {
-            Err(EngineError::Invalid(format!("{command}: declare the new string variable first, e.g. STRING {name} (A20).")))
-        }
+        None if kind == Type::Str => Err(EngineError::Invalid(tr!("err-compute-declare-string", command = command, name = name))),
         None if !is_valid_name(name) => Err(EngineError::Dataset(mksigma_core::DatasetError::InvalidName(name.to_string()))),
         None => Ok(Err(Variable::numeric(name))),
     }
@@ -59,7 +58,7 @@ pub(crate) fn compute(ds: &mut Dataset, target_name: &str, expr: &Expr, cond: Op
     let cond: Option<Node> = match cond {
         Some(c) => match compiler.compile(c)? {
             (node, Type::Num) => Some(node),
-            (_, Type::Str) => return Err(EngineError::Invalid("IF needs a true/false condition".into())),
+            (_, Type::Str) => return Err(EngineError::Invalid(tr!("err-if-condition"))),
         },
         None => None,
     };
@@ -129,7 +128,7 @@ pub(crate) fn recode(ds: &mut Dataset, groups: &[RecodeGroup]) -> Result<Vec<Edi
                     };
                     if !ok {
                         let kind = if numeric { "numbers" } else { "quoted strings" };
-                        return Err(EngineError::Invalid(format!("RECODE: {name} takes {kind} on the left of =")));
+                        return Err(EngineError::Invalid(tr!("err-recode-left", name = name, kind = mksigma_i18n::phrase(kind))));
                     }
                 }
             }
@@ -138,7 +137,7 @@ pub(crate) fn recode(ds: &mut Dataset, groups: &[RecodeGroup]) -> Result<Vec<Edi
             let to_number = group.specs.iter().any(|s| matches!(s.to, RecodeTo::Value(Literal::Num(_)) | RecodeTo::SysMis));
             let into = group.into.get(k);
             let kind = match (into, to_text, to_number) {
-                (_, true, true) => return Err(EngineError::Invalid("RECODE: new values mix numbers and text".into())),
+                (_, true, true) => return Err(EngineError::Invalid(tr!("err-recode-mix"))),
                 (None, _, _) => {
                     if numeric {
                         Type::Num
@@ -157,7 +156,7 @@ pub(crate) fn recode(ds: &mut Dataset, groups: &[RecodeGroup]) -> Result<Vec<Edi
                 }
             };
             if group.specs.iter().any(|s| s.to == RecodeTo::Copy) && (kind == Type::Num) != numeric {
-                return Err(EngineError::Invalid(format!("RECODE: COPY needs {name} and its target to be the same type")));
+                return Err(EngineError::Invalid(tr!("err-recode-copy", name = name)));
             }
             let target = match into {
                 None => Ok(source),
@@ -204,7 +203,7 @@ pub(crate) fn recode(ds: &mut Dataset, groups: &[RecodeGroup]) -> Result<Vec<Edi
 pub(crate) fn select_if(ds: &mut Dataset, cond: &Expr) -> Result<Vec<Edit>, EngineError> {
     let (node, kind) = Compiler { ds }.compile(cond)?;
     if kind != Type::Num {
-        return Err(EngineError::Invalid("SELECT IF needs a true/false condition".into()));
+        return Err(EngineError::Invalid(tr!("err-select-condition")));
     }
     let drop: Vec<usize> = (0..ds.n_cases()).filter(|&case| Case { ds, case }.num(&node).is_none_or(|x| x == 0.0)).collect();
     if drop.is_empty() {
