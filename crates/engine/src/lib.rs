@@ -656,7 +656,9 @@ impl Session {
         let Item::Table(table) = self.output.items.get(item)? else { return None };
         match &self.runs.get(run)?.command {
             Command::Descriptives { .. } | Command::Correlations { .. } if place == 0 => Some((run, None)),
-            Command::Frequencies { .. } if table.title != "Statistics" => Some((run, Some(table.title.clone()))),
+            // The Statistics table comes first; then each variable's frequency table.
+            Command::Frequencies { .. } if place == 0 => Some((run, None)),
+            Command::Frequencies { .. } => Some((run, Some(table.title.clone()))),
             // Every table of a t test: the groups, the test, a pair's correlation.
             Command::TTest { .. } => Some((run, None)),
             _ => None,
@@ -688,6 +690,9 @@ impl Session {
             Command::Descriptives { variables } => explain::descriptives(&ds, variables, full)?,
             Command::Correlations { variables, with, one_tailed, listwise, .. } => {
                 explain::correlations(&ds, variables, with, *listwise, *one_tailed, full)?
+            }
+            Command::Frequencies { variables, statistics, .. } if title.is_none() => {
+                explain::frequency_statistics(&ds, variables, &freq_statistics(statistics), full)?
             }
             Command::Frequencies { variables, order, .. } => {
                 // The table's own variable: its title is the variable's name or label.
@@ -928,6 +933,25 @@ impl Session {
     }
 }
 
+fn freq_statistics(statistics: &[mksigma_syntax::FreqStatistic]) -> Vec<mksigma_stats::FrequenciesStatistic> {
+    use mksigma_stats::FrequenciesStatistic as S;
+    use mksigma_syntax::FreqStatistic;
+    statistics
+        .iter()
+        .map(|s| match s {
+            FreqStatistic::Mean => S::Mean,
+            FreqStatistic::SeMean => S::SeMean,
+            FreqStatistic::Mode => S::Mode,
+            FreqStatistic::StdDev => S::StdDev,
+            FreqStatistic::Variance => S::Variance,
+            FreqStatistic::Range => S::Range,
+            FreqStatistic::Minimum => S::Minimum,
+            FreqStatistic::Maximum => S::Maximum,
+            FreqStatistic::Sum => S::Sum,
+        })
+        .collect()
+}
+
 fn freq_order(order: &mksigma_syntax::FreqOrder) -> mksigma_stats::FrequenciesOrder {
     use mksigma_stats::FrequenciesOrder as O;
     use mksigma_syntax::FreqOrder;
@@ -964,26 +988,11 @@ fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
             items.push(Item::Table(table));
         }
         Command::Frequencies { variables, table, order, statistics, histogram, barchart } => {
-            use mksigma_stats::FrequenciesStatistic as S;
-            use mksigma_syntax::FreqStatistic;
             let options = mksigma_stats::FrequenciesOptions {
                 variables: variables.clone(),
                 table: *table,
                 order: freq_order(order),
-                statistics: statistics
-                    .iter()
-                    .map(|s| match s {
-                        FreqStatistic::Mean => S::Mean,
-                        FreqStatistic::SeMean => S::SeMean,
-                        FreqStatistic::Mode => S::Mode,
-                        FreqStatistic::StdDev => S::StdDev,
-                        FreqStatistic::Variance => S::Variance,
-                        FreqStatistic::Range => S::Range,
-                        FreqStatistic::Minimum => S::Minimum,
-                        FreqStatistic::Maximum => S::Maximum,
-                        FreqStatistic::Sum => S::Sum,
-                    })
-                    .collect(),
+                statistics: freq_statistics(statistics),
             };
             for item in mksigma_stats::frequencies(ds, &options)? {
                 items.push(item);
@@ -1138,7 +1147,8 @@ mod tests {
             })
             .collect();
         let income = titles.iter().position(|t| t == "Monthly income").unwrap();
-        assert!(!s.can_explain(titles.iter().position(|t| t == "Statistics").unwrap()));
+        let statistics = titles.iter().position(|t| t == "Statistics").unwrap();
+        assert_eq!(s.explain(statistics, false).unwrap().title, "Statistics");
         assert!(!s.can_explain(s.output.items.len() - 1));
         let e = s.explain(income, false).unwrap();
         assert_eq!(e.sections.len(), 1);

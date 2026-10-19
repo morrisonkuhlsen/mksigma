@@ -10,7 +10,7 @@ use mksigma_core::Dataset;
 use mksigma_output::math::build::*;
 use mksigma_output::math::{Explanation, Math, Step};
 
-use crate::frequencies::{Order, count};
+use crate::frequencies::{Order, Statistic, count};
 use crate::groups::{numeric, valid, valid_value};
 use crate::{StatsError, TTest, dist, value_text};
 
@@ -683,6 +683,131 @@ fn number_text(x: f64) -> String {
     mksigma_output::math::number(x, PLACES)
 }
 
+/// `x` to four decimals, then to `places` as the table shows it (when that differs).
+fn approx_to(x: f64, places: usize) -> Math {
+    if number_text(x) == mksigma_output::math::number(x, places) { n(x) } else { row(vec![n(x), text("≈"), num(x, places)]) }
+}
+
+/// `FREQUENCIES`' Statistics table: N valid and missing, then each statistic asked for, from
+/// the frequencies (each value `x` counted `f` times), with what it needs before it.
+pub fn frequency_statistics(ds: &Dataset, variables: &[String], wanted: &[Statistic], full: bool) -> Result<Explanation, StatsError> {
+    let weights: Vec<f64> = (0..ds.n_cases()).map(|c| ds.case_weight(c)).collect();
+    let asked = |s: &[Statistic]| s.iter().any(|x| wanted.contains(x));
+    let mut sections = Vec::new();
+    for name in variables {
+        let (index, variable) = ds.variable(name).ok_or_else(|| StatsError::UnknownVariable(name.clone()))?;
+        let counts = count(variable, ds.column(index).unwrap_or_default(), &weights, Order::AscendingValue);
+        let (valid_n, missing) = (counts.valid_total(), counts.missing_total());
+        let mut steps = several(
+            "N counts the cases with a valid value, and apart those whose value is missing:",
+            vec![equals(vec![sub(var("N"), text("valid")), n(valid_n)]), equals(vec![sub(var("N"), text("missing")), n(missing)])],
+        );
+        let xs: Vec<(f64, f64)> = counts.valid.iter().filter_map(|(v, f)| Some((v.as_num()?, *f))).collect();
+        if wanted.is_empty() {
+            sections.push((variable.display_name().to_string(), steps));
+            continue;
+        }
+        if variable.var_type != mksigma_core::VarType::Numeric {
+            steps.push(say("A string variable has none of the other statistics."));
+            sections.push((variable.display_name().to_string(), steps));
+            continue;
+        }
+        if xs.is_empty() {
+            steps.push(say("With no valid values there is nothing more to compute."));
+            sections.push((variable.display_name().to_string(), steps));
+            continue;
+        }
+        // Each distinct value once, with its frequency.
+        let f_x = |x: f64, f: f64| row(vec![n(f), text("·"), val(x)]);
+        let body = row(vec![indexed("f", "k"), indexed("x", "k")]);
+        let total: f64 = xs.iter().map(|(x, f)| x * f).sum();
+        let mean = total / valid_n;
+        if asked(&[Statistic::Sum, Statistic::Mean, Statistic::SeMean, Statistic::StdDev, Statistic::Variance]) {
+            steps.push(step(
+                "The sum: each distinct value times its frequency f, added up:",
+                equals(vec![sum(None, None, body.clone()), terms(xs.iter().map(|(x, f)| f_x(*x, *f)).collect(), full), approx_to(total, 2)]),
+            ));
+        }
+        if asked(&[Statistic::Mean, Statistic::SeMean, Statistic::StdDev, Statistic::Variance]) {
+            steps.push(step(
+                "The mean divides it by N:",
+                equals(vec![
+                    bar(var("x")),
+                    frac(sum(None, None, body), sub(var("N"), text("valid"))),
+                    frac(n(total), n(valid_n)),
+                    approx_to(mean, 2),
+                ]),
+            ));
+        }
+        if asked(&[Statistic::SeMean, Statistic::StdDev, Statistic::Variance]) {
+            let ss: f64 = xs.iter().map(|(x, f)| f * (x - mean).powi(2)).sum();
+            let devs: Vec<Math> = xs.iter().map(|(x, f)| row(vec![n(*f), text("·"), dev_sq(*x, mean)])).collect();
+            steps.push(step(
+                "The squared deviations from the mean, each times its frequency:",
+                equals(vec![
+                    sum(None, None, row(vec![indexed("f", "k"), sup(paren(row(vec![indexed("x", "k"), text("−"), bar(var("x"))])), text("2"))])),
+                    terms(devs, full),
+                    n(ss),
+                ]),
+            ));
+            if valid_n <= 1.0 {
+                steps.push(say("With N of 1 or less the variance and the standard deviation are undefined."));
+            } else {
+                let variance = ss / (valid_n - 1.0);
+                let sd = variance.sqrt();
+                steps.extend(several(
+                    "The variance divides that by N − 1; the standard deviation is its square root:",
+                    vec![
+                        equals(vec![sup(var("s"), text("2")), frac(n(ss), row(vec![n(valid_n), text("−"), text("1")])), approx_to(variance, 2)]),
+                        equals(vec![var("s"), sqrt(n(variance)), approx_to(sd, 2)]),
+                    ],
+                ));
+                if wanted.contains(&Statistic::SeMean) {
+                    steps.push(step(
+                        "The standard error of the mean:",
+                        equals(vec![
+                            var("SE"),
+                            frac(var("s"), sqrt(sub(var("N"), text("valid")))),
+                            frac(n(sd), sqrt(n(valid_n))),
+                            approx_to(sd / valid_n.sqrt(), 2),
+                        ]),
+                    ));
+                }
+            }
+        }
+        if wanted.contains(&Statistic::Mode) {
+            let top = xs.iter().map(|(_, f)| *f).fold(0.0, f64::max);
+            let modes: Vec<f64> = xs.iter().filter(|(_, f)| *f == top).map(|(x, _)| *x).collect();
+            let smallest = modes.iter().copied().fold(f64::INFINITY, f64::min);
+            let text_of = if modes.len() > 1 {
+                format!(
+                    "The mode is the most frequent value. {} values share the largest frequency, {}; the table shows the smallest:",
+                    modes.len(),
+                    number_text(top)
+                )
+            } else {
+                format!("The mode is the most frequent value, the one with the largest frequency, {}:", number_text(top))
+            };
+            steps.push(step(&text_of, equals(vec![text("Mode"), approx_to(smallest, 2)])));
+        }
+        let (lo, hi) = xs.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (x, _)| (a.min(*x), b.max(*x)));
+        if asked(&[Statistic::Minimum, Statistic::Maximum, Statistic::Range]) {
+            steps.extend(several(
+                "The smallest and largest valid values:",
+                vec![equals(vec![text("Minimum"), approx_to(lo, 2)]), equals(vec![text("Maximum"), approx_to(hi, 2)])],
+            ));
+        }
+        if wanted.contains(&Statistic::Range) {
+            steps.push(step(
+                "The range is their difference:",
+                equals(vec![text("Range"), row(vec![n(hi), text("−"), val(lo)]), approx_to(hi - lo, 2)]),
+            ));
+        }
+        sections.push((variable.display_name().to_string(), steps));
+    }
+    Ok(Explanation { title: "Statistics".into(), sections })
+}
+
 /// `FREQUENCIES`: each value's percent, valid percent and cumulative percent, in the table's
 /// `order`.
 pub fn frequencies(ds: &Dataset, variables: &[String], order: Order, full: bool) -> Result<Explanation, StatsError> {
@@ -895,6 +1020,42 @@ mod tests {
         ends_on(&tex, &[&tables[1].rows[0].1[2]]);
         // Differences 2 2 0 3 1 0 3, case by case: sum 11.
         assert!(tex.contains("7 - 5 = 2") && tex.contains("+ 3 = 11"), "{tex}");
+    }
+
+    #[test]
+    fn frequency_statistics_by_hand_agree_with_the_table() {
+        let ds = t_data();
+        let all = [
+            Statistic::Mean,
+            Statistic::SeMean,
+            Statistic::Mode,
+            Statistic::StdDev,
+            Statistic::Variance,
+            Statistic::Range,
+            Statistic::Minimum,
+            Statistic::Maximum,
+            Statistic::Sum,
+        ];
+        let names: Vec<String> = vec!["before".into(), "after".into()];
+        let tex = latex(&frequency_statistics(&ds, &names, &all, false).unwrap());
+        let options = crate::FrequenciesOptions { variables: names, table: false, order: Order::AscendingValue, statistics: all.to_vec() };
+        let items = crate::frequencies(&ds, &options).unwrap();
+        let t = tables(&items)[0];
+        for (_, cells) in t.rows.iter().skip(2) {
+            for cell in cells {
+                let x = match cell {
+                    Cell::Num { value, .. } => *value,
+                    Cell::Text(s) => s.trim_end_matches('a').parse().unwrap(),
+                    other => panic!("{other:?}"),
+                };
+                let shown = number(x, 2);
+                assert!(tex.contains(&format!("\\approx {shown}")) || tex.contains(&format!("= {shown}")), "{x} in {tex}");
+            }
+        }
+        // before: 4 4 5 6 6 7 8, in frequencies: 2 · 4 + 5 + 2 · 6 + 7 + 8 = 40.
+        assert!(tex.contains("2 \\cdot 4 + 1 \\cdot 5 + 2 \\cdot 6 + 1 \\cdot 7 + 1 \\cdot 8 = 40"), "{tex}");
+        // Two values share the largest frequency: the smallest is shown.
+        assert!(tex.contains("\\text{Mode} = 4"), "{tex}");
     }
 
     #[test]
