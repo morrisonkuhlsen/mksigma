@@ -286,7 +286,9 @@ pub(crate) fn show(ui: &mut egui::Ui, m: &Math, size: f32) -> egui::Response {
     let setter = Typesetter { painter: &painter, color };
     let mut pieces = Vec::new();
     flatten(m, &mut pieces);
-    let laid: Vec<(bool, Laid)> = pieces.iter().map(|p| (breaks_before(p), setter.lay(p, size))).collect();
+    // A list may break after its commas too.
+    let after_comma = |k: usize| k.checked_sub(1).and_then(|j| pieces.get(j)).is_some_and(|p| matches!(p, Math::Text(s) if s.starts_with(',')));
+    let laid: Vec<(bool, Laid)> = pieces.iter().enumerate().map(|(k, p)| (breaks_before(p) || after_comma(k), setter.lay(p, size))).collect();
     let max = ui.available_width().max(size * 10.0);
     // Lines after the first start under the first `=`, or a little in when that is far.
     let first_eq = pieces.iter().position(|p| matches!(p, Math::Text(s) if s == "="));

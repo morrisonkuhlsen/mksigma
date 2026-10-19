@@ -122,6 +122,8 @@ fn latex_text(s: &str) -> String {
             '×' => out.push_str("$\\times$"),
             '≤' => out.push_str("$\\le$"),
             '≥' => out.push_str("$\\ge$"),
+            '±' => out.push_str("$\\pm$"),
+            'μ' => out.push_str("$\\mu$"),
             '…' | '⋯' => out.push_str("\\ldots{}"),
             c => out.push(c),
         }
@@ -134,7 +136,17 @@ impl Math {
     pub fn to_latex(&self) -> String {
         match self {
             Math::Var(s) => {
-                if s.chars().count() == 1 {
+                // Greek letters as LaTeX's own.
+                let greek = match s.as_str() {
+                    "μ" => Some("\\mu"),
+                    "σ" => Some("\\sigma"),
+                    "ν" => Some("\\nu"),
+                    "α" => Some("\\alpha"),
+                    _ => None,
+                };
+                if let Some(g) = greek {
+                    g.to_string()
+                } else if s.chars().count() == 1 {
                     latex_text(s)
                 } else {
                     format!("\\mathit{{{}}}", latex_text(s))
@@ -148,6 +160,8 @@ impl Math {
                 "…" | "⋯" => "\\cdots".into(),
                 "≤" => "\\le".into(),
                 "≥" => "\\ge".into(),
+                "±" => "\\pm".into(),
+                "|" => "|".into(),
                 s if s.parse::<f64>().is_ok() => s.to_string(),
                 s => format!("\\text{{{}}}", latex_text(s)),
             },
@@ -224,6 +238,7 @@ mod tests {
             equals(vec![bar(var("x")), frac(text("1"), var("n")), sum(Some(equals(vec![var("i"), text("1")])), Some(var("n")), indexed("x", "i"))]);
         assert_eq!(mean.to_latex(), "\\bar{x} = \\frac{1}{n} = \\sum_{i = 1}^{n} {x}_{i}");
         assert_eq!(sqrt(sup(var("s"), num(2.0, 0))).to_latex(), "\\sqrt{{s}^{2}}");
+        assert_eq!(row(vec![sub(var("μ"), text("0")), text("±"), text("|")]).to_latex(), "{\\mu}_{0} \\pm |");
         assert_eq!(row(vec![var("score"), text("≈"), text("Test & score")]).to_latex(), "\\mathit{score} \\approx \\text{Test \\& score}");
         let e = Explanation {
             title: "Descriptive Statistics".into(),

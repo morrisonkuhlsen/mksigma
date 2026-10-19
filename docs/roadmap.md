@@ -198,8 +198,13 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   steps run on the cases the table shows (slicers, cross-filter), say so in the title, and a
   table made before the data changed is refused rather than explained on other numbers. Tests
   hold each final figure against the table's.
-- **Next:** T-TEST (Levene, pooled and Welch), the FREQUENCIES Statistics table, CROSSTABS'
-  chi-square, ONEWAY; then the charts (a histogram's bins, a bar's mean).
+- **T-TEST — done:** every table of a t test opens the whole test: one sample against its test
+  value; two groups with each one's mean and variance, Levene's test as the ANOVA on the
+  distances from the group means, the pooled version and Welch's with Satterthwaite's degrees
+  of freedom; paired samples with the differences case by case and the pair's correlation.
+  t's significance and the interval's critical t are the only figures from a distribution.
+- **Next:** the FREQUENCIES Statistics table, CROSSTABS' chi-square, ONEWAY; then the charts (a
+  histogram's bins, a bar's mean).
 
 ## Later
 - Multiple related tables (star-schema data model) and measures

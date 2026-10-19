@@ -657,6 +657,8 @@ impl Session {
         match &self.runs.get(run)?.command {
             Command::Descriptives { .. } | Command::Correlations { .. } if place == 0 => Some((run, None)),
             Command::Frequencies { .. } if table.title != "Statistics" => Some((run, Some(table.title.clone()))),
+            // Every table of a t test: the groups, the test, a pair's correlation.
+            Command::TTest { .. } => Some((run, None)),
             _ => None,
         }
     }
@@ -697,6 +699,7 @@ impl Session {
                     .collect();
                 explain::frequencies(&ds, if own.is_empty() { variables } else { &own }, freq_order(order), full)?
             }
+            Command::TTest { test, ci } => explain::t_test(&ds, &t_test_of(test), *ci, full)?,
             _ => return Err(EngineError::Invalid("this item has no calculation by hand".into())),
         };
         let mut explanation = explanation;
@@ -936,6 +939,21 @@ fn freq_order(order: &mksigma_syntax::FreqOrder) -> mksigma_stats::FrequenciesOr
     }
 }
 
+fn t_test_of(test: &mksigma_syntax::TTestSpec) -> mksigma_stats::TTest {
+    use mksigma_syntax::{Literal, TTestSpec};
+    let value = |l: &Literal| match l {
+        Literal::Num(x) => Value::Num(*x),
+        Literal::Str(s) => Value::Str(s.clone()),
+    };
+    match test {
+        TTestSpec::OneSample { variables, test_value } => mksigma_stats::TTest::OneSample { variables: variables.clone(), test_value: *test_value },
+        TTestSpec::Independent { variables, group, first, second } => {
+            mksigma_stats::TTest::Independent { variables: variables.clone(), group: group.clone(), first: value(first), second: value(second) }
+        }
+        TTestSpec::Paired { pairs } => mksigma_stats::TTest::Paired { pairs: pairs.clone() },
+    }
+}
+
 /// The output of an analysis command on `ds`; nothing for commands that change the data.
 fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
     let command = &lists::expand(ds, command)?;
@@ -1025,26 +1043,7 @@ fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
             };
             items.extend(mksigma_stats::crosstabs(ds, &options)?);
         }
-        Command::TTest { test, ci } => {
-            use mksigma_syntax::{Literal, TTestSpec};
-            let value = |l: &Literal| match l {
-                Literal::Num(x) => Value::Num(*x),
-                Literal::Str(s) => Value::Str(s.clone()),
-            };
-            let test = match test {
-                TTestSpec::OneSample { variables, test_value } => {
-                    mksigma_stats::TTest::OneSample { variables: variables.clone(), test_value: *test_value }
-                }
-                TTestSpec::Independent { variables, group, first, second } => mksigma_stats::TTest::Independent {
-                    variables: variables.clone(),
-                    group: group.clone(),
-                    first: value(first),
-                    second: value(second),
-                },
-                TTestSpec::Paired { pairs } => mksigma_stats::TTest::Paired { pairs: pairs.clone() },
-            };
-            items.extend(mksigma_stats::t_test(ds, &test, *ci)?);
-        }
+        Command::TTest { test, ci } => items.extend(mksigma_stats::t_test(ds, &t_test_of(test), *ci)?),
         Command::Correlations { variables, with, one_tailed, flag, listwise } => {
             let options = mksigma_stats::CorrelationsOptions {
                 variables: variables.clone(),
@@ -1155,6 +1154,19 @@ mod tests {
         s.run_syntax("DESCRIPTIVES age.").unwrap();
         let last = s.output.items.len() - 1;
         assert!(tex(&s, last).contains("\\frac{285}{8} = 35.625"));
+    }
+
+    #[test]
+    fn explains_every_table_of_a_t_test() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("COMPUTE older = age > 35.\nT-TEST GROUPS=older(0 1) /VARIABLES=score.").unwrap();
+        let tables: Vec<usize> = (0..s.output.items.len()).filter(|&i| matches!(s.output.items[i], Item::Table(_))).collect();
+        assert_eq!(tables.len(), 2);
+        for i in tables {
+            let e = s.explain(i, false).unwrap();
+            assert_eq!(e.title, "T-Test");
+            assert!(e.sections.iter().any(|(h, _)| h.contains("Levene")), "{:?}", e.sections);
+        }
     }
 
     #[test]
