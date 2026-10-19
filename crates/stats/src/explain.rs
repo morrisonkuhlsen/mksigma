@@ -7,6 +7,7 @@
 //! writes every one.
 
 use mksigma_core::Dataset;
+use mksigma_i18n::tr;
 use mksigma_output::math::build::*;
 use mksigma_output::math::{Explanation, Math, Step};
 
@@ -96,18 +97,14 @@ pub fn descriptives(ds: &Dataset, variables: &[String], full: bool) -> Result<Ex
         let (xs, left) = values(ds, index);
         let mut steps = Vec::new();
         let total: f64 = xs.iter().map(|(_, w)| w).sum();
-        let note =
-            if left > 0 { format!(" ({left} cases are left out: their value is missing or their weight isn't positive)") } else { String::new() };
+        let note = if left > 0 { format!(" {}", tr!("ex-left-out", n = left)) } else { String::new() };
         if w {
-            steps.push(step(
-                &format!("The cases are weighted: N is the sum of the weights{note}."),
-                equals(vec![var("N"), sum(None, None, indexed("w", "i")), n(total)]),
-            ));
+            steps.push(step(&tr!("ex-weighted-n", note = note.as_str()), equals(vec![var("N"), sum(None, None, indexed("w", "i")), n(total)])));
         } else {
-            steps.push(step(&format!("N counts the cases with a valid value{note}."), equals(vec![var("N"), n(total)])));
+            steps.push(step(&tr!("ex-valid-n", note = note), equals(vec![var("N"), n(total)])));
         }
         if xs.is_empty() {
-            steps.push(say("With no valid values there is nothing more to compute."));
+            steps.push(say(&tr!("ex-with-no-valid-values-there-is-nothing-more-to-compute")));
             sections.push((variable.display_name().to_string(), steps));
             continue;
         }
@@ -118,12 +115,12 @@ pub fn descriptives(ds: &Dataset, variables: &[String], full: bool) -> Result<Ex
         let each: Vec<Math> = xs.iter().map(|(x, wi)| if w { row(vec![n(*wi), text("·"), val(*x)]) } else { val(*x) }).collect();
         let body = if w { row(vec![indexed("w", "i"), xi()]) } else { xi() };
         let (from, to) = range();
-        steps.push(step("The sum of the values:", equals(vec![sum(from, to, body.clone()), terms(each, full), n(s)])));
+        steps.push(step(&tr!("ex-the-sum-of-the-values"), equals(vec![sum(from, to, body.clone()), terms(each, full), n(s)])));
         // The mean.
         let mean = s / total;
         let (from, to) = range();
         steps.push(step(
-            "The mean divides the sum by N:",
+            &tr!("ex-the-mean-divides-the-sum-by-n"),
             equals(vec![bar(var("x")), frac(sum(from, to, body), var("N")), frac(n(s), n(total)), n(mean)]),
         ));
         // Squared deviations.
@@ -134,31 +131,31 @@ pub fn descriptives(ds: &Dataset, variables: &[String], full: bool) -> Result<Ex
         let dev_body = if w { row(vec![indexed("w", "i"), dev_body]) } else { dev_body };
         let (from, to) = range();
         steps.push(step(
-            "The squared deviations from the mean, added up:",
+            &tr!("ex-the-squared-deviations-from-the-mean-added-up"),
             equals(vec![sum(from, to, dev_body), terms(devs, full), terms(squares, full), n(ss)]),
         ));
         if total <= 1.0 {
-            steps.push(say("With N of 1 or less the variance and standard deviation are undefined."));
+            steps.push(say(&tr!("ex-with-n-of-1-or-less-the-variance-and-standard-deviation-are")));
         } else {
             let variance = ss / (total - 1.0);
             steps.push(step(
-                "The variance divides that by N − 1:",
+                &tr!("ex-the-variance-divides-that-by-n-1"),
                 equals(vec![sup(var("s"), text("2")), frac(n(ss), row(vec![n(total), text("−"), text("1")])), n(variance)]),
             ));
             let sd = variance.sqrt();
             steps.push(step(
-                "The standard deviation is its square root:",
+                &tr!("ex-the-standard-deviation-is-its-square-root"),
                 equals(vec![var("s"), sqrt(n(variance)), row(vec![n(sd), text("≈"), num(sd, 2)])]),
             ));
         }
         let (lo, hi) = xs.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (x, _)| (a.min(*x), b.max(*x)));
         steps.extend(several(
-            "The minimum and maximum are the smallest and largest values:",
-            vec![equals(vec![text("min"), n(lo)]), equals(vec![text("max"), n(hi)])],
+            &tr!("ex-the-minimum-and-maximum-are-the-smallest-and-largest-values"),
+            vec![equals(vec![text(&tr!("ex-word-min")), n(lo)]), equals(vec![text(&tr!("ex-word-max")), n(hi)])],
         ));
         sections.push((variable.display_name().to_string(), steps));
     }
-    Ok(Explanation { title: "Descriptive Statistics".into(), sections })
+    Ok(Explanation { title: tr!("ex-title-descriptive-statistics"), sections })
 }
 
 /// Pearson's r of `(x, y, weight)` pairs, step by step, then its t and significance; `how`
@@ -166,14 +163,15 @@ pub fn descriptives(ds: &Dataset, variables: &[String], full: bool) -> Result<Ex
 fn pearson(pairs: &[(f64, f64, f64)], w: bool, how: &str, one_tailed: bool, full: bool, test: bool) -> Vec<Step> {
     let mut steps = Vec::new();
     let total: f64 = pairs.iter().map(|(_, _, w)| w).sum();
-    steps.push(step(&format!("The cases {how}{}:", if w { ", weighted" } else { "" }), equals(vec![var("N"), n(total)])));
+    let cases = if w { tr!("ex-cases-weighted", how = how) } else { tr!("ex-cases", how = how) };
+    steps.push(step(&cases, equals(vec![var("N"), n(total)])));
     if total <= 0.0 {
-        steps.push(say("With no cases there is no correlation."));
+        steps.push(say(&tr!("ex-with-no-cases-there-is-no-correlation")));
         return steps;
     }
     let mx = pairs.iter().map(|(x, _, w)| x * w).sum::<f64>() / total;
     let my = pairs.iter().map(|(_, y, w)| y * w).sum::<f64>() / total;
-    steps.extend(several("The means of x and y:", vec![equals(vec![bar(var("x")), n(mx)]), equals(vec![bar(var("y")), n(my)])]));
+    steps.extend(several(&tr!("ex-the-means-of-x-and-y"), vec![equals(vec![bar(var("x")), n(mx)]), equals(vec![bar(var("y")), n(my)])]));
     let xi = || indexed("x", "i");
     let yi = || indexed("y", "i");
     let weight = |m: Math| if w { row(vec![indexed("w", "i"), m]) } else { m };
@@ -190,24 +188,27 @@ fn pearson(pairs: &[(f64, f64, f64)], w: bool, how: &str, one_tailed: bool, full
         })
         .collect();
     steps.push(step(
-        "The sum of the products of the deviations:",
+        &tr!("ex-the-sum-of-the-products-of-the-deviations"),
         equals(vec![sub(var("S"), var("xy")), sum(None, None, weight(row(vec![dx(), dy()]))), terms(cross, full), n(sxy)]),
     ));
     let xs: Vec<Math> = pairs.iter().map(|(x, _, wi)| weighted_term(w, *wi, dev_sq(*x, mx))).collect();
     steps.push(step(
-        "The sum of the squared deviations of x:",
+        &tr!("ex-the-sum-of-the-squared-deviations-of-x"),
         equals(vec![sub(var("S"), var("xx")), sum(None, None, weight(sup(dx(), text("2")))), terms(xs, full), n(sxx)]),
     ));
     let ys: Vec<Math> = pairs.iter().map(|(_, y, wi)| weighted_term(w, *wi, dev_sq(*y, my))).collect();
-    steps.push(step("And of y:", equals(vec![sub(var("S"), var("yy")), sum(None, None, weight(sup(dy(), text("2")))), terms(ys, full), n(syy)])));
+    steps.push(step(
+        &tr!("ex-and-of-y"),
+        equals(vec![sub(var("S"), var("yy")), sum(None, None, weight(sup(dy(), text("2")))), terms(ys, full), n(syy)]),
+    ));
     let r = sxy / (sxx * syy).sqrt();
     if !r.is_finite() {
-        steps.push(say("One of the variables doesn't vary here, so r is undefined."));
+        steps.push(say(&tr!("ex-one-of-the-variables-doesn-t-vary-here-so-r-is-undefined")));
         return steps;
     }
     let r = r.clamp(-1.0, 1.0);
     steps.push(step(
-        "Pearson's r:",
+        &tr!("ex-pearson-s-r"),
         equals(vec![
             var("r"),
             frac(sub(var("S"), var("xy")), sqrt(row(vec![sub(var("S"), var("xx")), text("·"), sub(var("S"), var("yy"))]))),
@@ -219,7 +220,7 @@ fn pearson(pairs: &[(f64, f64, f64)], w: bool, how: &str, one_tailed: bool, full
         let df = total - 2.0;
         let t = r * (df / (1.0 - r * r)).sqrt();
         steps.push(step(
-            "Its t statistic, with N − 2 degrees of freedom:",
+            &tr!("ex-its-t-statistic-with-n-2-degrees-of-freedom"),
             equals(vec![
                 var("t"),
                 frac(
@@ -231,9 +232,9 @@ fn pearson(pairs: &[(f64, f64, f64)], w: bool, how: &str, one_tailed: bool, full
             ]),
         ));
         if let Some(p) = dist::t_sig(t, df) {
-            let (p, tails) = if one_tailed { (p / 2.0, "one-tailed") } else { (p, "two-tailed") };
+            let (p, tails) = if one_tailed { (p / 2.0, tr!("ex-one-tailed")) } else { (p, tr!("ex-two-tailed")) };
             steps.push(step(
-                &format!("The significance ({tails}) is the probability of a t at least this far from 0 in Student's t distribution with {} degrees of freedom: the one figure here that comes from the distribution's function, not from arithmetic.", number_text(df)),
+                &tr!("ex-r-significance", tails = tails, df = number_text(df)),
                 row(vec![var("p"), text("="), n(p), text("≈"), num(p, 3)]),
             ));
         }
@@ -271,12 +272,12 @@ pub fn correlations(
             done.push((*ri, *ci));
             let pairs: Vec<(f64, f64, f64)> =
                 (0..ds.n_cases()).filter(|&c| usable(c)).filter_map(|c| Some((valid(ds, *ri, c)?, valid(ds, *ci, c)?, ds.case_weight(c)))).collect();
-            let how = if listwise { "valid on every variable listed (listwise)" } else { "valid on both (pairwise)" };
-            let steps = pearson(&pairs, w, how, one_tailed, full, true);
-            sections.push((format!("{} with {}", rvar.display_name(), cvar.display_name()), steps));
+            let how = if listwise { tr!("ex-how-listwise") } else { tr!("ex-how-pairwise") };
+            let steps = pearson(&pairs, w, &how, one_tailed, full, true);
+            sections.push((tr!("ex-pair-with", a = rvar.display_name(), b = cvar.display_name()), steps));
         }
     }
-    Ok(Explanation { title: "Correlations".into(), sections })
+    Ok(Explanation { title: tr!("ex-title-correlations"), sections })
 }
 
 /// The symbols of one sample's statistics: its size, its values, their mean and standard
@@ -310,36 +311,39 @@ struct Sample {
 fn sample(steps: &mut Vec<Step>, xs: &[(f64, f64)], names: &Names, w: bool, full: bool) -> Option<Sample> {
     let total: f64 = xs.iter().map(|(_, w)| w).sum();
     if w {
-        steps.push(step("Its size is the sum of the weights:", equals(vec![names.n.clone(), sum(None, None, indexed("w", "i")), n(total)])));
+        steps.push(step(&tr!("ex-its-size-is-the-sum-of-the-weights"), equals(vec![names.n.clone(), sum(None, None, indexed("w", "i")), n(total)])));
     } else {
-        steps.push(step("Its size counts the cases with a valid value:", equals(vec![names.n.clone(), n(total)])));
+        steps.push(step(&tr!("ex-its-size-counts-the-cases-with-a-valid-value"), equals(vec![names.n.clone(), n(total)])));
     }
     if total <= 0.0 {
-        steps.push(say("With no valid values there is nothing more to compute."));
+        steps.push(say(&tr!("ex-with-no-valid-values-there-is-nothing-more-to-compute")));
         return None;
     }
     let s: f64 = xs.iter().map(|(x, w)| x * w).sum();
     let body = if w { row(vec![indexed("w", "i"), names.item.clone()]) } else { names.item.clone() };
     let each: Vec<Math> = xs.iter().map(|(x, wi)| weighted_term(w, *wi, val(*x))).collect();
-    steps.push(step("The sum of the values:", equals(vec![sum(None, None, body.clone()), terms(each, full), n(s)])));
+    steps.push(step(&tr!("ex-the-sum-of-the-values"), equals(vec![sum(None, None, body.clone()), terms(each, full), n(s)])));
     let mean = s / total;
-    steps.push(step("The mean:", equals(vec![names.mean.clone(), frac(sum(None, None, body), names.n.clone()), frac(n(s), n(total)), approx(mean)])));
+    steps.push(step(
+        &tr!("ex-the-mean"),
+        equals(vec![names.mean.clone(), frac(sum(None, None, body), names.n.clone()), frac(n(s), n(total)), approx(mean)]),
+    ));
     let ss: f64 = xs.iter().map(|(x, wi)| wi * (x - mean).powi(2)).sum();
     let devs: Vec<Math> = xs.iter().map(|(x, wi)| weighted_term(w, *wi, dev_sq(*x, mean))).collect();
     let squares: Vec<Math> = xs.iter().map(|(x, wi)| n(wi * (x - mean).powi(2))).collect();
     let dev_body = sup(paren(row(vec![names.item.clone(), text("−"), names.mean.clone()])), text("2"));
     let dev_body = if w { row(vec![indexed("w", "i"), dev_body]) } else { dev_body };
     steps.push(step(
-        "The squared deviations from the mean, added up:",
+        &tr!("ex-the-squared-deviations-from-the-mean-added-up"),
         equals(vec![sum(None, None, dev_body), terms(devs, full), terms(squares, full), n(ss)]),
     ));
     if total <= 1.0 {
-        steps.push(say("With a size of 1 or less the variance is undefined."));
+        steps.push(say(&tr!("ex-with-a-size-of-1-or-less-the-variance-is-undefined")));
         return Some(Sample { n: total, mean, variance: None });
     }
     let variance = ss / (total - 1.0);
     steps.extend(several(
-        "The variance divides that by the size minus 1, and the standard deviation is its square root:",
+        &tr!("ex-the-variance-divides-that-by-the-size-minus-1-and-the-standa"),
         vec![
             equals(vec![sup(names.s.clone(), text("2")), frac(n(ss), row(vec![n(total), text("−"), text("1")])), approx(variance)]),
             equals(vec![names.s.clone(), sqrt(n(variance)), approx(variance.sqrt())]),
@@ -356,13 +360,7 @@ fn approx(x: f64) -> Math {
 /// The two-tailed significance of `t` with `df` degrees of freedom.
 fn t_significance(t: f64, df: f64) -> Option<Step> {
     let p = dist::t_sig(t, df)?;
-    Some(step(
-        &format!(
-            "The significance (two-tailed) is the probability of a t at least this far from 0 in Student's t distribution with {} degrees of freedom: a figure from the distribution's function, not from arithmetic.",
-            number_text(df)
-        ),
-        equals(vec![var("p"), approx(p)]),
-    ))
+    Some(step(&tr!("ex-t-significance", df = number_text(df)), equals(vec![var("p"), approx(p)])))
 }
 
 /// t from a difference and its standard error, its degrees of freedom, significance and the
@@ -370,24 +368,24 @@ fn t_significance(t: f64, df: f64) -> Option<Step> {
 fn t_and_interval(steps: &mut Vec<Step>, difference: (Math, f64), se: (Math, f64), df: (Math, f64), ci: f64) {
     let ((d_name, d), (se_name, se), (df_name, df)) = (difference, se, df);
     let t = d / se;
-    steps.push(step("t divides the difference by its standard error:", equals(vec![var("t"), frac(d_name, se_name), frac(n(d), n(se)), approx(t)])));
+    steps.push(step(
+        &tr!("ex-t-divides-the-difference-by-its-standard-error"),
+        equals(vec![var("t"), frac(d_name, se_name), frac(n(d), n(se)), approx(t)]),
+    ));
     let whole = df.fract() == 0.0;
-    steps.push(step("Its degrees of freedom:", equals(vec![var("df"), df_name, if whole { n(df) } else { approx(df) }])));
+    steps.push(step(&tr!("ex-its-degrees-of-freedom"), equals(vec![var("df"), df_name, if whole { n(df) } else { approx(df) }])));
     steps.extend(t_significance(t, df));
     if let Some(critical) = dist::t_quantile(0.5 + ci / 2.0, df) {
         let level = number_text(ci * 100.0);
         let tail = number_text((1.0 - ci) / 2.0 * 100.0);
-        steps.push(step(
-            &format!("For the {level}% confidence interval, the t that leaves {tail}% in each tail, from the same distribution:"),
-            equals(vec![sub(var("t"), num(0.5 + ci / 2.0, 4)), approx(critical)]),
-        ));
+        steps.push(step(&tr!("ex-ci-t", level = level, tail = tail), equals(vec![sub(var("t"), num(0.5 + ci / 2.0, 4)), approx(critical)])));
         let half = critical * se;
         steps.extend(several(
-            "The interval is the difference plus or minus that t times the standard error:",
+            &tr!("ex-the-interval-is-the-difference-plus-or-minus-that-t-times-th"),
             vec![
                 equals(vec![row(vec![n(d), text("±"), n(critical), text("·"), n(se)]), row(vec![n(d), text("±"), n(half)])]),
-                equals(vec![text("Lower"), row(vec![n(d), text("−"), n(half)]), approx(d - half)]),
-                equals(vec![text("Upper"), row(vec![n(d), text("+"), n(half)]), approx(d + half)]),
+                equals(vec![text(&tr!("ex-word-lower-cap")), row(vec![n(d), text("−"), n(half)]), approx(d - half)]),
+                equals(vec![text(&tr!("ex-word-upper-cap")), row(vec![n(d), text("+"), n(half)]), approx(d + half)]),
             ],
         ));
     }
@@ -409,7 +407,7 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                     let diff = mean - test_value;
                     let mu = sub(var("μ"), text("0"));
                     steps.push(step(
-                        "The difference from the test value:",
+                        &tr!("ex-the-difference-from-the-test-value"),
                         equals(vec![
                             row(vec![names.mean.clone(), text("−"), mu.clone()]),
                             row(vec![n(mean), text("−"), val(*test_value)]),
@@ -418,7 +416,7 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                     ));
                     let se = (variance / size).sqrt();
                     steps.push(step(
-                        "The standard error of the mean:",
+                        &tr!("ex-the-standard-error-of-the-mean"),
                         equals(vec![var("SE"), frac(names.s.clone(), sqrt(names.n.clone())), frac(n(variance.sqrt()), sqrt(n(size))), approx(se)]),
                     ));
                     let df_name = row(vec![names.n.clone(), text("−"), text("1")]);
@@ -444,12 +442,12 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                         groups[1].push((x, weight));
                     }
                 }
-                let heading = |part: &str| format!("{} by {}: {part}", variable.display_name(), gvar.display_name());
+                let heading = |part: &str| tr!("ex-heading-by", variable = variable.display_name(), group = gvar.display_name(), part = part);
                 let mut steps = Vec::new();
                 let mut stats = Vec::new();
                 for (k, (values, value)) in groups.iter().zip([first, second]).enumerate() {
                     let tag = (k + 1).to_string();
-                    steps.push(say(&format!("Group {tag}: {} = {}.", gvar.display_name(), value_text(gvar, value))));
+                    steps.push(say(&tr!("ex-group-is", tag = tag.as_str(), group = gvar.display_name(), value = value_text(gvar, value))));
                     stats.push(sample(&mut steps, values, &Names::of("x", &tag), w, full));
                 }
                 let both = match (stats.first(), stats.get(1)) {
@@ -457,18 +455,18 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                     _ => None,
                 };
                 let Some((n1, m1, v1, n2, m2, v2)) = both else {
-                    steps.push(say("Each group needs two cases or more for the test."));
-                    sections.push((heading("the groups"), steps));
+                    steps.push(say(&tr!("ex-each-group-needs-two-cases-or-more-for-the-test")));
+                    sections.push((heading(&tr!("ex-the-groups")), steps));
                     continue;
                 };
                 let d = m1 - m2;
                 let (g1, g2) = (Names::of("x", "1"), Names::of("x", "2"));
                 steps.push(step(
-                    "The difference of the means:",
+                    &tr!("ex-the-difference-of-the-means"),
                     equals(vec![row(vec![g1.mean.clone(), text("−"), g2.mean.clone()]), row(vec![n(m1), text("−"), n(m2)]), approx(d)]),
                 ));
-                sections.push((heading("the groups"), steps));
-                sections.push((heading("Levene's test of equal variances"), levene_steps(&groups, &[m1, m2], w, full, true)));
+                sections.push((heading(&tr!("ex-the-groups")), steps));
+                sections.push((heading(&tr!("ex-levene-s-test-of-equal-variances")), levene_steps(&groups, &[m1, m2], w, full, true)));
 
                 // Equal variances: one variance for both, pooled.
                 let mut steps = Vec::new();
@@ -476,7 +474,7 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                 let pooled = ((n1 - 1.0) * v1 + (n2 - 1.0) * v2) / df;
                 let s2 = |names: &Names| sup(names.s.clone(), text("2"));
                 steps.push(step(
-                    "The pooled variance weighs each group's variance by its degrees of freedom:",
+                    &tr!("ex-the-pooled-variance-weighs-each-group-s-variance-by-its-degr"),
                     equals(vec![
                         sup(sub(var("s"), var("p")), text("2")),
                         frac(
@@ -507,7 +505,7 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                 let se = (pooled * (1.0 / n1 + 1.0 / n2)).sqrt();
                 let one_over = |x: Math| frac(text("1"), x);
                 steps.push(step(
-                    "The standard error of the difference:",
+                    &tr!("ex-the-standard-error-of-the-difference"),
                     equals(vec![
                         var("SE"),
                         sqrt(row(vec![
@@ -521,13 +519,13 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                 let df_name = row(vec![g1.n.clone(), text("+"), g2.n.clone(), text("−"), text("2")]);
                 let diff_name = || row(vec![g1.mean.clone(), text("−"), g2.mean.clone()]);
                 t_and_interval(&mut steps, (diff_name(), d), (var("SE"), se), (df_name, df), ci);
-                sections.push((heading("equal variances assumed"), steps));
+                sections.push((heading(&tr!("ex-equal-variances-assumed")), steps));
 
                 // Unequal variances: Welch's standard error and Satterthwaite's degrees of freedom.
                 let mut steps = Vec::new();
                 let (a, b) = (v1 / n1, v2 / n2);
                 steps.extend(several(
-                    "Each group's variance of its mean:",
+                    &tr!("ex-each-group-s-variance-of-its-mean"),
                     vec![
                         equals(vec![var("a"), frac(s2(&g1), g1.n.clone()), frac(n(v1), n(n1)), n(a)]),
                         equals(vec![var("b"), frac(s2(&g2), g2.n.clone()), frac(n(v2), n(n2)), n(b)]),
@@ -535,13 +533,13 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                 ));
                 let se = (a + b).sqrt();
                 steps.push(step(
-                    "The standard error of the difference adds them, without pooling:",
+                    &tr!("ex-the-standard-error-of-the-difference-adds-them-without-pooli"),
                     equals(vec![var("SE"), sqrt(row(vec![var("a"), text("+"), var("b")])), sqrt(row(vec![n(a), text("+"), n(b)])), approx(se)]),
                 ));
                 let (da, db) = (a * a / (n1 - 1.0), b * b / (n2 - 1.0));
                 let df = (a + b).powi(2) / (da + db);
                 steps.push(step(
-                    "Welch–Satterthwaite's degrees of freedom, usually not a whole number:",
+                    &tr!("ex-welch-satterthwaite-s-degrees-of-freedom-usually-not-a-whole"),
                     equals(vec![
                         var("df"),
                         frac(
@@ -561,7 +559,7 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                     ]),
                 ));
                 t_and_interval(&mut steps, (diff_name(), d), (var("SE"), se), (text("Welch–Satterthwaite"), df), ci);
-                sections.push((heading("equal variances not assumed"), steps));
+                sections.push((heading(&tr!("ex-equal-variances-not-assumed")), steps));
             }
         }
         TTest::Paired { pairs } => {
@@ -571,7 +569,7 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                     .filter_map(|c| Some((valid(ds, ai, c)?, valid(ds, bi, c)?, ds.case_weight(c))))
                     .filter(|(_, _, w)| *w > 0.0)
                     .collect();
-                let pair = format!("Pair {}: {} − {}", p + 1, avar.display_name(), bvar.display_name());
+                let pair = tr!("ex-pair-difference", n = p + 1, a = avar.display_name(), b = bvar.display_name());
                 let mut steps = Vec::new();
                 let each: Vec<Math> = rows.iter().map(|(x, y, _)| equals(vec![row(vec![val(*x), text("−"), val(*y)]), val(x - y)])).collect();
                 let mut listed = Vec::new();
@@ -588,36 +586,32 @@ pub fn t_test(ds: &Dataset, test: &TTest, ci: f64, full: bool) -> Result<Explana
                     short.extend(listed.iter().skip(n_items - 3).cloned());
                     listed = short;
                 }
-                steps.push(step(
-                    &format!("The differences, case by case, on the cases valid on both ({} minus {}):", avar.display_name(), bvar.display_name()),
-                    row(listed),
-                ));
+                steps.push(step(&tr!("ex-differences", a = avar.display_name(), b = bvar.display_name()), row(listed)));
                 let diffs: Vec<(f64, f64)> = rows.iter().map(|(x, y, w)| (x - y, *w)).collect();
                 let names = Names::of("d", "");
                 if let Some(Sample { n: size, mean, variance: Some(variance) }) = sample(&mut steps, &diffs, &names, w, full) {
                     let se = (variance / size).sqrt();
                     steps.push(step(
-                        "The standard error of the mean difference:",
+                        &tr!("ex-the-standard-error-of-the-mean-difference"),
                         equals(vec![var("SE"), frac(names.s.clone(), sqrt(names.n.clone())), frac(n(variance.sqrt()), sqrt(n(size))), approx(se)]),
                     ));
                     let df_name = row(vec![names.n.clone(), text("−"), text("1")]);
                     t_and_interval(&mut steps, (names.mean, mean), (var("SE"), se), (df_name, size - 1.0), ci);
                 }
                 sections.push((pair.clone(), steps));
-                let x_and_y = format!("x is {}, y is {}; the cases valid on both", avar.display_name(), bvar.display_name());
-                sections.push((format!("Pair {}: the correlation", p + 1), pearson(&rows, w, &x_and_y, false, full, true)));
+                let x_and_y = tr!("ex-how-pair", x = avar.display_name(), y = bvar.display_name());
+                sections.push((tr!("ex-pair-correlation", n = p + 1), pearson(&rows, w, &x_and_y, false, full, true)));
             }
         }
     }
-    Ok(Explanation { title: "T-Test".into(), sections })
+    Ok(Explanation { title: tr!("ex-title-t-test"), sections })
 }
 
 /// Levene's test, based on the mean: a one-way analysis of variance on each value's distance
 /// from its group's mean.
 /// `t_test` says which row of its table to read.
 fn levene_steps(groups: &[Vec<(f64, f64)>], means: &[f64], w: bool, full: bool, t_test: bool) -> Vec<Step> {
-    let mut steps =
-        vec![say("Levene's test asks whether the groups' variances differ: an analysis of variance on each value's distance from its group's mean.")];
+    let mut steps = vec![say(&tr!("ex-levene-s-test-asks-whether-the-groups-variances-differ-an-an"))];
     let z_of: Vec<Vec<(f64, f64)>> = groups.iter().zip(means).map(|(g, &m)| g.iter().map(|(x, wi)| ((x - m).abs(), *wi)).collect()).collect();
     let mut z_means = Vec::new();
     for (k, ((g, z), &m)) in groups.iter().zip(&z_of).zip(means).enumerate() {
@@ -629,7 +623,7 @@ fn levene_steps(groups: &[Vec<(f64, f64)>], means: &[f64], w: bool, full: bool, 
         let mean = total / size;
         z_means.push((size, mean));
         steps.extend(several(
-            &format!("Group {tag}: the distances, their sum and mean:"),
+            &tr!("ex-group-distances", tag = tag.as_str()),
             vec![
                 equals(vec![sum(None, None, sub(var("z"), text(&format!("{tag}i")))), terms(distances, full), terms(zs, full), n(total)]),
                 equals(vec![sub(bar(var("z")), text(&tag)), frac(n(total), n(size)), n(mean)]),
@@ -639,14 +633,14 @@ fn levene_steps(groups: &[Vec<(f64, f64)>], means: &[f64], w: bool, full: bool, 
     let big_n: f64 = z_means.iter().map(|(s, _)| s).sum();
     let grand = z_means.iter().map(|(s, m)| s * m).sum::<f64>() / big_n;
     steps.push(step(
-        "The mean of all the distances:",
+        &tr!("ex-the-mean-of-all-the-distances"),
         equals(vec![bar(var("z")), frac(plus(z_means.iter().map(|(s, m)| row(vec![n(*s), text("·"), n(*m)])).collect()), n(big_n)), n(grand)]),
     ));
     let between: f64 = z_means.iter().map(|(s, m)| s * (m - grand).powi(2)).sum();
     steps.push(step(
-        "Between the groups: each group's mean distance from that, squared and weighed by its size:",
+        &tr!("ex-between-the-groups-each-group-s-mean-distance-from-that-squa"),
         equals(vec![
-            sub(var("SS"), text("between")),
+            sub(var("SS"), text(&tr!("ex-word-between"))),
             plus(z_means.iter().map(|(s, m)| row(vec![n(*s), text("·"), dev_sq(*m, grand)])).collect()),
             n(between),
         ]),
@@ -655,33 +649,30 @@ fn levene_steps(groups: &[Vec<(f64, f64)>], means: &[f64], w: bool, full: bool, 
         z_of.iter().zip(&z_means).flat_map(|(z, (_, m))| z.iter().map(move |(z, wi)| weighted_term(w, *wi, dev_sq(*z, *m)))).collect();
     let within: f64 = z_of.iter().zip(&z_means).map(|(z, (_, m))| z.iter().map(|(z, wi)| wi * (z - m).powi(2)).sum::<f64>()).sum();
     steps.push(step(
-        "Within the groups: each distance's deviation from its group's mean distance, squared:",
-        equals(vec![sub(var("SS"), text("within")), terms(within_terms, full), n(within)]),
+        &tr!("ex-within-the-groups-each-distance-s-deviation-from-its-group-s"),
+        equals(vec![sub(var("SS"), text(&tr!("ex-word-within"))), terms(within_terms, full), n(within)]),
     ));
     let df1 = z_means.len() as f64 - 1.0;
     let df2 = big_n - z_means.len() as f64;
     if df1 <= 0.0 || df2 <= 0.0 || within <= 0.0 {
-        steps.push(say("With no spread within the groups F is undefined."));
+        steps.push(say(&tr!("ex-with-no-spread-within-the-groups-f-is-undefined")));
         return steps;
     }
     let f = (between / df1) / (within / df2);
     steps.push(step(
-        "F divides the mean squares, with k − 1 and N − k degrees of freedom (k groups):",
+        &tr!("ex-f-divides-the-mean-squares-with-k-1-and-n-k-degrees-of-freed"),
         equals(vec![
             var("F"),
             frac(
-                row(vec![sub(var("SS"), text("between")), text("/"), paren(row(vec![var("k"), text("−"), text("1")]))]),
-                row(vec![sub(var("SS"), text("within")), text("/"), paren(row(vec![var("N"), text("−"), var("k")]))]),
+                row(vec![sub(var("SS"), text(&tr!("ex-word-between"))), text("/"), paren(row(vec![var("k"), text("−"), text("1")]))]),
+                row(vec![sub(var("SS"), text(&tr!("ex-word-within"))), text("/"), paren(row(vec![var("N"), text("−"), var("k")]))]),
             ),
             frac(row(vec![n(between), text("/"), n(df1)]), row(vec![n(within), text("/"), n(df2)])),
             approx(f),
         ]),
     ));
     if let Some(p) = dist::f_sig(f, df1, df2) {
-        steps.push(step(
-            &format!("Its significance, from the F distribution with {} and {} degrees of freedom:", number_text(df1), number_text(df2)),
-            equals(vec![var("p"), approx(p)]),
-        ));
+        steps.push(step(&tr!("ex-f-significance", df1 = number_text(df1), df2 = number_text(df2)), equals(vec![var("p"), approx(p)])));
         if !t_test {
             return steps;
         }
@@ -718,12 +709,17 @@ pub fn oneway(ds: &Dataset, options: &crate::OnewayOptions, full: bool) -> Resul
             }
         }
         groups.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let heading = |part: &str| format!("{} by {}: {part}", variable.display_name(), fvar.display_name());
+        let heading = |part: &str| tr!("ex-heading-by", variable = variable.display_name(), group = fvar.display_name(), part = part);
         let mut steps = Vec::new();
         let mut stats: Vec<(f64, f64, f64)> = Vec::new();
         for (k, (level, values)) in groups.iter().enumerate() {
             let tag = (k + 1).to_string();
-            steps.push(say(&format!("Group {tag}: {} = {}.", fvar.display_name(), value_text(fvar, &mksigma_core::Value::Num(*level)))));
+            steps.push(say(&tr!(
+                "ex-group-is",
+                tag = tag.as_str(),
+                group = fvar.display_name(),
+                value = value_text(fvar, &mksigma_core::Value::Num(*level))
+            )));
             let names = Names::of("x", &tag);
             if let Some(Sample { n: size, mean, variance }) = sample(&mut steps, values, &names, w, full) {
                 let variance = variance.unwrap_or(0.0);
@@ -736,24 +732,25 @@ pub fn oneway(ds: &Dataset, options: &crate::OnewayOptions, full: bool) -> Resul
         }
         if options.descriptives {
             let all: Vec<(f64, f64)> = groups.iter().flat_map(|(_, g)| g.iter().copied()).collect();
-            steps.push(say("All the groups together (the Total row):"));
+            steps.push(say(&tr!("ex-all-the-groups-together-the-total-row")));
             let names = Names::of("x", "");
             if let Some(Sample { n: size, mean, variance: Some(variance) }) = sample(&mut steps, &all, &names, w, full) {
                 interval_steps(&mut steps, &names, size, mean, variance);
                 steps.extend(extremes(&all));
             }
         }
-        sections.push((heading("the groups"), steps));
+        sections.push((heading(&tr!("ex-the-groups")), steps));
         let k = stats.len() as f64;
         let big_n: f64 = stats.iter().map(|(s, _, _)| s).sum();
         if k < 2.0 || big_n <= k {
-            sections.push((heading("the analysis of variance"), vec![say("It needs two groups or more, and more cases than groups.")]));
+            sections
+                .push((heading(&tr!("ex-the-analysis-of-variance")), vec![say(&tr!("ex-it-needs-two-groups-or-more-and-more-cases-than-groups"))]));
             continue;
         }
         if options.homogeneity {
             let values: Vec<Vec<(f64, f64)>> = groups.iter().map(|(_, g)| g.clone()).collect();
             let means: Vec<f64> = stats.iter().map(|(_, m, _)| *m).collect();
-            sections.push((heading("Levene's test of equal variances"), levene_steps(&values, &means, w, full, false)));
+            sections.push((heading(&tr!("ex-levene-s-test-of-equal-variances")), levene_steps(&values, &means, w, full, false)));
         }
 
         let mut steps = Vec::new();
@@ -761,7 +758,7 @@ pub fn oneway(ds: &Dataset, options: &crate::OnewayOptions, full: bool) -> Resul
         let group_mean = |k: usize| sub(bar(var("x")), text(&(k + 1).to_string()));
         let group_n = |k: usize| sub(var("n"), text(&(k + 1).to_string()));
         steps.push(step(
-            "The grand mean weighs each group's mean by its size:",
+            &tr!("ex-the-grand-mean-weighs-each-group-s-mean-by-its-size"),
             equals(vec![
                 bar(var("x")),
                 frac(plus((0..stats.len()).map(|k| row(vec![group_n(k), group_mean(k)])).collect()), var("N")),
@@ -771,9 +768,9 @@ pub fn oneway(ds: &Dataset, options: &crate::OnewayOptions, full: bool) -> Resul
         ));
         let between: f64 = stats.iter().map(|(s, m, _)| s * (m - grand).powi(2)).sum();
         steps.push(step(
-            "Between the groups: each group's mean against the grand mean, squared and weighed by its size:",
+            &tr!("ex-between-the-groups-each-group-s-mean-against-the-grand-mean"),
             equals(vec![
-                sub(var("SS"), text("between")),
+                sub(var("SS"), text(&tr!("ex-word-between"))),
                 sum(
                     None,
                     None,
@@ -785,46 +782,53 @@ pub fn oneway(ds: &Dataset, options: &crate::OnewayOptions, full: bool) -> Resul
         ));
         let within: f64 = stats.iter().map(|(s, _, v)| (s - 1.0) * v).sum();
         steps.push(step(
-            "Within the groups: each group's squared deviations from its own mean, which are its variance times its size minus 1:",
+            &tr!("ex-within-the-groups-each-group-s-squared-deviations-from-its-o"),
             equals(vec![
-                sub(var("SS"), text("within")),
+                sub(var("SS"), text(&tr!("ex-word-within"))),
                 sum(None, None, row(vec![paren(row(vec![indexed("n", "k"), text("−"), text("1")])), sup(indexed("s", "k"), text("2"))])),
                 plus(stats.iter().map(|(s, _, v)| row(vec![paren(row(vec![n(*s), text("−"), text("1")])), text("·"), n(*v)])).collect()),
                 approx(within),
             ]),
         ));
         steps.push(step(
-            "The total sum of squares is the two together:",
-            equals(vec![sub(var("SS"), text("total")), row(vec![n(between), text("+"), n(within)]), approx(between + within)]),
+            &tr!("ex-the-total-sum-of-squares-is-the-two-together"),
+            equals(vec![sub(var("SS"), text(&tr!("ex-word-total"))), row(vec![n(between), text("+"), n(within)]), approx(between + within)]),
         ));
         let (df1, df2) = (k - 1.0, big_n - k);
         steps.extend(several(
-            "The degrees of freedom, with k groups and N cases:",
+            &tr!("ex-the-degrees-of-freedom-with-k-groups-and-n-cases"),
             vec![
-                equals(vec![sub(var("df"), text("between")), row(vec![var("k"), text("−"), text("1")]), n(df1)]),
-                equals(vec![sub(var("df"), text("within")), row(vec![var("N"), text("−"), var("k")]), row(vec![n(big_n), text("−"), n(k)]), n(df2)]),
+                equals(vec![sub(var("df"), text(&tr!("ex-word-between"))), row(vec![var("k"), text("−"), text("1")]), n(df1)]),
+                equals(vec![
+                    sub(var("df"), text(&tr!("ex-word-within"))),
+                    row(vec![var("N"), text("−"), var("k")]),
+                    row(vec![n(big_n), text("−"), n(k)]),
+                    n(df2),
+                ]),
             ],
         ));
         let (ms_b, ms_w) = (between / df1, within / df2);
         steps.extend(several(
-            "Each mean square divides its sum of squares by its degrees of freedom:",
+            &tr!("ex-each-mean-square-divides-its-sum-of-squares-by-its-degrees-o"),
             vec![
-                equals(vec![sub(var("MS"), text("between")), frac(n(between), n(df1)), approx(ms_b)]),
-                equals(vec![sub(var("MS"), text("within")), frac(n(within), n(df2)), approx(ms_w)]),
+                equals(vec![sub(var("MS"), text(&tr!("ex-word-between"))), frac(n(between), n(df1)), approx(ms_b)]),
+                equals(vec![sub(var("MS"), text(&tr!("ex-word-within"))), frac(n(within), n(df2)), approx(ms_w)]),
             ],
         ));
         let f = ms_b / ms_w;
         steps.push(step(
-            "F compares them:",
-            equals(vec![var("F"), frac(sub(var("MS"), text("between")), sub(var("MS"), text("within"))), frac(n(ms_b), n(ms_w)), approx(f)]),
+            &tr!("ex-f-compares-them"),
+            equals(vec![
+                var("F"),
+                frac(sub(var("MS"), text(&tr!("ex-word-between"))), sub(var("MS"), text(&tr!("ex-word-within")))),
+                frac(n(ms_b), n(ms_w)),
+                approx(f),
+            ]),
         ));
         if let Some(p) = dist::f_sig(f, df1, df2) {
-            steps.push(step(
-                &format!("Its significance, from the F distribution with {} and {} degrees of freedom:", number_text(df1), number_text(df2)),
-                equals(vec![var("p"), approx(p)]),
-            ));
+            steps.push(step(&tr!("ex-f-significance", df1 = number_text(df1), df2 = number_text(df2)), equals(vec![var("p"), approx(p)])));
         }
-        sections.push((heading("the analysis of variance"), steps));
+        sections.push((heading(&tr!("ex-the-analysis-of-variance")), steps));
 
         for test in &options.posthoc {
             sections.push((
@@ -836,30 +840,33 @@ pub fn oneway(ds: &Dataset, options: &crate::OnewayOptions, full: bool) -> Resul
             ));
         }
     }
-    Ok(Explanation { title: "Oneway".into(), sections })
+    Ok(Explanation { title: tr!("ex-title-oneway"), sections })
 }
 
 /// The smallest and largest of the values.
 fn extremes(values: &[(f64, f64)]) -> Vec<Step> {
     let (lo, hi) = values.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (x, _)| (a.min(*x), b.max(*x)));
-    several("The smallest and largest values:", vec![equals(vec![text("Minimum"), n(lo)]), equals(vec![text("Maximum"), n(hi)])])
+    several(
+        &tr!("ex-the-smallest-and-largest-values"),
+        vec![equals(vec![text(&tr!("ex-word-minimum-cap")), n(lo)]), equals(vec![text(&tr!("ex-word-maximum-cap")), n(hi)])],
+    )
 }
 
 /// A group's standard error and the 95% interval of its mean, as ONEWAY's Descriptives show.
 fn interval_steps(steps: &mut Vec<Step>, names: &Names, size: f64, mean: f64, variance: f64) {
     let se = (variance / size).sqrt();
     steps.push(step(
-        "Its standard error:",
+        &tr!("ex-its-standard-error"),
         equals(vec![var("SE"), frac(names.s.clone(), sqrt(names.n.clone())), frac(n(variance.sqrt()), sqrt(n(size))), approx(se)]),
     ));
     if let Some(critical) = dist::t_quantile(0.975, size - 1.0) {
         let half = critical * se;
         steps.extend(several(
-            &format!("The 95% interval of the mean, with the t that leaves 2.5% in each tail at {} degrees of freedom:", number_text(size - 1.0)),
+            &tr!("ex-mean-interval", df = number_text(size - 1.0)),
             vec![
                 equals(vec![sub(var("t"), text("0.975")), approx(critical)]),
-                equals(vec![text("Lower"), row(vec![n(mean), text("−"), n(critical), text("·"), n(se)]), approx(mean - half)]),
-                equals(vec![text("Upper"), row(vec![n(mean), text("+"), n(critical), text("·"), n(se)]), approx(mean + half)]),
+                equals(vec![text(&tr!("ex-word-lower-cap")), row(vec![n(mean), text("−"), n(critical), text("·"), n(se)]), approx(mean - half)]),
+                equals(vec![text(&tr!("ex-word-upper-cap")), row(vec![n(mean), text("+"), n(critical), text("·"), n(se)]), approx(mean + half)]),
             ],
         ));
     }
@@ -876,12 +883,7 @@ fn posthoc_steps(test: crate::PostHoc, stats: &[(f64, f64, f64)], mse: f64, df: 
             let q = crate::range::quantile(1.0 - alpha, k, df);
             if let Some(q) = q {
                 steps.push(step(
-                    &format!(
-                        "Tukey compares each pair with the studentized range distribution of {} groups and {} degrees of freedom, whose q leaves {} above it; divided by √2, it gives the intervals:",
-                        number_text(k),
-                        number_text(df),
-                        number_text(alpha)
-                    ),
+                    &tr!("ex-tukey", k = number_text(k), df = number_text(df), alpha = number_text(alpha)),
                     equals(vec![sub(var("q"), text(&number_text(1.0 - alpha))), approx(q)]),
                 ));
             }
@@ -890,21 +892,21 @@ fn posthoc_steps(test: crate::PostHoc, stats: &[(f64, f64, f64)], mse: f64, df: 
         crate::PostHoc::Bonferroni => {
             let t = dist::t_quantile(1.0 - alpha / (2.0 * m), df);
             steps.push(step(
-                &format!("Bonferroni makes {} comparisons, so each t test's significance is multiplied by {}, and the intervals use the t that leaves {} / (2 · {}) in each tail:", number_text(m), number_text(m), number_text(alpha), number_text(m)),
+                &tr!("ex-bonferroni", m = number_text(m), alpha = number_text(alpha)),
                 equals(vec![var("m"), frac(row(vec![var("k"), paren(row(vec![var("k"), text("−"), text("1")]))]), text("2")), n(m)]),
             ));
             if let Some(t) = t {
-                steps.push(step("That t:", equals(vec![sub(var("t"), text("crit")), approx(t)])));
+                steps.push(step(&tr!("ex-that-t"), equals(vec![sub(var("t"), text(&tr!("ex-word-crit"))), approx(t)])));
             }
             t
         }
     };
     steps.push(step(
-        "Every comparison uses the mean square within the groups:",
+        &tr!("ex-every-comparison-uses-the-mean-square-within-the-groups"),
         equals(vec![
             var("SE"),
             sqrt(row(vec![
-                sub(var("MS"), text("within")),
+                sub(var("MS"), text(&tr!("ex-word-within"))),
                 paren(row(vec![frac(text("1"), sub(var("n"), var("I"))), text("+"), frac(text("1"), sub(var("n"), var("J")))])),
             ])),
         ]),
@@ -939,16 +941,25 @@ fn posthoc_steps(test: crate::PostHoc, stats: &[(f64, f64, f64)], mse: f64, df: 
                     if let Some(p) = dist::t_sig(t, df) {
                         // A probability: at most 1.
                         let times = row(vec![n(m), text("·"), n(p)]);
-                        let times = if p * m > 1.0 { row(vec![text("min"), paren(row(vec![text("1"), text(","), times]))]) } else { times };
+                        let times =
+                            if p * m > 1.0 { row(vec![text(&tr!("ex-word-min")), paren(row(vec![text("1"), text(","), times]))]) } else { times };
                         maths.push(equals(vec![var("p"), times, approx((p * m).min(1.0))]));
                     }
                 }
             }
             if let Some(c) = critical {
-                maths.push(equals(vec![text("Lower"), row(vec![n(diff), text("−"), n(c), text("·"), n(se)]), approx(diff - c * se)]));
-                maths.push(equals(vec![text("Upper"), row(vec![n(diff), text("+"), n(c), text("·"), n(se)]), approx(diff + c * se)]));
+                maths.push(equals(vec![
+                    text(&tr!("ex-word-lower-cap")),
+                    row(vec![n(diff), text("−"), n(c), text("·"), n(se)]),
+                    approx(diff - c * se),
+                ]));
+                maths.push(equals(vec![
+                    text(&tr!("ex-word-upper-cap")),
+                    row(vec![n(diff), text("+"), n(c), text("·"), n(se)]),
+                    approx(diff + c * se),
+                ]));
             }
-            steps.extend(several(&format!("Groups {} and {}:", i + 1, j + 1), maths));
+            steps.extend(several(&tr!("ex-groups-pair", i = i + 1, j = j + 1), maths));
         }
     }
     steps
@@ -1019,21 +1030,14 @@ fn ties_step(ranked: &[(f64, f64, f64)], full: bool) -> (Step, f64) {
             n(total),
         ])
     };
-    let text_of = if tied.is_empty() {
-        "No values are tied, so there is no correction for ties:"
-    } else {
-        "The correction for ties, over the values that t cases share:"
-    };
-    (step(text_of, math), total)
+    let text_of = if tied.is_empty() { tr!("ex-no-ties") } else { tr!("ex-ties") };
+    (step(&text_of, math), total)
 }
 
 /// The significance of `z` from the standard normal distribution, two-tailed.
 fn z_significance(z: f64) -> Option<Step> {
     let p = crate::npar::two_sided(z)?;
-    Some(step(
-        "Its significance (two-tailed) is the probability of a z at least this far from 0 in the standard normal distribution:",
-        equals(vec![var("p"), approx(p)]),
-    ))
+    Some(step(&tr!("ex-its-significance-two-tailed-is-the-probability-of-a-z-at-lea"), equals(vec![var("p"), approx(p)])))
 }
 
 /// A sum of ranks, term by term, and the mean rank: the sum over the cases.
@@ -1062,16 +1066,8 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                     let data = crate::npar::group_values(ds, vi, gi, |g| g == *first || g == *second);
                     let ranked = ranked(&data.iter().map(|(x, w, _)| (*x, *w)).collect::<Vec<_>>());
                     let label = |g: f64| value_text(gvar, &mksigma_core::Value::Num(g));
-                    let mut steps = rank_steps(
-                        &format!(
-                            "Both groups ({} = {} and {}) together, ranked from the smallest value:",
-                            gvar.display_name(),
-                            label(*first),
-                            label(*second)
-                        ),
-                        &ranked,
-                        full,
-                    );
+                    let mut steps =
+                        rank_steps(&tr!("ex-rank-both", group = gvar.display_name(), first = label(*first), second = label(*second)), &ranked, full);
                     let group_ranks =
                         |g: f64| data.iter().filter(|(_, _, gg)| *gg == g).map(|(x, w, _)| (rank_of(&ranked, *x), *w)).collect::<Vec<_>>();
                     let (r1_math, r1) = rank_sum(sub(var("R"), text("1")), sub(var("n"), text("1")), group_ranks(*first), full);
@@ -1080,13 +1076,13 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                     let (n1, n2) = (size(*first), size(*second));
                     let big_n = n1 + n2;
                     steps.extend(several(
-                        &format!("Each group's size, sum of ranks and mean rank: group 1 is {}, group 2 is {}:", label(*first), label(*second)),
+                        &tr!("ex-rank-groups-two", first = label(*first), second = label(*second)),
                         vec![r1_math, r2_math, equals(vec![var("N"), row(vec![n(n1), text("+"), n(n2)]), n(big_n)])],
                     ));
                     let u1 = r1 - n1 * (n1 + 1.0) / 2.0;
                     let u2 = n1 * n2 - u1;
                     steps.extend(several(
-                        "U counts the pairs, one case from each group, in which group 1's value is the higher; the test takes the smaller U:",
+                        &tr!("ex-u-counts-the-pairs-one-case-from-each-group-in-which-group-1"),
                         vec![
                             equals(vec![
                                 sub(var("U"), text("1")),
@@ -1111,14 +1107,14 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                     ));
                     let (u, w) = if u1 <= u2 { (u1, r1) } else { (u2, r2) };
                     steps.extend(several(
-                        "Mann-Whitney's U, and Wilcoxon's W, the sum of ranks of the group that U belongs to:",
+                        &tr!("ex-mann-whitney-s-u-and-wilcoxon-s-w-the-sum-of-ranks-of-the-gr"),
                         vec![equals(vec![var("U"), n(u)]), equals(vec![var("W"), n(w)])],
                     ));
                     let (ties, t) = ties_step(&ranked, full);
                     steps.push(ties);
                     let variance = n1 * n2 / (big_n * (big_n - 1.0)) * ((big_n.powi(3) - big_n) / 12.0 - t / 12.0);
                     steps.push(step(
-                        "U's variance, with the ties taken out:",
+                        &tr!("ex-u-s-variance-with-the-ties-taken-out"),
                         equals(vec![
                             sup(sub(var("σ"), var("U")), text("2")),
                             row(vec![
@@ -1146,7 +1142,7 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                     let z = (u - n1 * n2 / 2.0) / variance.sqrt();
                     if z.is_finite() {
                         steps.push(step(
-                            "z measures U's distance from its expected value, half the product of the groups' sizes, in standard deviations:",
+                            &tr!("ex-z-measures-u-s-distance-from-its-expected-value-half-the-pro"),
                             equals(vec![
                                 var("Z"),
                                 frac(
@@ -1159,7 +1155,7 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                         ));
                         steps.extend(z_significance(z));
                     }
-                    sections.push((format!("Mann-Whitney: {} by {}", variable.display_name(), gvar.display_name()), steps));
+                    sections.push((tr!("ex-heading-mann-whitney", variable = variable.display_name(), group = gvar.display_name()), steps));
                 }
             }
             NparTest::Wilcoxon { pairs } => {
@@ -1185,17 +1181,10 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                         short.extend(listed.iter().skip(count - 3).cloned());
                         listed = short;
                     }
-                    let mut steps = vec![step(
-                        &format!(
-                            "The differences, case by case ({} minus {}); those of 0 are ties and leave the test:",
-                            bvar.display_name(),
-                            avar.display_name()
-                        ),
-                        row(listed),
-                    )];
+                    let mut steps = vec![step(&tr!("ex-wilcoxon-differences", a = bvar.display_name(), b = avar.display_name()), row(listed))];
                     let nonzero: Vec<(f64, f64)> = rows.iter().map(|(x, y, w)| (y - x, *w)).filter(|(d, _)| *d != 0.0).collect();
                     let ranked = ranked(&nonzero.iter().map(|(d, w)| (d.abs(), *w)).collect::<Vec<_>>());
-                    steps.extend(rank_steps("The differences' sizes, ranked from the smallest:", &ranked, full));
+                    steps.extend(rank_steps(&tr!("ex-rank-sizes"), &ranked, full));
                     let side = |negative: bool| {
                         nonzero.iter().filter(|(d, _)| (*d < 0.0) == negative).map(|(d, w)| (rank_of(&ranked, d.abs()), *w)).collect::<Vec<_>>()
                     };
@@ -1204,19 +1193,19 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                     let big_n: f64 = nonzero.iter().map(|(_, w)| w).sum();
                     let zero: f64 = rows.iter().filter(|(x, y, _)| y == x).map(|(_, _, w)| w).sum();
                     steps.extend(several(
-                        "How many differences are negative and positive, their sums of ranks and mean ranks; then the ties, and all the cases:",
+                        &tr!("ex-how-many-differences-are-negative-and-positive-their-sums-of"),
                         vec![
                             neg_math,
                             pos_math,
-                            equals(vec![text("Ties"), n(zero)]),
-                            equals(vec![text("Total"), row(vec![n(big_n), text("+"), n(zero)]), n(big_n + zero)]),
+                            equals(vec![text(&tr!("ex-word-ties-cap")), n(zero)]),
+                            equals(vec![text(&tr!("ex-word-total-cap")), row(vec![n(big_n), text("+"), n(zero)]), n(big_n + zero)]),
                         ],
                     ));
                     let (ties, t) = ties_step(&ranked, full);
                     steps.push(ties);
                     let variance = big_n * (big_n + 1.0) * (2.0 * big_n + 1.0) / 24.0 - t / 48.0;
                     steps.push(step(
-                        &format!("The variance of the smaller sum, over the n = {} differences that aren't 0:", number_text(big_n)),
+                        &tr!("ex-wilcoxon-variance", n = number_text(big_n)),
                         equals(vec![
                             sup(var("σ"), text("2")),
                             row(vec![
@@ -1243,12 +1232,12 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                     let z = (smaller - big_n * (big_n + 1.0) / 4.0) / variance.sqrt();
                     if z.is_finite() {
                         steps.push(step(
-                            "z measures the smaller sum's distance from its expected value, n(n + 1) / 4:",
+                            &tr!("ex-z-measures-the-smaller-sum-s-distance-from-its-expected-valu"),
                             equals(vec![
                                 var("Z"),
                                 frac(
                                     row(vec![
-                                        text("min"),
+                                        text(&tr!("ex-word-min")),
                                         paren(row(vec![sub(var("T"), text("−")), text(","), sub(var("T"), text("+"))])),
                                         text("−"),
                                         frac(row(vec![var("n"), paren(row(vec![var("n"), text("+"), text("1")]))]), text("4")),
@@ -1261,7 +1250,7 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                         ));
                         steps.extend(z_significance(z));
                     }
-                    sections.push((format!("Wilcoxon: {} − {}", bvar.display_name(), avar.display_name()), steps));
+                    sections.push((tr!("ex-heading-wilcoxon", a = bvar.display_name(), b = avar.display_name()), steps));
                 }
             }
             NparTest::KruskalWallis { variables, group, low, high } => {
@@ -1271,12 +1260,7 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                     let data = crate::npar::group_values(ds, vi, gi, |g| *low <= g && g <= *high);
                     let ranked = ranked(&data.iter().map(|(x, w, _)| (*x, *w)).collect::<Vec<_>>());
                     let mut steps = rank_steps(
-                        &format!(
-                            "Every group ({} from {} to {}) together, ranked from the smallest value:",
-                            gvar.display_name(),
-                            number_text(*low),
-                            number_text(*high)
-                        ),
+                        &tr!("ex-rank-every", group = gvar.display_name(), low = number_text(*low), high = number_text(*high)),
                         &ranked,
                         full,
                     );
@@ -1293,15 +1277,18 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                         sums.push(math);
                         groups.push((size, total));
                     }
-                    let names: Vec<String> =
-                        levels.iter().enumerate().map(|(k, l)| format!("{} is {}", k + 1, value_text(gvar, &mksigma_core::Value::Num(*l)))).collect();
+                    let names: Vec<String> = levels
+                        .iter()
+                        .enumerate()
+                        .map(|(k, l)| tr!("ex-group-label", n = k + 1, value = value_text(gvar, &mksigma_core::Value::Num(*l))))
+                        .collect();
                     let big_n: f64 = groups.iter().map(|(s, _)| s).sum();
                     sums.push(equals(vec![var("N"), plus(groups.iter().map(|(s, _)| n(*s)).collect()), n(big_n)]));
-                    steps.extend(several(&format!("Each group's size, sum of ranks and mean rank (group {}):", names.join(", ")), sums));
+                    steps.extend(several(&tr!("ex-rank-groups", groups = names.join(", ")), sums));
                     let inner: f64 = groups.iter().map(|(s, r)| r * r / s).sum();
                     let raw = 12.0 / (big_n * (big_n + 1.0)) * inner - 3.0 * (big_n + 1.0);
                     steps.push(step(
-                        "H before the correction for ties:",
+                        &tr!("ex-h-before-the-correction-for-ties"),
                         equals(vec![
                             var("H"),
                             row(vec![
@@ -1328,7 +1315,7 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                     let h = raw / correction;
                     let df = levels.len() as f64 - 1.0;
                     steps.push(step(
-                        "Corrected for ties:",
+                        &tr!("ex-corrected-for-ties"),
                         equals(vec![
                             var("H"),
                             frac(var("H"), row(vec![text("1"), text("−"), frac(var("T"), row(vec![sup(var("N"), text("3")), text("−"), var("N")]))])),
@@ -1337,20 +1324,17 @@ pub fn npar_tests(ds: &Dataset, tests: &[crate::NparTest], full: bool) -> Result
                         ]),
                     ));
                     if h.is_finite() && df >= 1.0 {
-                        steps.push(step("Its degrees of freedom, the groups minus 1:", equals(vec![var("df"), n(df)])));
+                        steps.push(step(&tr!("ex-its-degrees-of-freedom-the-groups-minus-1"), equals(vec![var("df"), n(df)])));
                         if let Some(p) = dist::chi_square_sig(h, df) {
-                            steps.push(step(
-                                &format!("Its significance, from the chi-square distribution with {} degrees of freedom:", number_text(df)),
-                                equals(vec![var("p"), approx(p)]),
-                            ));
+                            steps.push(step(&tr!("ex-chi-significance-df", df = number_text(df)), equals(vec![var("p"), approx(p)])));
                         }
                     }
-                    sections.push((format!("Kruskal-Wallis: {} by {}", variable.display_name(), gvar.display_name()), steps));
+                    sections.push((tr!("ex-heading-kruskal-wallis", variable = variable.display_name(), group = gvar.display_name()), steps));
                 }
             }
         }
     }
-    Ok(Explanation { title: "NPar Tests".into(), sections })
+    Ok(Explanation { title: tr!("ex-title-npar-tests"), sections })
 }
 
 /// `EXAMINE`'s Descriptives for each variable (and group of `by`): the mean with its standard
@@ -1366,14 +1350,16 @@ pub fn examine(ds: &Dataset, variables: &[String], by: Option<&str>, full: bool)
         let (groups, _) = crate::examine::groups_of(ds, vi, by.map(|(bi, _)| bi));
         for (key, values) in groups {
             let heading = match (&key, by) {
-                (Some(v), Some((_, bvar))) => format!("{}, {} = {}", variable.display_name(), bvar.display_name(), value_text(bvar, v)),
+                (Some(v), Some((_, bvar))) => {
+                    tr!("ex-heading-group", variable = variable.display_name(), group = bvar.display_name(), value = value_text(bvar, v))
+                }
                 _ => variable.display_name().to_string(),
             };
             let sorted = crate::examine::Sorted::new(values);
             sections.push((heading, examine_steps(&sorted, w, full)));
         }
     }
-    Ok(Explanation { title: "Explore".into(), sections })
+    Ok(Explanation { title: tr!("ex-title-explore"), sections })
 }
 
 fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<Step> {
@@ -1383,7 +1369,7 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
     if let Some(variance) = variance {
         let se = (variance / big_w).sqrt();
         steps.push(step(
-            "The standard error of the mean:",
+            &tr!("ex-the-standard-error-of-the-mean"),
             equals(vec![var("SE"), frac(var("s"), sqrt(var("n"))), frac(n(variance.sqrt()), sqrt(n(big_w))), approx(se)]),
         ));
         if let Some(critical) = dist::t_quantile(0.975, big_w - 1.0) {
@@ -1395,8 +1381,8 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
                 ),
                 vec![
                     equals(vec![sub(var("t"), text("0.975")), approx(critical)]),
-                    equals(vec![text("Lower"), row(vec![n(mean), text("−"), n(critical), text("·"), n(se)]), approx(mean - half)]),
-                    equals(vec![text("Upper"), row(vec![n(mean), text("+"), n(critical), text("·"), n(se)]), approx(mean + half)]),
+                    equals(vec![text(&tr!("ex-word-lower-cap")), row(vec![n(mean), text("−"), n(critical), text("·"), n(se)]), approx(mean - half)]),
+                    equals(vec![text(&tr!("ex-word-upper-cap")), row(vec![n(mean), text("+"), n(critical), text("·"), n(se)]), approx(mean + half)]),
                 ],
             ));
         }
@@ -1417,11 +1403,11 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
     let kept_w: f64 = kept.iter().map(|(_, k)| k).sum();
     let kept_sum: f64 = kept.iter().map(|(x, k)| x * k).sum();
     steps.push(step(
-        "The 5% trimmed mean leaves out 5% of the cases at each end; a case at a cut counts for the part of it inside:",
+        &tr!("ex-the-5-trimmed-mean-leaves-out-5-of-the-cases-at-each-end-a-c"),
         equals(vec![var("c"), row(vec![text("0.05"), text("·"), n(big_w)]), n(cut)]),
     ));
     steps.push(step(
-        "What remains, each value times the part of it kept, over the part kept:",
+        &tr!("ex-what-remains-each-value-times-the-part-of-it-kept-over-the-p"),
         equals(vec![
             frac(
                 terms(kept.iter().map(|(x, k)| row(vec![n(*k), text("·"), val(*x)])).collect(), full),
@@ -1442,22 +1428,13 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
             n(pos),
         ]);
         if pos <= 1.0 || pos >= big_w {
-            let end = if pos <= 1.0 { "the smallest" } else { "the largest" };
-            steps.extend(several(
-                &format!("The {label} sits at position (W + 1)p, at or beyond the end, so it is {end} value:"),
-                vec![at, equals(vec![name, n(value)])],
-            ));
+            let text_of = if pos <= 1.0 { tr!("ex-percentile-first", what = label) } else { tr!("ex-percentile-last", what = label) };
+            steps.extend(several(&text_of, vec![at, equals(vec![name, n(value)])]));
         } else {
             let k = pos.floor();
             let (a, b) = (sorted.at_rank(k), sorted.at_rank(k + 1.0));
             steps.extend(several(
-                &format!(
-                    "The {label} sits at position (W + 1)p, between the values ranked {} and {}, {} and {}:",
-                    number_text(k),
-                    number_text(k + 1.0),
-                    number_text(a),
-                    number_text(b)
-                ),
+                &tr!("ex-percentile-between", what = label, k = number_text(k), next = number_text(k + 1.0), a = number_text(a), b = number_text(b)),
                 vec![
                     at,
                     equals(vec![
@@ -1470,11 +1447,11 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
         }
         value
     };
-    percentile(0.5, text("Median"), "median", &mut steps);
-    let q1 = percentile(0.25, sub(var("Q"), text("1")), "first quartile", &mut steps);
-    let q3 = percentile(0.75, sub(var("Q"), text("3")), "third quartile", &mut steps);
+    percentile(0.5, text(&tr!("ex-word-median-cap")), &tr!("ex-median"), &mut steps);
+    let q1 = percentile(0.25, sub(var("Q"), text("1")), &tr!("ex-first-quartile"), &mut steps);
+    let q3 = percentile(0.75, sub(var("Q"), text("3")), &tr!("ex-third-quartile"), &mut steps);
     steps.push(step(
-        "The interquartile range:",
+        &tr!("ex-the-interquartile-range"),
         equals(vec![
             text("IQR"),
             row(vec![sub(var("Q"), text("3")), text("−"), sub(var("Q"), text("1"))]),
@@ -1484,7 +1461,10 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
     ));
     steps.extend(extremes(&sorted.0));
     if let (Some(lo), Some(hi)) = (sorted.0.first(), sorted.0.last()) {
-        steps.push(step("The range:", equals(vec![text("Range"), row(vec![n(hi.0), text("−"), val(lo.0)]), approx(hi.0 - lo.0)])));
+        steps.push(step(
+            &tr!("ex-the-range"),
+            equals(vec![text(&tr!("ex-word-range-cap")), row(vec![n(hi.0), text("−"), val(lo.0)]), approx(hi.0 - lo.0)]),
+        ));
     }
 
     // Skewness and kurtosis: the bias-corrected G1 and G2, from the third and fourth moments.
@@ -1495,12 +1475,12 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
             sorted.0.iter().map(|(x, wi)| weighted_term(w, *wi, sup(paren(row(vec![val(*x), text("−"), n(mean)])), text("3")))).collect();
         let m3: f64 = sorted.0.iter().map(|(x, wi)| wi * (x - mean).powi(3)).sum();
         steps.push(step(
-            "The cubed deviations from the mean, added up:",
+            &tr!("ex-the-cubed-deviations-from-the-mean-added-up"),
             equals(vec![sum(None, None, sup(paren(row(vec![indexed("x", "i"), text("−"), bar(var("x"))])), text("3"))), terms(cubes, full), n(m3)]),
         ));
         let g1 = big_w / ((big_w - 1.0) * (big_w - 2.0)) * m3 / sd.powi(3);
         steps.push(step(
-            "The skewness:",
+            &tr!("ex-the-skewness"),
             equals(vec![
                 sub(var("G"), text("1")),
                 row(vec![
@@ -1514,7 +1494,7 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
         ));
         let se1 = (6.0 * big_w * (big_w - 1.0) / ((big_w - 2.0) * (big_w + 1.0) * (big_w + 3.0))).sqrt();
         steps.push(step(
-            "Its standard error:",
+            &tr!("ex-its-standard-error"),
             equals(vec![
                 sub(var("SE"), sub(var("G"), text("1"))),
                 sqrt(frac(
@@ -1537,7 +1517,7 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
                 sorted.0.iter().map(|(x, wi)| weighted_term(w, *wi, sup(paren(row(vec![val(*x), text("−"), n(mean)])), text("4")))).collect();
             let m4: f64 = sorted.0.iter().map(|(x, wi)| wi * (x - mean).powi(4)).sum();
             steps.push(step(
-                "The fourth powers of the deviations, added up:",
+                &tr!("ex-the-fourth-powers-of-the-deviations-added-up"),
                 equals(vec![
                     sum(None, None, sup(paren(row(vec![indexed("x", "i"), text("−"), bar(var("x"))])), text("4"))),
                     terms(fourths, full),
@@ -1548,7 +1528,7 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
             let b = 3.0 * (big_w - 1.0).powi(2) / ((big_w - 2.0) * (big_w - 3.0));
             let g2 = a * m4 / sd.powi(4) - b;
             steps.push(step(
-                "The kurtosis:",
+                &tr!("ex-the-kurtosis"),
                 equals(vec![
                     sub(var("G"), text("2")),
                     row(vec![
@@ -1577,7 +1557,7 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
             ));
             let se2 = (4.0 * (big_w * big_w - 1.0) * se1 * se1 / ((big_w - 3.0) * (big_w + 5.0))).sqrt();
             steps.push(step(
-                "Its standard error:",
+                &tr!("ex-its-standard-error"),
                 equals(vec![
                     sub(var("SE"), sub(var("G"), text("2"))),
                     sqrt(frac(
@@ -1619,23 +1599,20 @@ fn gauss_jordan_steps(m: &[Vec<f64>], steps: &mut Vec<Step>) -> Option<Vec<Vec<f
     let mut a: Vec<Vec<f64>> = m.to_vec();
     let mut inv: Vec<Vec<f64>> = (0..size).map(|i| (0..size).map(|j| if i == j { 1.0 } else { 0.0 }).collect()).collect();
     let scale: Vec<f64> = (0..size).map(|i| m.get(i).and_then(|r| r.get(i)).copied().unwrap_or(0.0).abs()).collect();
-    steps.push(step(
-        "Its inverse, by Gauss–Jordan elimination: beside it the identity matrix, then row operations until the left side is the identity; the right side is then the inverse:",
-        side_by_side(&a, &inv),
-    ));
+    steps.push(step(&tr!("ex-its-inverse-by-gauss-jordan-elimination-beside-it-the-identi"), side_by_side(&a, &inv)));
     let at = |a: &Vec<Vec<f64>>, r: usize, c: usize| a.get(r).and_then(|row| row.get(c)).copied().unwrap_or(0.0);
     for col in 0..size {
         let pivot_row = (col..size).max_by(|&x, &y| at(&a, x, col).abs().total_cmp(&at(&a, y, col).abs()))?;
         let pivot = at(&a, pivot_row, col);
         if pivot.abs() <= 1e-10 * scale.get(col).copied().unwrap_or(0.0).max(f64::MIN_POSITIVE) {
-            steps.push(say("A pivot is 0: a predictor is a combination of the others, and there is no inverse."));
+            steps.push(say(&tr!("ex-a-pivot-is-0-a-predictor-is-a-combination-of-the-others-and")));
             return None;
         }
         let mut what = Vec::new();
         if pivot_row != col {
             a.swap(col, pivot_row);
             inv.swap(col, pivot_row);
-            what.push(format!("swap rows {} and {} (the larger pivot first)", col + 1, pivot_row + 1));
+            what.push(tr!("ex-gj-swap", a = col + 1, b = pivot_row + 1));
         }
         for j in 0..size {
             if let Some(x) = a.get_mut(col).and_then(|r| r.get_mut(j)) {
@@ -1645,7 +1622,7 @@ fn gauss_jordan_steps(m: &[Vec<f64>], steps: &mut Vec<Step>) -> Option<Vec<Vec<f
                 *x /= pivot;
             }
         }
-        what.push(format!("divide row {} by {}", col + 1, number_text(pivot)));
+        what.push(tr!("ex-gj-divide", row = col + 1, by = number_text(pivot)));
         for row in 0..size {
             let factor = at(&a, row, col);
             if row == col || factor == 0.0 {
@@ -1660,9 +1637,9 @@ fn gauss_jordan_steps(m: &[Vec<f64>], steps: &mut Vec<Step>) -> Option<Vec<Vec<f
                     *x -= factor * ic;
                 }
             }
-            what.push(format!("subtract {} times row {} from row {}", number_text(factor), col + 1, row + 1));
+            what.push(tr!("ex-gj-subtract", factor = number_text(factor), from = col + 1, row = row + 1));
         }
-        steps.push(step(&format!("Column {}: {}:", col + 1, what.join("; ")), side_by_side(&a, &inv)));
+        steps.push(step(&tr!("ex-gj-column", n = col + 1, what = what.join("; ")), side_by_side(&a, &inv)));
     }
     Some(inv)
 }
@@ -1688,20 +1665,19 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
     let w = weighted(ds);
     let mut steps = Vec::new();
     let big_n: f64 = cases.iter().map(|(_, _, w)| w).sum();
-    let legend: Vec<String> = xs.iter().enumerate().map(|(j, (_, v))| format!("x{} is {}", j + 1, v.display_name())).collect();
+    let legend: Vec<String> = xs.iter().enumerate().map(|(j, (_, v))| tr!("ex-x-is", n = j + 1, name = v.display_name())).collect();
     steps.push(step(
-        &format!(
-            "The cases valid on y ({}) and on every predictor ({}){}:",
-            yvar.display_name(),
-            legend.join(", "),
-            if w { ", weighted" } else { "" }
-        ),
+        &if w {
+            tr!("ex-regression-cases-weighted", y = yvar.display_name(), predictors = legend.join(", "))
+        } else {
+            tr!("ex-regression-cases", y = yvar.display_name(), predictors = legend.join(", "))
+        },
         equals(vec![var("N"), n(big_n)]),
     ));
     let df_residual = big_n - p as f64 - 1.0;
     if p == 0 || df_residual <= 0.0 {
-        steps.push(say("It needs more cases than predictors plus one."));
-        return Ok(Explanation { title: "Regression".into(), sections: vec![("The model".into(), steps)] });
+        steps.push(say(&tr!("ex-it-needs-more-cases-than-predictors-plus-one")));
+        return Ok(Explanation { title: tr!("ex-title-regression"), sections: vec![(tr!("ex-the-model"), steps)] });
     }
     let x_name = |j: usize| if p == 1 { var("x") } else { sub(var("x"), text(&(j + 1).to_string())) };
     let column = |j: usize| cases.iter().map(|(_, x, w)| (x.get(j).copied().unwrap_or(0.0), *w)).collect::<Vec<_>>();
@@ -1721,8 +1697,8 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
         means.push(math);
         mx.push(m);
     }
-    steps.extend(several("The means:", means));
-    let mut sections = vec![("The data".to_string(), steps)];
+    steps.extend(several(&tr!("ex-the-means"), means));
+    let mut sections = vec![(tr!("ex-the-data"), steps)];
 
     // The cross-products of the deviations.
     let mut steps = Vec::new();
@@ -1762,36 +1738,36 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
     }
     let (syy_math, syy) = product(&ys, my, &ys, my, sname("y", "y"));
     maths.push(syy_math);
-    steps.extend(several("The sums of the products of the deviations from the means, for each pair of variables:", maths));
-    sections.push(("Sums of products".into(), steps));
+    steps.extend(several(&tr!("ex-the-sums-of-the-products-of-the-deviations-from-the-means-fo"), maths));
+    sections.push((tr!("ex-sums-of-products"), steps));
 
     // The slopes.
     let mut steps = Vec::new();
     let inverse = if p == 1 {
         let s = at(&sxx, 0, 0);
         if s <= 0.0 {
-            steps.push(say("The predictor doesn't vary, so there is no slope."));
-            sections.push(("The coefficients".into(), steps));
-            return Ok(Explanation { title: "Regression".into(), sections });
+            steps.push(say(&tr!("ex-the-predictor-doesn-t-vary-so-there-is-no-slope")));
+            sections.push((tr!("ex-the-coefficients"), steps));
+            return Ok(Explanation { title: tr!("ex-title-regression"), sections });
         }
         steps.push(step(
-            "The slope divides the products of x and y by the squares of x:",
+            &tr!("ex-the-slope-divides-the-products-of-x-and-y-by-the-squares-of"),
             equals(vec![var("b"), frac(sname("x", "y"), sname("x", "x")), frac(n(item(&sxy, 0)), n(s)), approx(item(&sxy, 0) / s)]),
         ));
         vec![vec![1.0 / s]]
     } else {
         steps.extend(several(
-            "The slopes solve the normal equations, Sxx b = Sxy, with these matrices:",
+            &tr!("ex-the-slopes-solve-the-normal-equations-sxx-b-sxy-with-these-m"),
             vec![
                 equals(vec![sub(var("S"), text("xx")), matrix(numbers(&sxx))]),
                 equals(vec![sub(var("S"), text("xy")), matrix(sxy.iter().map(|x| vec![n(*x)]).collect())]),
             ],
         ));
         let Some(inverse) = gauss_jordan_steps(&sxx, &mut steps) else {
-            sections.push(("The coefficients".into(), steps));
-            return Ok(Explanation { title: "Regression".into(), sections });
+            sections.push((tr!("ex-the-coefficients"), steps));
+            return Ok(Explanation { title: tr!("ex-title-regression"), sections });
         };
-        steps.push(step("The inverse:", equals(vec![sup(sub(var("S"), text("xx")), text("−1")), matrix(numbers(&inverse))])));
+        steps.push(step(&tr!("ex-the-inverse"), equals(vec![sup(sub(var("S"), text("xx")), text("−1")), matrix(numbers(&inverse))])));
         let mut maths = Vec::new();
         for (j, row_of) in inverse.iter().enumerate() {
             let b: f64 = row_of.iter().zip(&sxy).map(|(a, s)| a * s).sum();
@@ -1801,14 +1777,14 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
                 approx(b),
             ]));
         }
-        steps.extend(several("Each slope is a row of the inverse times Sxy:", maths));
+        steps.extend(several(&tr!("ex-each-slope-is-a-row-of-the-inverse-times-sxy"), maths));
         inverse
     };
     let b: Vec<f64> = (0..p).map(|j| (0..p).map(|k| at(&inverse, j, k) * item(&sxy, k)).sum()).collect();
     let b_name = |j: usize| if p == 1 { var("b") } else { sub(var("b"), text(&(j + 1).to_string())) };
     let constant = my - b.iter().zip(&mx).map(|(b, m)| b * m).sum::<f64>();
     steps.push(step(
-        "The constant puts the line through the means:",
+        &tr!("ex-the-constant-puts-the-line-through-the-means"),
         equals(vec![
             var("a"),
             row(vec![bar(var("y")), text("−"), plus((0..p).map(|j| row(vec![b_name(j), bar(x_name(j))])).collect())]),
@@ -1816,80 +1792,85 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
             approx(constant),
         ]),
     ));
-    sections.push(("The coefficients".into(), steps));
+    sections.push((tr!("ex-the-coefficients"), steps));
 
     // The analysis of variance and the model summary.
     let mut steps = Vec::new();
     let ss_regression: f64 = b.iter().zip(&sxy).map(|(b, s)| b * s).sum();
     let ss_residual = (syy - ss_regression).max(0.0);
     steps.extend(several(
-        "The sum of squares the model explains, the rest left in the residuals, and the total:",
+        &tr!("ex-the-sum-of-squares-the-model-explains-the-rest-left-in-the-r"),
         vec![
             equals(vec![
-                sub(var("SS"), text("regression")),
+                sub(var("SS"), text(&tr!("ex-word-regression"))),
                 sum(None, None, row(vec![indexed("b", "j"), sub(var("S"), var("jy"))])),
                 plus((0..p).map(|j| row(vec![val(item(&b, j)), text("·"), val(item(&sxy, j))])).collect()),
                 approx(ss_regression),
             ]),
             equals(vec![
-                sub(var("SS"), text("residual")),
-                row(vec![sname("y", "y"), text("−"), sub(var("SS"), text("regression"))]),
+                sub(var("SS"), text(&tr!("ex-word-residual"))),
+                row(vec![sname("y", "y"), text("−"), sub(var("SS"), text(&tr!("ex-word-regression")))]),
                 row(vec![n(syy), text("−"), n(ss_regression)]),
                 approx(ss_residual),
             ]),
-            equals(vec![sub(var("SS"), text("total")), sname("y", "y"), approx(syy)]),
+            equals(vec![sub(var("SS"), text(&tr!("ex-word-total"))), sname("y", "y"), approx(syy)]),
         ],
     ));
     let (df_regression, df_total) = (p as f64, big_n - 1.0);
     let (ms_regression, ms_residual) = (ss_regression / df_regression, ss_residual / df_residual);
     steps.extend(several(
-        "Their degrees of freedom (predictors; cases minus predictors minus 1) and mean squares:",
+        &tr!("ex-their-degrees-of-freedom-predictors-cases-minus-predictors-m"),
         vec![
-            equals(vec![sub(var("df"), text("regression")), n(df_regression)]),
-            equals(vec![sub(var("df"), text("residual")), row(vec![n(big_n), text("−"), n(df_regression), text("−"), text("1")]), n(df_residual)]),
-            equals(vec![sub(var("MS"), text("regression")), frac(n(ss_regression), n(df_regression)), approx(ms_regression)]),
-            equals(vec![sub(var("MS"), text("residual")), frac(n(ss_residual), n(df_residual)), approx(ms_residual)]),
+            equals(vec![sub(var("df"), text(&tr!("ex-word-regression"))), n(df_regression)]),
+            equals(vec![
+                sub(var("df"), text(&tr!("ex-word-residual"))),
+                row(vec![n(big_n), text("−"), n(df_regression), text("−"), text("1")]),
+                n(df_residual),
+            ]),
+            equals(vec![sub(var("MS"), text(&tr!("ex-word-regression"))), frac(n(ss_regression), n(df_regression)), approx(ms_regression)]),
+            equals(vec![sub(var("MS"), text(&tr!("ex-word-residual"))), frac(n(ss_residual), n(df_residual)), approx(ms_residual)]),
         ],
     ));
     let f = ms_regression / ms_residual;
-    steps.push(step("F compares them:", equals(vec![var("F"), frac(n(ms_regression), n(ms_residual)), approx(f)])));
+    steps.push(step(&tr!("ex-f-compares-them"), equals(vec![var("F"), frac(n(ms_regression), n(ms_residual)), approx(f)])));
     if let Some(sig) = dist::f_sig(f, df_regression, df_residual) {
         steps.push(step(
-            &format!(
-                "Its significance, from the F distribution with {} and {} degrees of freedom:",
-                number_text(df_regression),
-                number_text(df_residual)
-            ),
+            &tr!("ex-f-significance", df1 = number_text(df_regression), df2 = number_text(df_residual)),
             equals(vec![var("p"), approx(sig)]),
         ));
     }
     let r2 = if syy > 0.0 { ss_regression / syy } else { 0.0 };
     let adjusted = 1.0 - (1.0 - r2) * df_total / df_residual;
     steps.extend(several(
-        "The share of the variance the model explains, its square root, the share adjusted for the number of predictors, and the residuals' standard deviation:",
+        &tr!("ex-the-share-of-the-variance-the-model-explains-its-square-root"),
         vec![
-            equals(vec![sup(var("R"), text("2")), frac(sub(var("SS"), text("regression")), sub(var("SS"), text("total"))), frac(n(ss_regression), n(syy)), approx(r2)]),
+            equals(vec![
+                sup(var("R"), text("2")),
+                frac(sub(var("SS"), text(&tr!("ex-word-regression"))), sub(var("SS"), text(&tr!("ex-word-total")))),
+                frac(n(ss_regression), n(syy)),
+                approx(r2),
+            ]),
             equals(vec![var("R"), sqrt(n(r2)), approx(r2.sqrt())]),
             equals(vec![
-                sup(sub(var("R"), text("adj")), text("2")),
+                sup(sub(var("R"), text(&tr!("ex-word-adj"))), text("2")),
                 row(vec![text("1"), text("−"), paren(row(vec![text("1"), text("−"), n(r2)])), text("·"), frac(n(df_total), n(df_residual))]),
                 approx(adjusted),
             ]),
             equals(vec![text("SE of the estimate"), sqrt(n(ms_residual)), approx(ms_residual.sqrt())]),
         ],
     ));
-    sections.push(("The analysis of variance and the model summary".into(), steps));
+    sections.push((tr!("ex-the-analysis-of-variance-and-the-model-summary"), steps));
 
     // Each coefficient.
     let mut steps = Vec::new();
     let t_crit = options.ci.and_then(|level| dist::t_quantile(0.5 + level / 2.0, df_residual));
     if let (Some(level), Some(tc)) = (options.ci, t_crit) {
         steps.push(step(
-            &format!(
-                "For the {}% intervals, the t that leaves {}% in each tail at {} degrees of freedom:",
-                number_text(level * 100.0),
-                number_text((1.0 - level) / 2.0 * 100.0),
-                number_text(df_residual)
+            &tr!(
+                "ex-intervals-t",
+                level = number_text(level * 100.0),
+                tail = number_text((1.0 - level) / 2.0 * 100.0),
+                df = number_text(df_residual)
             ),
             equals(vec![sub(var("t"), num(0.5 + level / 2.0, 4)), approx(tc)]),
         ));
@@ -1903,8 +1884,16 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
         }
         maths.extend(extra);
         if let Some(tc) = t_crit {
-            maths.push(equals(vec![text("Lower"), row(vec![n(value), text("−"), n(tc), text("·"), n(se)]), approx(value - tc * se)]));
-            maths.push(equals(vec![text("Upper"), row(vec![n(value), text("+"), n(tc), text("·"), n(se)]), approx(value + tc * se)]));
+            maths.push(equals(vec![
+                text(&tr!("ex-word-lower-cap")),
+                row(vec![n(value), text("−"), n(tc), text("·"), n(se)]),
+                approx(value - tc * se),
+            ]));
+            maths.push(equals(vec![
+                text(&tr!("ex-word-upper-cap")),
+                row(vec![n(value), text("+"), n(tc), text("·"), n(se)]),
+                approx(value + tc * se),
+            ]));
         }
         maths
     };
@@ -1916,12 +1905,12 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
         row(vec![sup(bar(var("x")), text("T")), sup(sub(var("S"), text("xx")), text("−1")), bar(var("x"))])
     };
     steps.extend(several(
-        &format!("The constant, a = {}: its standard error, from the residuals' mean square and the means of the predictors:", number_text(constant)),
+        &tr!("ex-constant-se", a = number_text(constant)),
         coefficient(
             var("a"),
             constant,
             vec![
-                sqrt(row(vec![sub(var("MS"), text("residual")), paren(row(vec![frac(text("1"), var("N")), text("+"), quad_math]))])),
+                sqrt(row(vec![sub(var("MS"), text(&tr!("ex-word-residual"))), paren(row(vec![frac(text("1"), var("N")), text("+"), quad_math]))])),
                 sqrt(row(vec![n(ms_residual), text("·"), paren(row(vec![frac(text("1"), n(big_n)), text("+"), n(quad)]))])),
             ],
             se_constant,
@@ -1939,22 +1928,19 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
             sub(paren(sup(sub(var("S"), text("xx")), text("−1"))), text(&format!("{}{}", j + 1, j + 1)))
         };
         let beta_math = equals(vec![
-            text("Beta"),
+            text(&tr!("ex-word-beta-cap")),
             row(vec![b_name(j), text("·"), frac(sub(var("s"), x_name(j)), sub(var("s"), var("y")))]),
             row(vec![val(item(&b, j)), text("·"), frac(sqrt(frac(n(at(&sxx, j, j)), n(df_total))), sqrt(frac(n(syy), n(df_total))))]),
             approx(beta),
         ]);
         let name = xs.get(j).map_or(String::new(), |(_, v)| v.display_name().to_string());
         steps.extend(several(
-            &format!(
-                "{name}, b = {}: its standard error from the inverse's diagonal, t, significance, and the beta in standard deviations:",
-                number_text(item(&b, j))
-            ),
+            &tr!("ex-coefficient-se", name = name.as_str(), b = number_text(item(&b, j))),
             coefficient(
                 b_name(j),
                 item(&b, j),
                 vec![
-                    sqrt(row(vec![sub(var("MS"), text("residual")), text("·"), diagonal])),
+                    sqrt(row(vec![sub(var("MS"), text(&tr!("ex-word-residual"))), text("·"), diagonal])),
                     sqrt(row(vec![n(ms_residual), text("·"), n(at(&inverse, j, j))])),
                 ],
                 se,
@@ -1962,8 +1948,8 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
             ),
         ));
     }
-    sections.push(("Each coefficient".into(), steps));
-    Ok(Explanation { title: "Regression".into(), sections })
+    sections.push((tr!("ex-each-coefficient"), steps));
+    Ok(Explanation { title: tr!("ex-title-regression"), sections })
 }
 
 /// `CROSSTABS`' chi-square tests for each row × column pair: the counts and their totals, the
@@ -1977,11 +1963,13 @@ pub fn crosstabs(ds: &Dataset, rows: &[String], columns: &[String], full: bool) 
         for column_name in columns {
             let (ci, column_var) = lookup(column_name)?;
             let counts = crate::crosstabs::count(ds, ri, ci);
-            sections
-                .push((format!("{} * {}", row_var.display_name(), column_var.display_name()), chi_square_steps(row_var, column_var, &counts, full)));
+            sections.push((
+                tr!("ex-heading-crosstab", rows = row_var.display_name(), columns = column_var.display_name()),
+                chi_square_steps(row_var, column_var, &counts, full),
+            ));
         }
     }
-    Ok(Explanation { title: "Crosstabs".into(), sections })
+    Ok(Explanation { title: tr!("ex-title-crosstabs"), sections })
 }
 
 fn chi_square_steps(
@@ -1994,13 +1982,9 @@ fn chi_square_steps(
     let labels = |var: &mksigma_core::Variable, values: &[mksigma_core::Value]| {
         values.iter().enumerate().map(|(k, v)| format!("{} = {}", k + 1, value_text(var, v))).collect::<Vec<_>>().join(", ")
     };
-    let mut steps = vec![say(&format!(
-        "The cases valid on both variables, counted in each cell (O; weighted counts are rounded to whole numbers). Rows: {}; columns: {}.",
-        labels(row_var, &counts.rows),
-        labels(column_var, &counts.columns),
-    ))];
+    let mut steps = vec![say(&tr!("ex-crosstab-cases", rows = labels(row_var, &counts.rows), columns = labels(column_var, &counts.columns)))];
     if nr < 2 || nc < 2 {
-        steps.push(say("One of the variables has a single value here, so there are no chi-square tests."));
+        steps.push(say(&tr!("ex-one-of-the-variables-has-a-single-value-here-so-there-are-no")));
         return steps;
     }
     let big_n = counts.total();
@@ -2010,14 +1994,14 @@ fn chi_square_steps(
             equals(vec![sub(var("R"), text(&(r + 1).to_string())), plus((0..nc).map(|c| n(counts.get(r, c))).collect()), n(counts.row_total(r))])
         })
         .collect();
-    steps.extend(several("Each row's total adds its counts:", row_totals));
+    steps.extend(several(&tr!("ex-each-row-s-total-adds-its-counts"), row_totals));
     let column_totals: Vec<Math> = (0..nc)
         .map(|c| {
             equals(vec![sub(var("C"), text(&(c + 1).to_string())), plus((0..nr).map(|r| n(counts.get(r, c))).collect()), n(counts.column_total(c))])
         })
         .collect();
-    steps.extend(several("And each column's:", column_totals));
-    steps.push(step("The total:", equals(vec![var("N"), plus((0..nr).map(|r| n(counts.row_total(r))).collect()), n(big_n)])));
+    steps.extend(several(&tr!("ex-and-each-column-s"), column_totals));
+    steps.push(step(&tr!("ex-the-total"), equals(vec![var("N"), plus((0..nr).map(|r| n(counts.row_total(r))).collect()), n(big_n)])));
     let cells: Vec<(usize, usize)> = (0..nr).flat_map(|r| (0..nc).map(move |c| (r, c))).collect();
     let expected: Vec<Math> = cells
         .iter()
@@ -2030,7 +2014,7 @@ fn chi_square_steps(
             ])
         })
         .collect();
-    steps.extend(several("The count each cell would expect if the variables were independent:", expected));
+    steps.extend(several(&tr!("ex-the-count-each-cell-would-expect-if-the-variables-were-indep"), expected));
 
     let df = ((nr - 1) * (nc - 1)) as f64;
     let chi2: f64 = cells.iter().map(|&(r, c)| (counts.get(r, c) - counts.expected(r, c)).powi(2) / counts.expected(r, c)).sum();
@@ -2041,11 +2025,11 @@ fn chi_square_steps(
         .collect();
     let parts: Vec<Math> = cells.iter().map(|&(r, c)| n((counts.get(r, c) - counts.expected(r, c)).powi(2) / counts.expected(r, c))).collect();
     steps.push(step(
-        "Pearson's chi-square adds each cell's squared distance from its expected count, relative to it:",
+        &tr!("ex-pearson-s-chi-square-adds-each-cell-s-squared-distance-from"),
         equals(vec![sup(var("χ"), text("2")), sum(None, None, symbol()), terms(each, full), terms(parts, full), approx(chi2)]),
     ));
     steps.push(step(
-        "Its degrees of freedom:",
+        &tr!("ex-its-degrees-of-freedom"),
         equals(vec![
             var("df"),
             row(vec![paren(row(vec![var("r"), text("−"), text("1")])), paren(row(vec![var("c"), text("−"), text("1")]))]),
@@ -2054,17 +2038,9 @@ fn chi_square_steps(
         ]),
     ));
     let chi_sig = |x: f64, df: f64, what: &str| {
-        dist::chi_square_sig(x, df).map(|p| {
-            step(
-                &format!(
-                    "{what}: the probability of a chi-square at least this large with {} degrees of freedom, from that distribution:",
-                    number_text(df)
-                ),
-                equals(vec![var("p"), approx(p)]),
-            )
-        })
+        dist::chi_square_sig(x, df).map(|p| step(&tr!("ex-chi-significance", what = what, df = number_text(df)), equals(vec![var("p"), approx(p)])))
     };
-    steps.extend(chi_sig(chi2, df, "Its significance"));
+    steps.extend(chi_sig(chi2, df, &tr!("ex-its-significance")));
 
     let lr: f64 =
         cells.iter().map(|&(r, c)| (counts.get(r, c), counts.expected(r, c))).filter(|(o, _)| *o > 0.0).map(|(o, e)| 2.0 * o * (o / e).ln()).sum();
@@ -2074,7 +2050,7 @@ fn chi_square_steps(
         .map(|&(r, c)| row(vec![n(counts.get(r, c)), text("·"), text("ln"), frac(n(counts.get(r, c)), n(counts.expected(r, c)))]))
         .collect();
     steps.push(step(
-        "The likelihood ratio, over the cells with a count:",
+        &tr!("ex-the-likelihood-ratio-over-the-cells-with-a-count"),
         equals(vec![
             sup(var("G"), text("2")),
             row(vec![text("2"), sum(None, None, row(vec![var("O"), text("·"), text("ln"), frac(var("O"), var("E"))]))]),
@@ -2082,7 +2058,7 @@ fn chi_square_steps(
             approx(lr),
         ]),
     ));
-    steps.extend(chi_sig(lr, df, "Its significance"));
+    steps.extend(chi_sig(lr, df, &tr!("ex-its-significance")));
 
     if nr == 2 && nc == 2 {
         let (a, b, c, d) = (counts.get(0, 0), counts.get(0, 1), counts.get(1, 0), counts.get(1, 1));
@@ -2090,9 +2066,9 @@ fn chi_square_steps(
         let inner = ((a * d - b * c).abs() - big_n / 2.0).max(0.0);
         let yates = big_n * inner.powi(2) / (r1 * r2 * c1 * c2);
         steps.push(step(
-            "The continuity correction (Yates), for a 2 × 2 table with cells a b / c d:",
+            &tr!("ex-the-continuity-correction-yates-for-a-2-2-table-with-cells-a"),
             equals(vec![
-                sup(sub(var("χ"), text("Yates")), text("2")),
+                sup(sub(var("χ"), text(&tr!("ex-word-yates-cap"))), text("2")),
                 frac(
                     row(vec![
                         var("N"),
@@ -2139,7 +2115,7 @@ fn chi_square_steps(
                 approx(yates),
             ]),
         ));
-        steps.extend(chi_sig(yates, 1.0, "Its significance"));
+        steps.extend(chi_sig(yates, 1.0, &tr!("ex-its-significance")));
         steps.extend(fisher_steps([a, b, c, d], full));
     }
     // Linear-by-linear: the correlation of the row and column values, each cell counted O times.
@@ -2150,8 +2126,8 @@ fn chi_square_steps(
     {
         let pairs: Vec<(f64, f64, f64)> =
             cells.iter().filter(|&&(r, c)| counts.get(r, c) > 0.0).filter_map(|&(r, c)| Some((*rs.get(r)?, *cs.get(c)?, counts.get(r, c)))).collect();
-        steps.push(say("The linear-by-linear association uses the correlation r of the row and column values, each cell counted as often as its count (the w below):"));
-        steps.extend(pearson(&pairs, true, "in the table", false, full, false));
+        steps.push(say(&tr!("ex-the-linear-by-linear-association-uses-the-correlation-r-of-t")));
+        steps.extend(pearson(&pairs, true, &tr!("ex-how-table"), false, full, false));
         let mx = pairs.iter().map(|(x, _, w)| x * w).sum::<f64>() / big_n;
         let my = pairs.iter().map(|(_, y, w)| y * w).sum::<f64>() / big_n;
         let sxy: f64 = pairs.iter().map(|(x, y, w)| w * (x - mx) * (y - my)).sum();
@@ -2161,7 +2137,7 @@ fn chi_square_steps(
         if r.is_finite() {
             let m2 = (big_n - 1.0) * r * r;
             steps.push(step(
-                "The association, with 1 degree of freedom:",
+                &tr!("ex-the-association-with-1-degree-of-freedom"),
                 equals(vec![
                     sup(var("M"), text("2")),
                     row(vec![paren(row(vec![var("N"), text("−"), text("1")])), sup(var("r"), text("2"))]),
@@ -2169,7 +2145,7 @@ fn chi_square_steps(
                     approx(m2),
                 ]),
             ));
-            steps.extend(chi_sig(m2, 1.0, "Its significance"));
+            steps.extend(chi_sig(m2, 1.0, &tr!("ex-its-significance")));
         }
     }
     steps
@@ -2191,7 +2167,7 @@ fn fisher_steps([a, b, c, d]: [f64; 4], full: bool) -> Vec<Step> {
     };
     let fact = |x: f64| row(vec![n(x), text("!")]);
     let mut steps = vec![step(
-        "Fisher's exact test: with the totals fixed, the probability of a table whose first cell is x:",
+        &tr!("ex-fisher-s-exact-test-with-the-totals-fixed-the-probability-of"),
         equals(vec![
             row(vec![var("P"), paren(var("x"))]),
             frac(
@@ -2222,7 +2198,7 @@ fn fisher_steps([a, b, c, d]: [f64; 4], full: bool) -> Vec<Step> {
     )];
     let observed = p_of(a);
     steps.push(step(
-        "This table's:",
+        &tr!("ex-this-table-s"),
         equals(vec![
             row(vec![var("P"), paren(n(a))]),
             frac(
@@ -2267,14 +2243,15 @@ fn fisher_steps([a, b, c, d]: [f64; 4], full: bool) -> Vec<Step> {
         short.extend(listed.iter().skip(count - 3).cloned());
         listed = short;
     }
-    steps.push(step(&format!("Every table with these totals, x from {low} to {high}:"), row(listed)));
+    steps.push(step(&tr!("ex-fisher-tables", low = low, high = high), row(listed)));
     steps.push(step(
-        "Two-sided: the tables at most as likely as this one, added up:",
+        &tr!("ex-two-sided-the-tables-at-most-as-likely-as-this-one-added-up"),
         equals(vec![var("p"), terms(two, full), approx(two_sum.min(1.0))]),
     ));
-    let (one, one_sum, side) = if lower_sum <= upper_sum { (lower, lower_sum, "x at most") } else { (upper, upper_sum, "x at least") };
+    let (one, one_sum, side) =
+        if lower_sum <= upper_sum { (lower, lower_sum, "ex-fisher-at-most") } else { (upper, upper_sum, "ex-fisher-at-least") };
     steps.push(step(
-        &format!("One-sided: the smaller tail, the tables with {side} {}:", number_text(a)),
+        &mksigma_i18n::message(side, &[("a", number_text(a).into())]),
         equals(vec![var("p"), terms(one, full), approx(one_sum.min(1.0))]),
     ));
     steps
@@ -2300,8 +2277,11 @@ pub fn frequency_statistics(ds: &Dataset, variables: &[String], wanted: &[Statis
         let counts = count(variable, ds.column(index).unwrap_or_default(), &weights, Order::AscendingValue);
         let (valid_n, missing) = (counts.valid_total(), counts.missing_total());
         let mut steps = several(
-            "N counts the cases with a valid value, and apart those whose value is missing:",
-            vec![equals(vec![sub(var("N"), text("valid")), n(valid_n)]), equals(vec![sub(var("N"), text("missing")), n(missing)])],
+            &tr!("ex-n-counts-the-cases-with-a-valid-value-and-apart-those-whose"),
+            vec![
+                equals(vec![sub(var("N"), text(&tr!("ex-word-valid"))), n(valid_n)]),
+                equals(vec![sub(var("N"), text(&tr!("ex-word-missing"))), n(missing)]),
+            ],
         );
         let xs: Vec<(f64, f64)> = counts.valid.iter().filter_map(|(v, f)| Some((v.as_num()?, *f))).collect();
         if wanted.is_empty() {
@@ -2309,12 +2289,12 @@ pub fn frequency_statistics(ds: &Dataset, variables: &[String], wanted: &[Statis
             continue;
         }
         if variable.var_type != mksigma_core::VarType::Numeric {
-            steps.push(say("A string variable has none of the other statistics."));
+            steps.push(say(&tr!("ex-a-string-variable-has-none-of-the-other-statistics")));
             sections.push((variable.display_name().to_string(), steps));
             continue;
         }
         if xs.is_empty() {
-            steps.push(say("With no valid values there is nothing more to compute."));
+            steps.push(say(&tr!("ex-with-no-valid-values-there-is-nothing-more-to-compute")));
             sections.push((variable.display_name().to_string(), steps));
             continue;
         }
@@ -2325,16 +2305,16 @@ pub fn frequency_statistics(ds: &Dataset, variables: &[String], wanted: &[Statis
         let mean = total / valid_n;
         if asked(&[Statistic::Sum, Statistic::Mean, Statistic::SeMean, Statistic::StdDev, Statistic::Variance]) {
             steps.push(step(
-                "The sum: each distinct value times its frequency f, added up:",
+                &tr!("ex-the-sum-each-distinct-value-times-its-frequency-f-added-up"),
                 equals(vec![sum(None, None, body.clone()), terms(xs.iter().map(|(x, f)| f_x(*x, *f)).collect(), full), approx_to(total, 2)]),
             ));
         }
         if asked(&[Statistic::Mean, Statistic::SeMean, Statistic::StdDev, Statistic::Variance]) {
             steps.push(step(
-                "The mean divides it by N:",
+                &tr!("ex-the-mean-divides-it-by-n"),
                 equals(vec![
                     bar(var("x")),
-                    frac(sum(None, None, body), sub(var("N"), text("valid"))),
+                    frac(sum(None, None, body), sub(var("N"), text(&tr!("ex-word-valid")))),
                     frac(n(total), n(valid_n)),
                     approx_to(mean, 2),
                 ]),
@@ -2344,7 +2324,7 @@ pub fn frequency_statistics(ds: &Dataset, variables: &[String], wanted: &[Statis
             let ss: f64 = xs.iter().map(|(x, f)| f * (x - mean).powi(2)).sum();
             let devs: Vec<Math> = xs.iter().map(|(x, f)| row(vec![n(*f), text("·"), dev_sq(*x, mean)])).collect();
             steps.push(step(
-                "The squared deviations from the mean, each times its frequency:",
+                &tr!("ex-the-squared-deviations-from-the-mean-each-times-its-frequenc"),
                 equals(vec![
                     sum(None, None, row(vec![indexed("f", "k"), sup(paren(row(vec![indexed("x", "k"), text("−"), bar(var("x"))])), text("2"))])),
                     terms(devs, full),
@@ -2352,12 +2332,12 @@ pub fn frequency_statistics(ds: &Dataset, variables: &[String], wanted: &[Statis
                 ]),
             ));
             if valid_n <= 1.0 {
-                steps.push(say("With N of 1 or less the variance and the standard deviation are undefined."));
+                steps.push(say(&tr!("ex-with-n-of-1-or-less-the-variance-and-the-standard-deviation")));
             } else {
                 let variance = ss / (valid_n - 1.0);
                 let sd = variance.sqrt();
                 steps.extend(several(
-                    "The variance divides that by N − 1; the standard deviation is its square root:",
+                    &tr!("ex-the-variance-divides-that-by-n-1-the-standard-deviation-is-i"),
                     vec![
                         equals(vec![sup(var("s"), text("2")), frac(n(ss), row(vec![n(valid_n), text("−"), text("1")])), approx_to(variance, 2)]),
                         equals(vec![var("s"), sqrt(n(variance)), approx_to(sd, 2)]),
@@ -2365,10 +2345,10 @@ pub fn frequency_statistics(ds: &Dataset, variables: &[String], wanted: &[Statis
                 ));
                 if wanted.contains(&Statistic::SeMean) {
                     steps.push(step(
-                        "The standard error of the mean:",
+                        &tr!("ex-the-standard-error-of-the-mean"),
                         equals(vec![
                             var("SE"),
-                            frac(var("s"), sqrt(sub(var("N"), text("valid")))),
+                            frac(var("s"), sqrt(sub(var("N"), text(&tr!("ex-word-valid"))))),
                             frac(n(sd), sqrt(n(valid_n))),
                             approx_to(sd / valid_n.sqrt(), 2),
                         ]),
@@ -2380,33 +2360,28 @@ pub fn frequency_statistics(ds: &Dataset, variables: &[String], wanted: &[Statis
             let top = xs.iter().map(|(_, f)| *f).fold(0.0, f64::max);
             let modes: Vec<f64> = xs.iter().filter(|(_, f)| *f == top).map(|(x, _)| *x).collect();
             let smallest = modes.iter().copied().fold(f64::INFINITY, f64::min);
-            let text_of = if modes.len() > 1 {
-                format!(
-                    "The mode is the most frequent value. {} values share the largest frequency, {}; the table shows the smallest:",
-                    modes.len(),
-                    number_text(top)
-                )
-            } else {
-                format!("The mode is the most frequent value, the one with the largest frequency, {}:", number_text(top))
-            };
-            steps.push(step(&text_of, equals(vec![text("Mode"), approx_to(smallest, 2)])));
+            let text_of = if modes.len() > 1 { tr!("ex-modes", n = modes.len(), f = number_text(top)) } else { tr!("ex-mode", f = number_text(top)) };
+            steps.push(step(&text_of, equals(vec![text(&tr!("ex-word-mode-cap")), approx_to(smallest, 2)])));
         }
         let (lo, hi) = xs.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (x, _)| (a.min(*x), b.max(*x)));
         if asked(&[Statistic::Minimum, Statistic::Maximum, Statistic::Range]) {
             steps.extend(several(
-                "The smallest and largest valid values:",
-                vec![equals(vec![text("Minimum"), approx_to(lo, 2)]), equals(vec![text("Maximum"), approx_to(hi, 2)])],
+                &tr!("ex-the-smallest-and-largest-valid-values"),
+                vec![
+                    equals(vec![text(&tr!("ex-word-minimum-cap")), approx_to(lo, 2)]),
+                    equals(vec![text(&tr!("ex-word-maximum-cap")), approx_to(hi, 2)]),
+                ],
             ));
         }
         if wanted.contains(&Statistic::Range) {
             steps.push(step(
-                "The range is their difference:",
-                equals(vec![text("Range"), row(vec![n(hi), text("−"), val(lo)]), approx_to(hi - lo, 2)]),
+                &tr!("ex-the-range-is-their-difference"),
+                equals(vec![text(&tr!("ex-word-range-cap")), row(vec![n(hi), text("−"), val(lo)]), approx_to(hi - lo, 2)]),
             ));
         }
         sections.push((variable.display_name().to_string(), steps));
     }
-    Ok(Explanation { title: "Statistics".into(), sections })
+    Ok(Explanation { title: tr!("ex-title-statistics"), sections })
 }
 
 /// `FREQUENCIES`: each value's percent, valid percent and cumulative percent, in the table's
@@ -2421,10 +2396,10 @@ pub fn frequencies(ds: &Dataset, variables: &[String], order: Order, full: bool)
         let total = valid_n + missing;
         let mut steps = Vec::new();
         steps.extend(several(
-            "Every case counts in the total; the valid ones are those whose value isn't missing:",
+            &tr!("ex-every-case-counts-in-the-total-the-valid-ones-are-those-whos"),
             vec![
                 equals(vec![var("N"), row(vec![n(valid_n), text("+"), n(missing)]), n(total)]),
-                equals(vec![sub(var("N"), text("valid")), n(valid_n)]),
+                equals(vec![sub(var("N"), text(&tr!("ex-word-valid"))), n(valid_n)]),
             ],
         ));
         let mut cumulative = 0.0;
@@ -2434,23 +2409,23 @@ pub fn frequencies(ds: &Dataset, variables: &[String], order: Order, full: bool)
             let label = value_text(variable, value);
             let frac100 = |a: Math, b: f64, r: f64| equals(vec![row(vec![frac(a, n(b)), text("×"), text("100")]), num(r, 1)]);
             steps.push(step(
-                &format!("{label}: f = {}", number_text(*f)),
+                &tr!("ex-value-f", label = label.as_str(), f = number_text(*f)),
                 row(vec![
-                    text("Percent:  "),
+                    text(&tr!("ex-percent-label")),
                     frac100(n(*f), total, f / total * 100.0),
-                    text(",   Valid:  "),
+                    text(&format!(",   {}", tr!("ex-valid-label"))),
                     frac100(n(*f), valid_n, f / valid_n * 100.0),
-                    text(",   Cumulative:  "),
+                    text(&format!(",   {}", tr!("ex-cumulative-label"))),
                     frac100(n(cumulative), valid_n, cumulative / valid_n * 100.0),
                 ]),
             ));
         }
         if shown < counts.valid.len() {
-            steps.push(say(&format!("And {} more values, the same way (Show every term lists them).", counts.valid.len() - shown)));
+            steps.push(say(&tr!("ex-more-values", n = counts.valid.len() - shown)));
         }
         sections.push((variable.display_name().to_string(), steps));
     }
-    Ok(Explanation { title: "Frequencies".into(), sections })
+    Ok(Explanation { title: tr!("ex-title-frequencies"), sections })
 }
 
 #[cfg(test)]

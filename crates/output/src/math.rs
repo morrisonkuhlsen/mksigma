@@ -154,6 +154,16 @@ fn latex_text(s: &str) -> String {
 }
 
 impl Math {
+    /// The items of a list (a row whose pieces are separated by commas), if it is one.
+    pub fn list(&self) -> Option<Vec<Math>> {
+        let Math::Row(parts) = self else { return None };
+        let separator = |m: &Math| matches!(m, Math::Text(s) if s.trim() == ",");
+        if !parts.iter().any(separator) {
+            return None;
+        }
+        Some(parts.split(separator).filter(|item| !item.is_empty()).map(|item| Math::Row(item.to_vec())).collect())
+    }
+
     /// The LaTeX for it, for math mode.
     pub fn to_latex(&self) -> String {
         match self {
@@ -235,8 +245,14 @@ impl Explanation {
                 if !step.text.is_empty() {
                     body.push_str(&format!("\\noindent {}\n", latex_text(&step.text)));
                 }
-                if let Some(m) = &step.math {
-                    body.push_str(&format!("\\begin{{dmath*}}\n{}\n\\end{{dmath*}}\n", m.to_latex()));
+                match step.math.as_ref().map(|m| (m, m.list())) {
+                    // A list wraps as text; one equation breaks at its relations.
+                    Some((_, Some(items))) => {
+                        let inline: Vec<String> = items.iter().map(|m| format!("${}$", m.to_latex())).collect();
+                        body.push_str(&format!("\\par\\noindent {}\n", inline.join(", ")));
+                    }
+                    Some((m, None)) => body.push_str(&format!("\\begin{{dmath*}}\n{}\n\\end{{dmath*}}\n", m.to_latex())),
+                    None => {}
                 }
                 body.push_str("\\medskip\n\n");
             }
@@ -273,6 +289,12 @@ mod tests {
             augmented(vec![vec![num(2.0, 0), num(1.0, 0)], vec![num(1.0, 0), num(3.0, 0)]], 1).to_latex(),
             "\\left[ \\begin{array}{c|c} 2 & 1 \\\\ 1 & 3 \\end{array} \\right]"
         );
+        // A list is written inline, as text that wraps.
+        let list = Explanation {
+            title: String::new(),
+            sections: vec![(String::new(), vec![Step { text: String::new(), math: Some(row(vec![var("a"), text(",   "), var("b")])) }])],
+        };
+        assert!(list.to_latex().contains("\\par\\noindent $a$, $b$"), "{}", list.to_latex());
         // The symbols the explanations write in their sentences: none left for pdflatex to refuse.
         let words = latex_text("N − 1, ≈ · × ≤ ≥ … ± μ σ χ α √2 Welch–Satterthwaite");
         assert!(words.is_ascii(), "{words}");
