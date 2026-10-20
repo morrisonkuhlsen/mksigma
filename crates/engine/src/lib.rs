@@ -2003,6 +2003,25 @@ mod tests {
         assert!(again.run_syntax("DASHBOARD /TILES=(9 1).").is_err());
     }
 
+    #[test]
+    fn dates_are_typed_as_their_format_shows_them() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("NUMERIC nascido (DATE11).").unwrap();
+        let column = s.dataset.variable("nascido").unwrap().0;
+        s.set_cell(0, column, "05-MAR-2024").unwrap();
+        let shown = |s: &Session| {
+            let var = &s.dataset.variables()[column];
+            var.format.render(&s.dataset.column(column).unwrap()[0])
+        };
+        assert_eq!(shown(&s), "05-MAR-2024");
+        s.set_cell(0, column, "2024-03-06").unwrap();
+        assert_eq!(shown(&s), "06-MAR-2024", "ISO in any date format");
+        let Err(EngineError::Invalid(message)) = s.set_cell(0, column, "2024") else { panic!("a bare number is no date") };
+        assert!(message.contains("05-MAR-2024"), "the error shows an example: {message}");
+        s.undo().unwrap();
+        assert_eq!(shown(&s), "05-MAR-2024", "undone like any edit");
+    }
+
     /// A Stata file (format 118, LSF) of a byte `grupo` labelled 1 A, 2 B and a str3 `nome`.
     fn stata_file() -> Vec<u8> {
         let mut b: Vec<u8> = Vec::new();

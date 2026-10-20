@@ -117,6 +117,26 @@ impl Format {
     }
 }
 
+impl Format {
+    /// Typed text in this format, when it is a date or time format: `Some(Ok(value))`, or
+    /// `Some(Err(example))` when the text isn't one, with an example of what is; `None` for
+    /// other formats.
+    pub fn parse_date(&self, text: &str) -> Option<Result<f64, String>> {
+        // An example in this format: 5 March 2024 at 13:07, or 13:07, Monday, March.
+        let example = || {
+            let x = match self.kind {
+                FormatKind::Time | FormatKind::DTime | FormatKind::MTime => 47_220.0,
+                FormatKind::WkDay => 2.0,
+                FormatKind::Month => 3.0,
+                FormatKind::DateTime | FormatKind::YmdHms => 161_215.0 * 86_400.0 + 47_220.0,
+                _ => 161_215.0 * 86_400.0,
+            };
+            self.render(&Value::Num(x))
+        };
+        dates::parse(self.kind, text).map(|v| v.ok_or_else(example))
+    }
+}
+
 /// Format names as written in syntax, by family.
 const FORMAT_NAMES: [(FormatKind, &str); 24] = [
     (FormatKind::F, "F"),

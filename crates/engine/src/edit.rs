@@ -163,19 +163,26 @@ pub(crate) fn apply(ds: &mut Dataset, command: &Command) -> Result<(), EngineErr
 }
 
 /// A cell edit as typed: numeric variables take a number, or nothing (or `.`) for
-/// system-missing; string variables take the text.
+/// system-missing, and date and time variables a date or time as their format writes it;
+/// string variables take the text.
 /// Sets a cell from typed text. Typing in the row after the last case adds a case first.
 pub(crate) fn set_cell(ds: &mut Dataset, case: usize, var: usize, input: &str) -> Result<Vec<Edit>, EngineError> {
     let v = variable(ds, var)?;
     let value = match v.var_type {
         VarType::Numeric => match input.trim() {
             "" | "." => Value::SysMis,
-            text => Value::Num(
-                text.parse::<f64>()
-                    .ok()
-                    .filter(|x| x.is_finite())
-                    .ok_or_else(|| EngineError::Invalid(tr!("err-not-a-number", text = text, name = v.name.as_str())))?,
-            ),
+            // A date or time variable takes its format's text.
+            text => match v.format.parse_date(text) {
+                Some(date) => Value::Num(date.map_err(|example| {
+                    EngineError::Invalid(tr!("err-not-a-date", text = text, name = v.name.as_str(), example = example.as_str()))
+                })?),
+                None => Value::Num(
+                    text.parse::<f64>()
+                        .ok()
+                        .filter(|x| x.is_finite())
+                        .ok_or_else(|| EngineError::Invalid(tr!("err-not-a-number", text = text, name = v.name.as_str())))?,
+                ),
+            },
         },
         VarType::String(_) => Value::Str(input.trim_end().to_string()),
     };

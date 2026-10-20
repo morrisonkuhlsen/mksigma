@@ -144,6 +144,145 @@ pub(crate) fn render(kind: FormatKind, width: u16, decimals: u8, x: f64) -> Opti
     })
 }
 
+/// Days from 1 January 1970 to a date (Hinnant's days-from-civil), the inverse of `civil`.
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = i64::from(if m > 2 { m - 3 } else { m + 9 });
+    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+fn days_in_month(y: i64, m: u32) -> u32 {
+    match m {
+        2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+/// A month or weekday number from its name in any of the interface's languages, whole or cut
+/// to at least `shortest` letters (`MAR`, `março`, `SEG`), ignoring case.
+fn by_name(word: &str, ids: &[&str], shortest: usize) -> Option<u32> {
+    let word = word.to_uppercase();
+    if word.chars().count() < shortest {
+        return None;
+    }
+    for lang in mksigma_i18n::Lang::ALL {
+        for id in ids {
+            let list = mksigma_i18n::message_in(lang, id, &[]);
+            if let Some(k) = list.split_whitespace().position(|n| n.to_uppercase() == word || n.to_uppercase().starts_with(&word)) {
+                return u32::try_from(k + 1).ok();
+            }
+        }
+    }
+    None
+}
+
+fn month_of(word: &str) -> Option<u32> {
+    match word.parse::<u32>() {
+        Ok(m) if (1..=12).contains(&m) => Some(m),
+        Ok(_) => None,
+        Err(_) => by_name(word, &["date-months", "date-months-full"], 3),
+    }
+}
+
+/// A year as typed: four digits as they are, two in the window 1950–2049.
+fn year_of(word: &str) -> Option<i64> {
+    let y: i64 = word.parse().ok()?;
+    match word.len() {
+        1 | 2 => Some(if y < 50 { 2000 + y } else { 1900 + y }),
+        3..=4 => Some(y),
+        _ => None,
+    }
+}
+
+/// The day number of a valid date.
+fn date(y: i64, m: u32, d: u32) -> Option<i64> {
+    ((1..=12).contains(&m) && d >= 1 && d <= days_in_month(y, m)).then(|| days_from_civil(y, m, d) + TO_1970)
+}
+
+/// `h:mm[:ss[.ff]]` (or `mm:ss` when `minutes_first`) in seconds; hours may pass 24.
+fn time_of(text: &str, minutes_first: bool) -> Option<f64> {
+    let parts: Vec<&str> = text.split(':').collect();
+    let number = |s: &str| s.trim().replace(',', ".").parse::<f64>().ok().filter(|x| x.is_finite() && *x >= 0.0);
+    let (h, m, s) = match (parts.as_slice(), minutes_first) {
+        ([m, s], true) => (0.0, number(m)?, number(s)?),
+        ([h, m], false) => (number(h)?, number(m)?, 0.0),
+        ([h, m, s], _) => (number(h)?, number(m)?, number(s)?),
+        _ => return None,
+    };
+    let whole = |x: f64| x.fract() == 0.0;
+    (whole(h) && whole(m) && (minutes_first || m < 60.0) && s < 60.0).then_some(h * 3600.0 + m * 60.0 + s)
+}
+
+/// Typed text in a date or time format, as the number it stores: `Some(None)` when the text
+/// isn't a date of that kind, `None` for formats that aren't dates. Day, month and year come
+/// in the format's order (`05-MAR-2024`, `03/05/2024`, `2024/03/05`), or as `2024-03-05` in
+/// any date format; months by number or by name in either language; a time after the date.
+pub(crate) fn parse(kind: FormatKind, text: &str) -> Option<Option<f64>> {
+    use FormatKind as K;
+    let text = text.trim();
+    let date_kind = matches!(kind, K::Date | K::ADate | K::EDate | K::SDate | K::JDate | K::QYr | K::MoYr | K::WkYr | K::DateTime | K::YmdHms);
+    if !date_kind && !matches!(kind, K::Time | K::DTime | K::MTime | K::WkDay | K::Month) {
+        return None;
+    }
+    let value = || -> Option<f64> {
+        match kind {
+            K::Time => return time_of(text, false),
+            K::MTime => return time_of(text, true),
+            K::DTime => {
+                let (days, clock) = text.split_once(char::is_whitespace)?;
+                let days: u32 = days.parse().ok()?;
+                return Some(f64::from(days) * 86_400.0 + time_of(clock.trim(), false)?);
+            }
+            K::WkDay => {
+                return text.parse::<u32>().ok().filter(|d| (1..=7).contains(d)).or_else(|| by_name(text, &["date-weekdays"], 2)).map(f64::from);
+            }
+            K::Month => return month_of(text).map(f64::from),
+            _ => {}
+        }
+        // A time of day may follow the date, after a space.
+        let (day_part, clock) = match text.split_once(char::is_whitespace) {
+            Some((d, t)) if matches!(kind, K::DateTime | K::YmdHms) || t.contains(':') => (d, Some(t.trim())),
+            _ => (text, None),
+        };
+        let seconds = match clock {
+            Some(t) => time_of(t, false).filter(|s| *s < 86_400.0)?,
+            None => 0.0,
+        };
+        let words: Vec<&str> = day_part.split(['-', '/', '.', ',', ' ']).filter(|w| !w.is_empty()).collect();
+        let day = match (kind, words.as_slice()) {
+            // ISO, in any date format.
+            (_, [y, m, d]) if y.len() == 4 && y.parse::<i64>().is_ok() => date(y.parse().ok()?, month_of(m)?, d.parse().ok()?)?,
+            (K::ADate, [m, d, y]) => date(year_of(y)?, month_of(m)?, d.parse().ok()?)?,
+            (K::SDate | K::YmdHms, [y, m, d]) => date(year_of(y)?, month_of(m)?, d.parse().ok()?)?,
+            (K::Date | K::EDate | K::DateTime, [d, m, y]) => date(year_of(y)?, month_of(m)?, d.parse().ok()?)?,
+            (K::JDate, [yd]) if yd.len() == 7 || yd.len() == 5 => {
+                let (y, d) = yd.split_at(yd.len() - 3);
+                let (y, d): (i64, u32) = (year_of(y)?, d.parse().ok()?);
+                let length = if days_in_month(y, 2) == 29 { 366 } else { 365 };
+                ((1..=length).contains(&d)).then(|| days_from_civil(y, 1, 1) + TO_1970 + i64::from(d) - 1)?
+            }
+            (K::MoYr, [m, y]) => date(year_of(y)?, month_of(m)?, 1)?,
+            (K::QYr, [q, letter, y]) if letter.eq_ignore_ascii_case("Q") => {
+                let q: u32 = q.parse().ok().filter(|q| (1..=4).contains(q))?;
+                date(year_of(y)?, 3 * q - 2, 1)?
+            }
+            (K::WkYr, [w, letters, y]) if letters.eq_ignore_ascii_case("WK") => {
+                let w: i64 = w.parse().ok().filter(|w| (1..=53).contains(w))?;
+                days_from_civil(year_of(y)?, 1, 1) + TO_1970 + 7 * (w - 1)
+            }
+            _ => return None,
+        };
+        Some(day as f64 * 86_400.0 + seconds)
+    };
+    Some(value())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,6 +341,53 @@ mod tests {
         assert_eq!(render(FormatKind::F, 8, 2, 1.0), None);
         assert_eq!(render(FormatKind::Date, 11, 0, f64::INFINITY), None);
         assert_eq!(render(FormatKind::Date, 11, 0, 1e300), None, "no calendar holds it");
+    }
+
+    #[test]
+    fn typed_dates_read_back_as_they_show() {
+        let x = MARCH_5_2024 * 86_400.0;
+        let cases = [
+            (FormatKind::Date, "05-MAR-2024"),
+            (FormatKind::Date, "5 march 2024"),
+            (FormatKind::Date, "05-mar-24"),
+            (FormatKind::Date, "2024-03-05"),
+            (FormatKind::ADate, "03/05/2024"),
+            (FormatKind::EDate, "05.03.2024"),
+            (FormatKind::SDate, "2024/03/05"),
+            (FormatKind::JDate, "2024065"),
+        ];
+        for (kind, text) in cases {
+            assert_eq!(parse(kind, text), Some(Some(x)), "{kind:?} {text}");
+        }
+        assert_eq!(parse(FormatKind::DateTime, "05-MAR-2024 13:07:09.25"), Some(Some(x + 47_229.25)));
+        assert_eq!(parse(FormatKind::YmdHms, "2024-03-05 13:07"), Some(Some(x + 47_220.0)));
+        assert_eq!(parse(FormatKind::MoYr, "MAR 2024"), Some(Some((MARCH_5_2024 - 4.0) * 86_400.0)));
+        assert_eq!(parse(FormatKind::QYr, "1 Q 2024"), Some(Some((MARCH_5_2024 - 64.0) * 86_400.0)));
+        assert_eq!(parse(FormatKind::Time, "30:00:00"), Some(Some(108_000.0)));
+        assert_eq!(parse(FormatKind::MTime, "02:05"), Some(Some(125.0)));
+        assert_eq!(parse(FormatKind::DTime, "01 01:01:01"), Some(Some(90_061.0)));
+        assert_eq!(parse(FormatKind::WkDay, "mon"), Some(Some(2.0)));
+        assert_eq!(parse(FormatKind::Month, "dez"), Some(Some(12.0)), "Portuguese names too");
+        // Not dates: impossible days, a bare number, other formats.
+        for text in ["02/30/2024", "2024", "03-XYZ-2024", "13/05/2024", ""] {
+            assert_eq!(parse(FormatKind::ADate, text), Some(None), "{text}");
+        }
+        assert_eq!(parse(FormatKind::Date, "29-FEB-2023"), Some(None));
+        assert_eq!(parse(FormatKind::Time, "10:75"), Some(None));
+        assert_eq!(parse(FormatKind::F, "05-MAR-2024"), None);
+        // Every format reads back what it shows.
+        for kind in
+            [FormatKind::Date, FormatKind::ADate, FormatKind::EDate, FormatKind::SDate, FormatKind::JDate, FormatKind::DateTime, FormatKind::YmdHms]
+        {
+            let width = match kind {
+                FormatKind::DateTime => 20,
+                FormatKind::YmdHms => 19,
+                FormatKind::JDate => 7,
+                _ => 11,
+            };
+            let shown = show(kind, width, 0, x + 3_600.0 * f64::from(matches!(kind, FormatKind::DateTime | FormatKind::YmdHms)));
+            assert!(parse(kind, &shown).flatten().is_some(), "{kind:?} {shown}");
+        }
     }
 
     #[test]

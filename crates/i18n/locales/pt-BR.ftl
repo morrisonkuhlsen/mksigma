@@ -972,6 +972,7 @@ err-empty-range = { $low } THRU { $high } é um intervalo vazio
 err-string-scale = { $name } é uma variável de texto e não pode ser Escala
 err-formats-numeric = FORMATS define formatos numéricos; { $name } não pode ser { $format }
 err-not-a-number = { $text } não é um número ({ $name } é numérica)
+err-not-a-date = { $text } não é uma data ou hora no formato de { $name } (por exemplo { $example })
 err-string-width = STRING { $name } precisa de uma largura de A1 a A255
 err-numeric-string-format = NUMERIC { $name } não pode ter o formato de texto { $format }
 err-analysis-no-item = a análise { $analysis } não tem o item de saída { $item }

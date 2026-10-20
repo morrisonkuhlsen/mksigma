@@ -293,7 +293,9 @@ gretl). One vertical slice at a time; **the order of the modules is the user's t
     become dates; names Stata allows and MK Sigma doesn't (`_merge`) are renamed, with a
     warning. File › Open, dropped files, `mksigma-cli --in` and MCP's `open_data` take `.dta`.
     Dates now show as dates (every SPSS date and time format, month and weekday names in the
-    interface's language). **Next:** `SAVE TRANSLATE /TYPE=STATA` (#6); typing dates (#12).
+    interface's language). Dates are typed in Data View as their format writes them (or as `2024-03-06`; months
+    by name in either language). **Next:** `SAVE TRANSLATE /TYPE=STATA` (#6); `SET EPOCH` for
+    two-digit years (#13).
   - *SAS transport files:* `.xpt` (XPORT, whose layout SAS publishes), the format regulators
     accept. `.sas7bdat` stays out: it is known only through third parties' reverse engineering.
   - *A parity matrix:* a table in code of every procedure against SPSS, SAS, Stata, JMP,
