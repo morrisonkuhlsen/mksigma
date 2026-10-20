@@ -94,7 +94,7 @@ pub enum Command {
     /// `CORRELATIONS [/VARIABLES=] vars [WITH vars] [/PRINT=...] [/MISSING=...]`
     Correlations { variables: Vec<String>, with: Vec<String>, one_tailed: bool, flag: bool, listwise: bool },
     /// `REGRESSION /DEPENDENT=y /METHOD=ENTER predictors [/STATISTICS ... CI(95)]`
-    Regression { dependent: String, predictors: Vec<String>, ci: Option<f64> },
+    Regression { dependent: String, predictors: Vec<String>, ci: Option<f64>, tolerance: f64 },
     /// `ONEWAY dependents BY factor [/STATISTICS=DESCRIPTIVES HOMOGENEITY]`
     Oneway { dependents: Vec<String>, factor: String, descriptives: bool, homogeneity: bool, posthoc: Vec<PostHocTest>, alpha: f64 },
     /// `NPAR TESTS /M-W=... /WILCOXON=... /K-W=...`

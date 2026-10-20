@@ -555,8 +555,13 @@ o-listwise-n = Listwise N = { $n }
 o-1-tailed = 1-tailed
 o-2-tailed = 2-tailed
 o-regression-needs-cases = REGRESSION needs more valid cases ({ $n }) than predictors plus one ({ $needed })
-o-regression-collinear = REGRESSION: a predictor is a linear combination of the others (or constant); no model
+o-regression-collinear = REGRESSION: no predictor passes the tolerance test (each is constant, or a combination of those before it); no model
 o-regression-note = Predictors: (Constant), { $predictors }. Dependent Variable: { $dependent }
+o-excluded-variables = Excluded Variables
+o-beta-in = Beta In
+o-partial-correlation = Partial Correlation
+o-tolerance = Tolerance
+o-regression-excluded-note = Left out of the model: { $names }. Their tolerance (the share of their variance the predictors already in leave unexplained) is below { $tolerance }: each is (almost) a combination of those.
 o-logistic-two-values = LOGISTIC REGRESSION needs a dependent variable with exactly two values; { $name } has { $n }
 o-logistic-collinear = LOGISTIC REGRESSION: the covariates are collinear (or constant); no model
 o-logistic-no-convergence = LOGISTIC REGRESSION did not converge
@@ -792,6 +797,13 @@ ex-constant-se = The constant, a = { $a }: its standard error, from the residual
 ex-coefficient-se = { $name }, b = { $b }: its standard error from the inverse's diagonal, t, significance, and the beta in standard deviations:
 ex-examine-interval = The 95% interval of the mean, with the t that leaves 2.5% in each tail at { $df } degrees of freedom:
 ex-regression-by-qr = By hand, the slopes solve the normal equations, the textbook route. The table solves the same least squares by a QR decomposition, which keeps more digits when predictors are nearly collinear; to the decimals shown here, the two agree.
+ex-regression-which-enter = Which predictors enter
+ex-regression-entry = With /METHOD=ENTER each predictor enters in turn, if its tolerance (the share of its variance the predictors already in leave unexplained) is { $tolerance } or more:
+ex-regression-enters = { $name } enters:
+ex-regression-left-out = { $name } is left out, its tolerance under the criterion:
+ex-regression-excluded = { $name }, next to the model's predictors: its tolerance; the residuals of the dependent and of { $name } on those predictors, multiplied; their correlation, the partial one; the coefficient it would take, in standard deviations (Beta In); and its t, with { $df } degrees of freedom:
+ex-regression-excluded-nothing = { $name } is exactly a combination of the model's predictors: it would add nothing, so it has no Beta In, t or partial correlation.
+ex-word-partial = partial
 ex-title-histogram = Histogram
 ex-title-bar-chart = Bar Chart
 ex-title-boxplot = Boxplot

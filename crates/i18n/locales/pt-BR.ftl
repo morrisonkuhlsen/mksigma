@@ -555,8 +555,13 @@ o-listwise-n = N de lista = { $n }
 o-1-tailed = unilateral
 o-2-tailed = bilateral
 o-regression-needs-cases = REGRESSION precisa de mais casos válidos ({ $n }) do que preditores mais um ({ $needed })
-o-regression-collinear = REGRESSION: um preditor é combinação linear dos outros (ou constante); sem modelo
+o-regression-collinear = REGRESSION: nenhum preditor passa no teste de tolerância (cada um é constante, ou combinação dos anteriores); sem modelo
 o-regression-note = Preditores: (Constante), { $predictors }. Variável dependente: { $dependent }
+o-excluded-variables = Variáveis excluídas
+o-beta-in = Beta de entrada
+o-partial-correlation = Correlação parcial
+o-tolerance = Tolerância
+o-regression-excluded-note = Fora do modelo: { $names }. A tolerância delas (a parte da sua variância que os preditores já presentes não explicam) fica abaixo de { $tolerance }: cada uma é (quase) uma combinação deles.
 o-logistic-two-values = LOGISTIC REGRESSION precisa de uma variável dependente com exatamente dois valores; { $name } tem { $n }
 o-logistic-collinear = LOGISTIC REGRESSION: as covariáveis são colineares (ou constantes); sem modelo
 o-logistic-no-convergence = LOGISTIC REGRESSION não convergiu
@@ -792,6 +797,13 @@ ex-constant-se = A constante, a = { $a }: o erro padrão dela, a partir do quadr
 ex-coefficient-se = { $name }, b = { $b }: o erro padrão pela diagonal da inversa, t, significância e o beta em desvios padrão:
 ex-examine-interval = O intervalo de 95% da média, com o t que deixa 2,5% em cada cauda a { $df } graus de liberdade:
 ex-regression-by-qr = À mão, as inclinações resolvem as equações normais, o caminho dos livros. A tabela resolve os mesmos mínimos quadrados por uma decomposição QR, que guarda mais dígitos quando os preditores são quase colineares; nas casas decimais mostradas aqui, os dois concordam.
+ex-regression-which-enter = Quais preditores entram
+ex-regression-entry = Com /METHOD=ENTER cada preditor entra por sua vez, se sua tolerância (a parte da sua variância que os preditores já presentes não explicam) for { $tolerance } ou mais:
+ex-regression-enters = { $name } entra:
+ex-regression-left-out = { $name } fica de fora, com a tolerância abaixo do critério:
+ex-regression-excluded = { $name }, ao lado dos preditores do modelo: sua tolerância; os resíduos da dependente e de { $name } sobre esses preditores, multiplicados; a correlação deles, a parcial; o coeficiente que tomaria, em desvios padrão (Beta de entrada); e seu t, com { $df } graus de liberdade:
+ex-regression-excluded-nothing = { $name } é exatamente uma combinação dos preditores do modelo: não acrescentaria nada, então não tem Beta de entrada, t nem correlação parcial.
+ex-word-partial = parcial
 ex-title-histogram = Histograma
 ex-title-bar-chart = Gráfico de barras
 ex-title-boxplot = Boxplot

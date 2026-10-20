@@ -14,12 +14,104 @@ use mksigma_output::{Cell, Item, Table};
 use crate::groups::{numeric, valid};
 use crate::{StatsError, dist, n_cell, num};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Options {
     pub dependent: String,
     pub predictors: Vec<String>,
     /// Confidence intervals for B at this level (`/STATISTICS CI(95)`), if asked.
     pub ci: Option<f64>,
+    /// A predictor enters only if its tolerance, 1 − R² on those already in, reaches this
+    /// (`/CRITERIA=TOLERANCE(.0001)`, the default).
+    pub tolerance: f64,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self { dependent: String::new(), predictors: Vec::new(), ci: None, tolerance: TOLERANCE }
+    }
+}
+
+/// SPSS's default tolerance criterion.
+pub const TOLERANCE: f64 = 0.0001;
+
+/// A case: the dependent, the predictors, the weight.
+pub(crate) type Case = (f64, Vec<f64>, f64);
+
+/// The residuals of `target` (a function of a case) on a constant and the predictors `set`,
+/// with their weights; `None` when those predictors are collinear.
+pub(crate) fn residuals(cases: &[Case], set: &[usize], target: impl Fn(&Case) -> f64) -> Option<Vec<(f64, f64)>> {
+    let sub: Vec<Case> = cases.iter().map(|c| (target(c), set.iter().map(|&j| c.1.get(j).copied().unwrap_or(0.0)).collect(), c.2)).collect();
+    let fit = least_squares(&sub, set.len())?;
+    Some(
+        sub.iter()
+            .map(|(v, x, w)| {
+                let predicted: f64 =
+                    fit.coefficients.first().copied().unwrap_or(0.0) + fit.coefficients.iter().skip(1).zip(x).map(|(c, xi)| c * xi).sum::<f64>();
+                (v - predicted, *w)
+            })
+            .collect(),
+    )
+}
+
+/// Predictor `j`'s tolerance next to `set`: the share of its variance the others leave
+/// unexplained, 1 − R². 0 for a constant predictor.
+pub(crate) fn tolerance(cases: &[Case], set: &[usize], j: usize) -> f64 {
+    let x = |c: &Case| c.1.get(j).copied().unwrap_or(0.0);
+    let total_w: f64 = cases.iter().map(|c| c.2).sum();
+    let mean = cases.iter().map(|c| x(c) * c.2).sum::<f64>() / total_w;
+    let total: f64 = cases.iter().map(|c| c.2 * (x(c) - mean).powi(2)).sum();
+    if total <= 0.0 {
+        return 0.0;
+    }
+    if set.is_empty() {
+        return 1.0;
+    }
+    residuals(cases, set, x).map_or(0.0, |e| e.iter().map(|(r, w)| w * r * r).sum::<f64>() / total)
+}
+
+/// `/METHOD=ENTER` with the tolerance test: in the order listed, each predictor enters if its
+/// tolerance next to those already in reaches `criterion`. The entered, and the left out.
+pub(crate) fn entry(cases: &[Case], p: usize, criterion: f64) -> (Vec<usize>, Vec<usize>) {
+    let (mut entered, mut excluded) = (Vec::new(), Vec::new());
+    for j in 0..p {
+        if tolerance(cases, &entered, j) >= criterion { entered.push(j) } else { excluded.push(j) }
+    }
+    (entered, excluded)
+}
+
+/// For a predictor left out: its standardized coefficient if it entered (Beta In), t, the
+/// partial correlation with the dependent and its tolerance, next to the entered ones. `None`
+/// for the first three when it adds nothing at all (a tolerance of 0).
+pub(crate) struct Excluded {
+    pub beta_in: Option<f64>,
+    pub t: Option<f64>,
+    pub partial: Option<f64>,
+    pub tolerance: f64,
+    pub df: f64,
+}
+
+pub(crate) fn excluded(cases: &[Case], entered: &[usize], j: usize) -> Excluded {
+    let n: f64 = cases.iter().map(|c| c.2).sum();
+    let df = n - entered.len() as f64 - 2.0;
+    let tolerance = tolerance(cases, entered, j);
+    let ey = residuals(cases, entered, |c| c.0);
+    let ex = residuals(cases, entered, |c| c.1.get(j).copied().unwrap_or(0.0));
+    let none = Excluded { beta_in: None, t: None, partial: None, tolerance, df };
+    let (Some(ey), Some(ex)) = (ey, ex) else { return none };
+    let (syy, sxx, sxy) = ey.iter().zip(&ex).fold((0.0, 0.0, 0.0), |(a, b, c), ((y, w), (x, _))| (a + w * y * y, b + w * x * x, c + w * x * y));
+    if tolerance < 1e-12 || sxx <= 0.0 || syy <= 0.0 {
+        return none;
+    }
+    let partial = sxy / (sxx * syy).sqrt();
+    // The variances of the dependent and the predictor, for the standardized coefficient.
+    let spread = |f: &dyn Fn(&Case) -> f64| {
+        let mean = cases.iter().map(|c| f(c) * c.2).sum::<f64>() / n;
+        (cases.iter().map(|c| c.2 * (f(c) - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt()
+    };
+    let (sd_y, sd_x) = (spread(&|c| c.0), spread(&|c| c.1.get(j).copied().unwrap_or(0.0)));
+    let beta_in = sxy / sxx * sd_x / sd_y;
+    let t = partial * (df / (1.0 - partial * partial)).sqrt();
+    Excluded { beta_in: Some(beta_in), t: Some(t), partial: Some(partial), tolerance, df }
 }
 
 /// Inverts a symmetric positive (semi)definite matrix by Gauss–Jordan elimination with partial
@@ -71,7 +163,7 @@ pub(crate) struct LeastSquares {
 
 /// Least squares of `y` on a constant and `x`, each case weighted, by Householder QR. `None`
 /// when a column is (numerically) a combination of the ones before it.
-pub(crate) fn least_squares(cases: &[(f64, Vec<f64>, f64)], p: usize) -> Option<LeastSquares> {
+pub(crate) fn least_squares(cases: &[Case], p: usize) -> Option<LeastSquares> {
     let k = p + 1;
     let n = cases.len();
     // Fewer cases than coefficients (heavy weights can hide it) leave the fit undetermined.
@@ -148,7 +240,7 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
     let xs = options.predictors.iter().map(|n| numeric(ds, n)).collect::<Result<Vec<_>, _>>()?;
     let p = xs.len();
     // Listwise: cases valid on the dependent and every predictor.
-    let cases: Vec<(f64, Vec<f64>, f64)> = (0..ds.n_cases())
+    let cases: Vec<Case> = (0..ds.n_cases())
         .filter_map(|c| {
             let w = ds.case_weight(c);
             let y = valid(ds, yi, c)?;
@@ -157,10 +249,20 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
         })
         .collect();
     let n: f64 = cases.iter().map(|(_, _, w)| w).sum();
-    let df_residual = n - p as f64 - 1.0;
-    if p == 0 || df_residual <= 0.0 {
+    if p == 0 || n - p as f64 - 1.0 <= 0.0 {
         return Ok(vec![Item::Warning(tr!("o-regression-needs-cases", n = n, needed = p + 1))]);
     }
+    // The tolerance test; the model holds the predictors that entered.
+    let (entered, left_out) = entry(&cases, p, options.tolerance);
+    if entered.is_empty() {
+        return Ok(vec![Item::Warning(tr!("o-regression-collinear"))]);
+    }
+    let all_cases = cases;
+    let cases: Vec<Case> = all_cases.iter().map(|(y, x, w)| (*y, entered.iter().map(|&j| x.get(j).copied().unwrap_or(0.0)).collect(), *w)).collect();
+    let all_names: Vec<String> = xs.iter().map(|(_, v)| v.display_name().to_string()).collect();
+    let xs: Vec<_> = entered.iter().filter_map(|&j| xs.get(j).copied()).collect();
+    let p = xs.len();
+    let df_residual = n - p as f64 - 1.0;
     let my = cases.iter().map(|(y, _, w)| y * w).sum::<f64>() / n;
     let mx: Vec<f64> = (0..p).map(|j| cases.iter().map(|(_, x, w)| x.get(j).copied().unwrap_or(0.0) * w).sum::<f64>() / n).collect();
     // The dependent's and each predictor's sum of squared deviations, for R² and the betas.
@@ -170,13 +272,16 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
     let Some(LeastSquares { coefficients, inverse, ss_regression, ss_residual }) = least_squares(&cases, p) else {
         return Ok(vec![Item::Warning(tr!("o-regression-collinear"))]);
     };
+    // An exact fit: no residual at all, not a rounding's −0, so that F is +∞ and its
+    // significance 0.
+    let ss_residual = if ss_residual > 0.0 { ss_residual } else { 0.0 };
     let constant = coefficients.first().copied().unwrap_or(f64::NAN);
     let b: Vec<f64> = coefficients.iter().skip(1).copied().collect();
     let (df_regression, df_total) = (p as f64, n - 1.0);
     let ms_residual = ss_residual / df_residual;
     let ms_regression = ss_regression / df_regression;
     let f = ms_regression / ms_residual;
-    let r2 = if syy > 0.0 { ss_regression / syy } else { 0.0 };
+    let r2 = if syy > 0.0 { (ss_regression / syy).clamp(0.0, 1.0) } else { 0.0 };
     let adjusted = 1.0 - (1.0 - r2) * df_total / df_residual;
     let sd_y = (syy / df_total).sqrt();
 
@@ -241,12 +346,32 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
     if let Some(level) = options.ci {
         columns.extend([tr!("o-ci-lower", level = format!("{:.0}", level * 100.0)), tr!("o-ci-upper", level = format!("{:.0}", level * 100.0))]);
     }
-    Ok(vec![
+    let mut items = vec![
         Item::Table(summary),
         Item::Text(tr!("o-regression-note", predictors = names.join(", "), dependent = yvar.display_name())),
         Item::Table(anova),
         Item::Table(Table { title: tr!("o-coefficients"), columns, rows: coefficients, categories: Vec::new() }),
-    ])
+    ];
+    if !left_out.is_empty() {
+        let rows = left_out
+            .iter()
+            .map(|&j| {
+                let e = excluded(&all_cases, &entered, j);
+                let sig = e.t.and_then(|t| dist::t_sig(t, e.df));
+                let name = all_names.get(j).cloned().unwrap_or_default();
+                (name, vec![num(e.beta_in, 3), num(e.t, 3), num(sig, 3), num(e.partial, 3), num(Some(e.tolerance), 3)])
+            })
+            .collect();
+        let columns = [tr!("o-beta-in"), tr!("o-t"), tr!("o-sig"), tr!("o-partial-correlation"), tr!("o-tolerance")].map(String::from).to_vec();
+        let names: Vec<String> = left_out.iter().filter_map(|&j| all_names.get(j).cloned()).collect();
+        items.push(Item::Table(Table { title: tr!("o-excluded-variables"), columns, rows, categories: Vec::new() }));
+        items.push(Item::Text(tr!(
+            "o-regression-excluded-note",
+            names = names.join(", "),
+            tolerance = mksigma_i18n::decimal(&format!("{}", options.tolerance))
+        )));
+    }
+    Ok(items)
 }
 
 #[cfg(test)]
@@ -263,8 +388,9 @@ mod tests {
     }
 
     #[test]
-    fn two_heavy_cases_cannot_fit_three_coefficients() {
-        // N = 20 by the weights, but two points can't place a plane.
+    fn two_heavy_cases_fit_a_line_and_leave_the_plane_out() {
+        // N = 20 by the weights, but two points place a line, not a plane: b can't enter after
+        // a, and the line fits them exactly.
         let mut ds = Dataset::new();
         for name in ["y", "a", "b", "w"] {
             ds.add_variable(Variable::numeric(name)).unwrap();
@@ -273,8 +399,13 @@ mod tests {
             ds.push_case(row.iter().map(|v| Value::Num(*v)).collect()).unwrap();
         }
         ds.weight = Some(3);
-        let items = regression(&ds, &Options { dependent: "y".into(), predictors: vec!["a".into(), "b".into()], ci: None }).unwrap();
-        assert!(matches!(&items[..], [Item::Warning(_)]), "{items:?}");
+        let items =
+            regression(&ds, &Options { dependent: "y".into(), predictors: vec!["a".into(), "b".into()], ci: None, tolerance: TOLERANCE }).unwrap();
+        let Item::Table(anova) = &items[2] else { panic!("{items:?}") };
+        assert_eq!((value(&anova.rows[1].1[1]), value(&anova.rows[0].1[5])), (0.0, 0.0), "no residual; F infinite, its significance 0");
+        let Item::Table(summary) = &items[0] else { panic!() };
+        assert_eq!(value(&summary.rows[0].1[1]), 1.0, "R² stays within 1");
+        assert!(matches!(&items[4], Item::Table(t) if t.rows[0].0 == "b"));
     }
 
     fn dataset(rows: &[(f64, f64, f64)]) -> Dataset {
@@ -292,7 +423,7 @@ mod tests {
     fn simple_regression_by_hand() {
         // x = 1..5, y = 2, 4, 5, 4, 5: slope 0.6, intercept 2.2, R² = 0.6.
         let ds = dataset(&[(2.0, 1.0, 0.0), (4.0, 2.0, 0.0), (5.0, 3.0, 0.0), (4.0, 4.0, 0.0), (5.0, 5.0, 0.0)]);
-        let items = regression(&ds, &Options { dependent: "y".into(), predictors: vec!["x1".into()], ci: Some(0.95) }).unwrap();
+        let items = regression(&ds, &Options { dependent: "y".into(), predictors: vec!["x1".into()], ci: Some(0.95), tolerance: TOLERANCE }).unwrap();
         let Item::Table(summary) = &items[0] else { panic!() };
         assert!((value(&summary.rows[0].1[1]) - 0.6).abs() < 1e-12);
         let Item::Table(coef) = &items[3] else { panic!() };
@@ -310,15 +441,66 @@ mod tests {
         // y = 1 + 2 x1 − 3 x2 exactly.
         let rows: Vec<(f64, f64, f64)> =
             [(1.0, 2.0), (2.0, 1.0), (3.0, 5.0), (4.0, 2.0), (5.0, 7.0), (6.0, 3.0)].iter().map(|&(a, b)| (1.0 + 2.0 * a - 3.0 * b, a, b)).collect();
-        let items = regression(&dataset(&rows), &Options { dependent: "y".into(), predictors: vec!["x1".into(), "x2".into()], ci: None }).unwrap();
+        let items = regression(
+            &dataset(&rows),
+            &Options { dependent: "y".into(), predictors: vec!["x1".into(), "x2".into()], ci: None, tolerance: TOLERANCE },
+        )
+        .unwrap();
         let Item::Table(coef) = &items[3] else { panic!() };
         assert!((value(&coef.rows[0].1[1]) - 1.0).abs() < 1e-9);
         assert!((value(&coef.rows[1].1[1]) - 2.0).abs() < 1e-9);
         assert!((value(&coef.rows[2].1[1]) + 3.0).abs() < 1e-9);
 
         let collinear: Vec<(f64, f64, f64)> = (1..8).map(|i| (f64::from(i) * 1.5, f64::from(i), f64::from(i) * 2.0)).collect();
-        let items =
-            regression(&dataset(&collinear), &Options { dependent: "y".into(), predictors: vec!["x1".into(), "x2".into()], ci: None }).unwrap();
-        assert!(matches!(&items[0], Item::Warning(s) if s.contains("linear combination")));
+        let items = regression(
+            &dataset(&collinear),
+            &Options { dependent: "y".into(), predictors: vec!["x1".into(), "x2".into()], ci: None, tolerance: TOLERANCE },
+        )
+        .unwrap();
+        // x2 = 2 x1 can't enter after x1: the model is y on x1 alone, an exact fit, whose t and
+        // significance are infinite and 0 (a NaN t once crashed the significance), and x2 is
+        // listed as excluded, its tolerance 0.
+        let Item::Table(coef) = &items[3] else { panic!("{items:?}") };
+        assert_eq!(coef.rows.len(), 2);
+        assert!((value(&coef.rows[1].1[1]) - 1.5).abs() < 1e-9);
+        let Item::Table(excluded) = &items[4] else { panic!("{items:?}") };
+        assert_eq!((excluded.title.as_str(), excluded.rows[0].0.as_str()), ("Excluded Variables", "x2"));
+        assert!(value(&excluded.rows[0].1[4]) < 1e-12 && excluded.rows[0].1[0] == Cell::Empty);
+        // Every predictor constant: nothing enters.
+        let flat: Vec<(f64, f64, f64)> = (1..6).map(|i| (f64::from(i), 1.0, 2.0)).collect();
+        let items = regression(
+            &dataset(&flat),
+            &Options { dependent: "y".into(), predictors: vec!["x1".into(), "x2".into()], ci: None, tolerance: TOLERANCE },
+        )
+        .unwrap();
+        assert!(matches!(&items[..], [Item::Warning(s)] if s.contains("tolerance")), "{items:?}");
+    }
+
+    #[test]
+    fn a_predictor_under_the_tolerance_is_listed_with_its_partial_correlation() {
+        // x2 tracks x1 closely; with TOLERANCE(.5) it stays out.
+        let rows: Vec<(f64, f64, f64)> =
+            [(3.0, 1.0, 1.2), (5.0, 2.0, 1.9), (4.0, 3.0, 3.3), (8.0, 4.0, 3.8), (9.0, 5.0, 5.1), (12.0, 6.0, 6.4)].to_vec();
+        let options = Options { dependent: "y".into(), predictors: vec!["x1".into(), "x2".into()], ci: None, tolerance: 0.5 };
+        let items = regression(&dataset(&rows), &options).unwrap();
+        let Some(Item::Table(excluded)) = items.iter().find(|i| matches!(i, Item::Table(t) if t.title == "Excluded Variables")) else {
+            panic!("{items:?}")
+        };
+        let cells = &excluded.rows[0].1;
+        // The partial correlation from the simple ones: (r_y2 − r_y1 r_12) / √((1 − r_y1²)(1 − r_12²)).
+        let r = |a: &dyn Fn(&(f64, f64, f64)) -> f64, b: &dyn Fn(&(f64, f64, f64)) -> f64| {
+            let n = rows.len() as f64;
+            let (ma, mb) = (rows.iter().map(a).sum::<f64>() / n, rows.iter().map(b).sum::<f64>() / n);
+            let sab: f64 = rows.iter().map(|q| (a(q) - ma) * (b(q) - mb)).sum();
+            let saa: f64 = rows.iter().map(|q| (a(q) - ma).powi(2)).sum();
+            let sbb: f64 = rows.iter().map(|q| (b(q) - mb).powi(2)).sum();
+            sab / (saa * sbb).sqrt()
+        };
+        let (ry1, ry2, r12) = (r(&|q| q.0, &|q| q.1), r(&|q| q.0, &|q| q.2), r(&|q| q.1, &|q| q.2));
+        let partial = (ry2 - ry1 * r12) / ((1.0 - ry1 * ry1) * (1.0 - r12 * r12)).sqrt();
+        assert!((value(&cells[3]) - partial).abs() < 1e-12, "{} against {partial}", value(&cells[3]));
+        assert!((value(&cells[4]) - (1.0 - r12 * r12)).abs() < 1e-12, "the tolerance is 1 − r12² with one predictor in");
+        // t from the partial correlation, with n − 1 − 2 degrees of freedom.
+        assert!((value(&cells[1]) - partial * (3.0 / (1.0 - partial * partial)).sqrt()).abs() < 1e-12);
     }
 }

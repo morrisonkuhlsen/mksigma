@@ -138,7 +138,8 @@ fn linear(name: &str, y: &[f64], xs: &[Vec<f64>], c: &Certified, digits: f64) {
     let mut columns: Vec<(&str, &[f64])> = vec![("y", y)];
     columns.extend(names.iter().map(String::as_str).zip(xs.iter().map(Vec::as_slice)));
     let ds = dataset(&columns);
-    let options = RegressionOptions { dependent: "y".into(), predictors: names.clone(), ci: None };
+    // Every predictor enters, as NIST certifies the full model: the lowest tolerance there is.
+    let options = RegressionOptions { dependent: "y".into(), predictors: names.clone(), ci: None, tolerance: f64::MIN_POSITIVE };
     let items = mksigma_stats::regression(&ds, &options).unwrap();
     let t = tables(&items);
     if t.is_empty() {

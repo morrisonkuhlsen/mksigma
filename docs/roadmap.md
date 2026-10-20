@@ -220,7 +220,10 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
 - **REGRESSION — done:** the cross-products of the deviations, the slopes from Sxx b = Sxy
   (Sxx inverted by Gauss–Jordan, every row operation shown, with two predictors or more), the
   constant, the analysis of variance, R², and each coefficient's standard error, t, beta and
-  interval.
+  interval. As in SPSS, `/METHOD=ENTER` applies the tolerance test (`/CRITERIA=TOLERANCE`,
+  .0001 by default): a predictor that is (almost) a combination of those before it is left
+  out and listed in Excluded Variables (Beta In, t, partial correlation, tolerance), each
+  figure with its Σ.
 - **LOGISTIC REGRESSION — done:** the coding of the dependent, the constant-only model (its
   probability, log odds and −2LL), every Newton–Raphson iteration (the first with the gradient
   and the information written out case by case; then g, H, H⁻¹, the step and the new

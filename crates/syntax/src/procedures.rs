@@ -569,6 +569,7 @@ pub(crate) fn regression(rest: &[Token]) -> Result<Command, SyntaxError> {
     const CMD: &str = "REGRESSION";
     let bad = |expected| SyntaxError::Expected { command: CMD, expected };
     let (mut dependent, mut predictors, mut ci) = (None, None, None);
+    let mut tolerance = 0.0001;
     for (name, tokens) in subcommands(rest) {
         let name = name.ok_or(bad("/DEPENDENT= and /METHOD=ENTER"))?;
         if is_keyword(name, "DEPENDENT") {
@@ -614,15 +615,27 @@ pub(crate) fn regression(rest: &[Token]) -> Result<Command, SyntaxError> {
             if !matches!(tokens, [Token::Word(w)] if is_keyword(w, "LISTWISE")) {
                 return Err(unsupported(CMD, "/MISSING other than LISTWISE"));
             }
-        } else if is_keyword(name, "CRITERIA") || is_keyword(name, "NOORIGIN") {
-            // Entry criteria only matter for stepwise methods; NOORIGIN is the default.
+        } else if is_keyword(name, "CRITERIA") {
+            // TOLERANCE(t) decides which predictors ENTER takes; PIN, POUT and the others only
+            // matter for stepwise methods.
+            let at = tokens.iter().position(|t| matches!(t, Token::Word(w) if w.eq_ignore_ascii_case("TOLERANCE")));
+            if let Some(at) = at {
+                tolerance = match (tokens.get(at + 1), tokens.get(at + 2), tokens.get(at + 3)) {
+                    (Some(Token::LParen), Some(Token::Word(t)), Some(Token::RParen)) => {
+                        t.parse::<f64>().ok().filter(|t| *t > 0.0 && *t < 1.0).ok_or(bad("TOLERANCE(t) with 0 < t < 1, such as TOLERANCE(.0001)"))?
+                    }
+                    _ => return Err(bad("TOLERANCE(t) with 0 < t < 1, such as TOLERANCE(.0001)")),
+                };
+            }
+        } else if is_keyword(name, "NOORIGIN") {
+            // The default: a constant in the model.
         } else {
             return Err(unsupported(CMD, &format!("/{name}")));
         }
     }
     let dependent = dependent.ok_or(bad("/DEPENDENT=variable"))?;
     let predictors = predictors.ok_or(bad("/METHOD=ENTER predictors"))?;
-    Ok(Command::Regression { dependent, predictors, ci })
+    Ok(Command::Regression { dependent, predictors, ci, tolerance })
 }
 
 #[cfg(test)]
@@ -700,9 +713,9 @@ mod tests {
     fn regression_syntax_as_spss_pastes_it() {
         assert_eq!(
             one(
-                "REGRESSION /MISSING LISTWISE /STATISTICS COEFF OUTS CI(99) R ANOVA /CRITERIA=PIN(.05) POUT(.10) /NOORIGIN /DEPENDENT renda /METHOD=ENTER idade escolaridade."
+                "REGRESSION /MISSING LISTWISE /STATISTICS COEFF OUTS CI(99) R ANOVA /CRITERIA=PIN(.05) POUT(.10) TOLERANCE(.05) /NOORIGIN /DEPENDENT renda /METHOD=ENTER idade escolaridade."
             ),
-            Command::Regression { dependent: "renda".into(), predictors: names(&["idade", "escolaridade"]), ci: Some(0.99) }
+            Command::Regression { dependent: "renda".into(), predictors: names(&["idade", "escolaridade"]), ci: Some(0.99), tolerance: 0.05 }
         );
         assert!(parse("REGRESSION /DEPENDENT y /METHOD=STEPWISE x.").is_err());
         assert!(parse("REGRESSION /DEPENDENT y /METHOD=ENTER a /METHOD=ENTER b.").is_err());
