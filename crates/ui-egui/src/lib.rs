@@ -668,7 +668,17 @@ impl SigmaApp {
         }
         let t = Tokens::get(ui.ctx());
         // The window's own background: a bare root Ui (as eframe gives) paints none.
-        ui.painter().rect_filled(ui.max_rect().expand(8.0), 0.0, t.window);
+        let whole = ui.max_rect().expand(8.0);
+        ui.painter().rect_filled(whole, 0.0, t.window);
+        // The chrome — title row, tabs and ribbon — is one surface over the workspace, painted
+        // once its height is known.
+        let chrome = ui.painter().add(egui::Shape::Noop);
+        let paint_chrome = |ui: &egui::Ui| {
+            let bottom = ui.cursor().top();
+            let rect = egui::Rect::from_min_max(whole.min, egui::pos2(whole.right(), bottom));
+            ui.painter().set(chrome, egui::Shape::rect_filled(rect, 0.0, t.ribbon));
+            ui.painter().hline(whole.x_range(), bottom, egui::Stroke::new(1.0, t.border));
+        };
         ui.spacing_mut().item_spacing.y = 0.0;
 
         let document = format!("{}{}", if self.session.modified { "• " } else { "" }, self.file_name.as_deref().unwrap_or(&untitled));
@@ -684,6 +694,9 @@ impl SigmaApp {
         };
         let mut actions = Vec::new();
         actions.extend(ribbon::title_bar(ui, &state));
+        if self.backstage.is_some() {
+            paint_chrome(ui);
+        }
         // The File backstage takes the whole window under the title row.
         if let Some(page) = self.backstage {
             for action in actions {
@@ -712,6 +725,7 @@ impl SigmaApp {
             return;
         }
         actions.extend(ribbon::ribbon(ui, &mut self.tab, &mut self.ribbon_collapsed, &state));
+        paint_chrome(ui);
         for action in actions {
             self.act(ui.ctx(), action);
         }
@@ -1048,15 +1062,12 @@ impl SigmaApp {
         theme::card(&t).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             ui.spacing_mut().item_spacing.y = 4.0;
-            ui.horizontal(|ui| {
-                icons::show(ui, Icon::List, 14.0);
-                ui.label(egui::RichText::new(tr!("syntax")).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ribbon::accent_button(ui, Icon::Run, &tr!("run")).on_hover_text(tr!("run-tip")).clicked() {
-                        self.run_syntax();
-                    }
-                });
+            let run = theme::pane_header(ui, Icon::List, &tr!("syntax"), "", |ui| {
+                ribbon::accent_button(ui, Icon::Run, &tr!("run")).on_hover_text(tr!("run-tip")).clicked()
             });
+            if run {
+                self.run_syntax();
+            }
             ui.add(egui::TextEdit::multiline(&mut self.syntax).code_editor().desired_rows(5).desired_width(f32::INFINITY));
             self.steps_panel(ui);
         });
@@ -1091,11 +1102,12 @@ impl SigmaApp {
         let steps = self.session.steps();
         let count = steps.len();
         egui::CollapsingHeader::new(tr!("steps-title", n = count)).id_salt("steps").default_open(true).show(ui, |ui| {
-            if steps.iter().any(|s| s.enabled && s.syntax().is_some()) && ui.small_button(tr!("steps-paste")).clicked() {
+            if steps.iter().any(|s| s.enabled && s.syntax().is_some()) && theme::ghost(ui, &tr!("steps-paste"), "", true) {
                 paste = true;
             }
             egui::ScrollArea::vertical().id_salt("steps-list").max_height(110.0).stick_to_bottom(true).show(ui, |ui| {
-                let text_width = (ui.available_width() - 210.0).max(120.0);
+                // What the step's buttons leave, so a narrow pane never grows past its share.
+                let text_width = (ui.available_width() - 240.0).max(60.0);
                 for (i, step) in steps.iter().enumerate() {
                     ui.horizontal(|ui| {
                         let mut enabled = step.enabled;
@@ -1125,13 +1137,14 @@ impl SigmaApp {
                             ui.add_sized([text_width, ROW_HEIGHT], egui::Label::new(text).truncate());
                         }
                         // Plain words: the default font has no arrow or cross glyphs.
-                        if ui.add_enabled(i > 0, egui::Button::new(tr!("step-up")).small()).on_hover_text(tr!("step-up-tip")).clicked() {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        if theme::ghost(ui, &tr!("step-up"), &tr!("step-up-tip"), i > 0) {
                             commits.push(Commit::MoveStep(i, true));
                         }
-                        if ui.add_enabled(i + 1 < count, egui::Button::new(tr!("step-down")).small()).on_hover_text(tr!("step-down-tip")).clicked() {
+                        if theme::ghost(ui, &tr!("step-down"), &tr!("step-down-tip"), i + 1 < count) {
                             commits.push(Commit::MoveStep(i, false));
                         }
-                        if ui.small_button(tr!("step-remove")).on_hover_text(tr!("step-remove-tip")).clicked() {
+                        if theme::ghost(ui, &tr!("step-remove"), &tr!("step-remove-tip"), true) {
                             commits.push(Commit::RemoveStep(i));
                         }
                     });

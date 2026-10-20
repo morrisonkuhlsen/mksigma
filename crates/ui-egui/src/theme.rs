@@ -136,7 +136,13 @@ pub fn apply(ctx: &egui::Context) {
         }
         v.window_corner_radius = egui::CornerRadius::ZERO;
         v.menu_corner_radius = egui::CornerRadius::ZERO;
-        v.popup_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(if t.dark { 90 } else { 40 }) };
+        // A dialog's title bar is the open state's fill: the faint header tone, not a grey band.
+        v.widgets.open.weak_bg_fill = t.header_bg;
+        v.widgets.open.bg_fill = t.header_bg;
+        v.widgets.open.bg_stroke = Stroke::new(1.0, t.border);
+        // A soft, wide shadow lifts dialogs and menus without a heavy edge.
+        v.popup_shadow =
+            egui::epaint::Shadow { offset: [0, 8], blur: 28, spread: 0, color: Color32::from_black_alpha(if t.dark { 110 } else { 28 }) };
         v.window_shadow = v.popup_shadow;
         v.striped = true;
         ctx.set_visuals_of(theme, v);
@@ -147,8 +153,10 @@ pub fn apply(ctx: &egui::Context) {
     });
     ctx.all_styles_mut(|s| {
         s.spacing.item_spacing = egui::vec2(6.0, 4.0);
-        s.spacing.button_padding = egui::vec2(6.0, 3.0);
-        s.spacing.interact_size.y = 22.0;
+        s.spacing.button_padding = egui::vec2(10.0, 4.0);
+        s.spacing.interact_size.y = 24.0;
+        s.spacing.window_margin = egui::Margin::same(14);
+        s.spacing.menu_margin = egui::Margin::same(6);
         s.text_styles.insert(egui::TextStyle::Body, egui::FontId::proportional(13.0));
         s.text_styles.insert(egui::TextStyle::Button, egui::FontId::proportional(13.0));
         s.text_styles.insert(egui::TextStyle::Small, egui::FontId::proportional(11.0));
@@ -157,7 +165,63 @@ pub fn apply(ctx: &egui::Context) {
     });
 }
 
-/// A white (or dark) panel with a hairline border: the ribbon, the syntax editor, the Output.
+/// A white (or dark) panel with a hairline border: the syntax editor, the Output, the Filters.
 pub fn card(t: &Tokens) -> egui::Frame {
-    egui::Frame::new().fill(t.ribbon).stroke(Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(8))
+    egui::Frame::new().fill(t.ribbon).stroke(Stroke::new(1.0, t.border)).inner_margin(egui::Margin::symmetric(12, 8))
+}
+
+/// Text and icons on the accent colour: white on the light theme's deep blue, near-black on the
+/// dark theme's pale one, so both read clearly.
+pub fn on_accent(t: &Tokens) -> Color32 {
+    if t.dark { t.window } else { Color32::WHITE }
+}
+
+/// Height of a pane's header row.
+pub const HEADER_HEIGHT: f32 = 28.0;
+
+/// A pane's header, the same in every pane: an icon and the title on the left, `actions` laid
+/// out from the right, and a hairline under the row.
+pub fn pane_header<R>(ui: &mut egui::Ui, icon: crate::icons::Icon, title: &str, tip: &str, actions: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let t = Tokens::get(ui.ctx());
+    let inner = ui
+        .horizontal(|ui| {
+            ui.set_min_height(HEADER_HEIGHT);
+            ui.spacing_mut().item_spacing.x = 6.0;
+            crate::icons::show(ui, icon, 14.0);
+            let label = ui.label(egui::RichText::new(title).size(13.5).color(t.text).strong());
+            if !tip.is_empty() {
+                label.on_hover_text(tip);
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                actions(ui)
+            })
+            .inner
+        })
+        .inner;
+    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, t.border));
+    ui.add_space(8.0);
+    inner
+}
+
+/// A quiet action in a header or beside an Output item: text in the dim colour, a tint only
+/// under the pointer. Disabled, it fades.
+pub fn ghost(ui: &mut egui::Ui, text: &str, tip: &str, enabled: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(12.5), t.text_dim);
+    let size = egui::vec2(galley.size().x + 14.0, 22.0);
+    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, text));
+    let color = if !enabled {
+        t.text_dim.gamma_multiply(0.45)
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.hover);
+        t.text
+    } else {
+        t.text_dim
+    };
+    ui.painter().galley_with_override_text_color(rect.center() - galley.size() / 2.0, galley, color);
+    let response = if tip.is_empty() { response } else { response.on_hover_text(tip) };
+    response.clicked()
 }

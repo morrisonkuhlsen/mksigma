@@ -155,7 +155,10 @@ pub(crate) fn show(ui: &mut egui::Ui, view: &View) -> Option<Action> {
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         action = Some(Action::Back);
     }
-    let area = ui.available_rect_before_wrap();
+    // To the window's edges: the backstage covers everything under the title row.
+    let below = ui.available_rect_before_wrap();
+    let screen = ui.ctx().content_rect();
+    let area = egui::Rect::from_min_max(egui::pos2(screen.left(), below.top()), screen.max);
     let column = egui::Rect::from_min_size(area.min, egui::vec2(COLUMN, area.height()));
     ui.painter().rect_filled(column, 0.0, INK);
     ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(column.right(), area.top()), area.max), 0.0, t.window);

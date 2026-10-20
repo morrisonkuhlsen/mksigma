@@ -2,7 +2,7 @@
 //! touching the screen.
 //!
 //! `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav] [--variables] [--labels]
-//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--filters] [--tab NAME] [--splash] [--lang CODE] [--learn ID|list] [--explain ITEM [--every-term]] [--backstage] [--dialog KIND [--dialog-vars 'SLOT:VAR...']]
+//!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--filters] [--dark] [--tab NAME] [--splash] [--lang CODE] [--learn ID|list] [--explain ITEM [--every-term]] [--backstage] [--dialog KIND [--dialog-vars 'SLOT:VAR...']]
 //!  [--size 1280x800] out.png` (`--disable` switches off applied step N, counting from 1, after
 //!  `--run`; `--select` cross-filters by category PART of Output item ITEM, both counting from 1:
 //!  a bar, bin or box, or a table row; `--pin` pins Output item ITEM to the dashboard and
@@ -26,6 +26,7 @@ fn main() -> Result<(), String> {
     let mut explain = None;
     let mut splash = false;
     let mut every_term = false;
+    let mut dark = false;
     let mut i = 0;
     while let Some(arg) = args.get(i) {
         match arg.as_str() {
@@ -57,6 +58,7 @@ fn main() -> Result<(), String> {
             "--dashboard" => app.output_state.dashboard = true,
             "--no-ribbon" => app.ribbon_collapsed = true,
             "--filters" => app.filters_open = true,
+            "--dark" => dark = true,
             "--splash" => splash = true,
             "--learn" => {
                 i += 1;
@@ -175,6 +177,9 @@ fn main() -> Result<(), String> {
         .with_pixels_per_point(1.0)
         .wgpu()
         .build_ui_state(|ui, app: &mut SigmaApp| app.ui(ui), app);
+    if dark {
+        harness.ctx.set_theme(egui::Theme::Dark);
+    }
     harness.run_steps(6);
     let image = harness.render().map_err(|e| e.to_string())?;
     image.save(&out).map_err(|e| e.to_string())?;

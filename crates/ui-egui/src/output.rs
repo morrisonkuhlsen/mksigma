@@ -66,50 +66,30 @@ fn copy_as_latex(response: &egui::Response, item: &Item, style: &Style) {
     });
 }
 
-/// The pane's heading: what it shows, the Output or the dashboard. The view rail switches
-/// between them; the heading only names it.
-fn heading(ui: &mut egui::Ui, icon: crate::icons::Icon, name: &str, tip: &str) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        crate::icons::show(ui, icon, 14.0);
-        ui.label(egui::RichText::new(name).strong()).on_hover_text(tip);
-    });
-}
-
 pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut OutputState) -> OutputAction {
     let mut action = OutputAction::None;
     let output = &session.output;
     let t = crate::theme::Tokens::get(ui.ctx());
     let tiles = session.dashboard();
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 14.0;
+    let (icon, title, tip) = if state.dashboard {
+        (crate::icons::Icon::Dashboard, tr!("out-dashboard"), tr!("out-dashboard-tip", n = tiles.len()))
+    } else {
+        (crate::icons::Icon::Table, tr!("out-output"), tr!("out-output-tip"))
+    };
+    crate::theme::pane_header(ui, icon, &title, &tip, |ui| {
+        let ghost = crate::theme::ghost;
         if state.dashboard {
-            heading(ui, crate::icons::Icon::Dashboard, &tr!("out-dashboard"), &tr!("out-dashboard-tip", n = tiles.len()));
-        } else {
-            heading(ui, crate::icons::Icon::Table, &tr!("out-output"), &tr!("out-output-tip"));
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if state.dashboard {
-                if ui
-                    .add_enabled(!tiles.is_empty(), egui::Button::new(tr!("out-export-dashboard")).small())
-                    .on_hover_text(tr!("out-export-dashboard-tip"))
-                    .clicked()
-                {
-                    action = OutputAction::ExportDashboard;
-                }
-                let tip = tr!("out-save-dashboard-tip");
-                if ui.add_enabled(!tiles.is_empty(), egui::Button::new(tr!("out-save-dashboard")).small()).on_hover_text(tip).clicked() {
-                    action = OutputAction::SaveDashboard;
-                }
-            } else if !output.items.is_empty() && ui.small_button(tr!("out-clear")).on_hover_text(tr!("clear-output-tip")).clicked() {
-                state.transposed.clear();
-                action = OutputAction::Clear;
+            if ghost(ui, &tr!("out-export-dashboard"), &tr!("out-export-dashboard-tip"), !tiles.is_empty()) {
+                action = OutputAction::ExportDashboard;
             }
-        });
+            if ghost(ui, &tr!("out-save-dashboard"), &tr!("out-save-dashboard-tip"), !tiles.is_empty()) {
+                action = OutputAction::SaveDashboard;
+            }
+        } else if !output.items.is_empty() && ghost(ui, &tr!("out-clear"), &tr!("clear-output-tip"), true) {
+            state.transposed.clear();
+            action = OutputAction::Clear;
+        }
     });
-    ui.add_space(4.0);
-    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), egui::Stroke::new(1.0, t.border));
-    ui.add_space(8.0);
     let empty = |ui: &mut egui::Ui, title: &str, hint: &str| {
         ui.add_space(40.0);
         ui.vertical_centered(|ui| {
@@ -138,7 +118,8 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
             if let Some(a) = show_item(ui, session, state, i, item, Some(session.is_pinned(i))) {
                 action = a;
             }
-            ui.add_space(12.0);
+            // Air between items: each table or chart reads as its own block.
+            ui.add_space(20.0);
         }
     });
     action
@@ -184,17 +165,19 @@ fn card(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, tiles: &[
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button(tr!("out-unpin")).on_hover_text(tr!("out-unpin-tip")).clicked() {
+                let ghost = crate::theme::ghost;
+                ui.spacing_mut().item_spacing.x = 2.0;
+                if ghost(ui, &tr!("out-unpin"), &tr!("out-unpin-tip"), true) {
                     action = Some(OutputAction::Pin(i));
                 }
                 let (label, tip) = if wide { (tr!("out-narrow"), tr!("out-narrow-tip")) } else { (tr!("out-wide"), tr!("out-wide-tip")) };
-                if ui.small_button(label).on_hover_text(tip).clicked() {
+                if ghost(ui, &label, &tip, true) {
                     action = Some(OutputAction::Wide(i, !wide));
                 }
-                if ui.add_enabled(k + 1 < tiles.len(), egui::Button::new(">").small()).on_hover_text(tr!("out-move-later")).clicked() {
+                if ghost(ui, ">", &tr!("out-move-later"), k + 1 < tiles.len()) {
                     action = Some(OutputAction::MoveTile(k, false));
                 }
-                if ui.add_enabled(k > 0, egui::Button::new("<").small()).on_hover_text(tr!("out-move-earlier")).clicked() {
+                if ghost(ui, "<", &tr!("out-move-earlier"), k > 0) {
                     action = Some(OutputAction::MoveTile(k, true));
                 }
             });
@@ -268,7 +251,7 @@ fn show_item(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, i: u
                     {
                         action = Some(OutputAction::Pin(i));
                     }
-                    if explain && ui.small_button("Σ").on_hover_text(tr!("out-sigma-tip")).clicked() {
+                    if explain && crate::theme::ghost(ui, "Σ", &tr!("out-sigma-tip"), true) {
                         action = Some(OutputAction::Explain(i));
                     }
                 });
@@ -340,16 +323,9 @@ pub(crate) fn filters_pane(ui: &mut egui::Ui, session: &Session, state: &mut Out
         ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 8.0))).layout(egui::Layout::top_down(egui::Align::Min)));
     let ui = &mut pane;
     ui.spacing_mut().item_spacing.y = 6.0;
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(tr!("filters")).size(15.0).color(t.text));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if crate::icon_button(ui, Icon::ChevronRight, &tr!("filters-hide")) {
-                *open = false;
-            }
-        });
-    });
-    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), egui::Stroke::new(1.0, t.border));
-    ui.add_space(4.0);
+    if crate::theme::pane_header(ui, Icon::Filter, &tr!("filters"), "", |ui| crate::icon_button(ui, Icon::ChevronRight, &tr!("filters-hide"))) {
+        *open = false;
+    }
     let card = egui::Frame::new().fill(t.paper).stroke(egui::Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(8));
     egui::ScrollArea::vertical().id_salt("filters").auto_shrink([false, false]).show(ui, |ui| {
         let names: Vec<String> = session.slicers().iter().map(|s| s.variable.clone()).chain(state.pending.iter().cloned()).collect();
@@ -383,7 +359,7 @@ pub(crate) fn filters_pane(ui: &mut egui::Ui, session: &Session, state: &mut Out
                 ui.set_width(ui.available_width());
                 ui.label(egui::RichText::new(tr!("filters-cross")).strong());
                 ui.label(egui::RichText::new(category.label.as_str()).color(t.accent));
-                if ui.small_button(tr!("out-clear-filter")).on_hover_text(tr!("out-clear-filter-tip")).clicked() {
+                if crate::theme::ghost(ui, &tr!("out-clear-filter"), &tr!("out-clear-filter-tip"), true) {
                     action = OutputAction::ClearFilter;
                 }
             });
@@ -499,20 +475,25 @@ fn table(
     style: &Style,
 ) -> TableClick {
     let mut click = TableClick { pivot: false, pin: false, explain: false, learn: false, select: None };
+    // The title, then the item's quiet actions: pivot, its calculation, its article, the pin.
     ui.horizontal(|ui| {
-        let title = ui.add(egui::Label::new(egui::RichText::new(&t.title).strong()).sense(egui::Sense::click()));
+        let title = ui.add(egui::Label::new(egui::RichText::new(&t.title).size(14.0).strong()).sense(egui::Sense::click()));
         copy_as_latex(&title, &Item::Table(t.clone()), style);
-        click.pivot = ui.small_button(tr!("out-pivot")).on_hover_text(tr!("out-pivot-tip")).clicked();
+        ui.add_space(6.0);
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let ghost = crate::theme::ghost;
+        click.pivot = ghost(ui, &tr!("out-pivot"), &tr!("out-pivot-tip"), true);
         if explain {
-            click.explain = ui.small_button("Σ").on_hover_text(tr!("out-sigma-tip")).clicked();
+            click.explain = ghost(ui, "Σ", &tr!("out-sigma-tip"), true);
         }
         if learn {
-            click.learn = ui.small_button("?").on_hover_text(tr!("learn-about-tip")).clicked();
+            click.learn = ghost(ui, "?", &tr!("learn-about-tip"), true);
         }
         if let Some(pinned) = pin {
             click.pin = pin_button(ui, pinned);
         }
     });
+    ui.add_space(2.0);
     // Where each row of `t` is selected: a cell's column, or `None` for the row label.
     let key = |row: usize| t.rows.get(row).and_then(|(_, cells)| cells.iter().position(|c| matches!(c, Cell::Text(_))));
     let shown = if flipped { t.transposed() } else { t.clone() };

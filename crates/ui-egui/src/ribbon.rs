@@ -7,7 +7,7 @@ use crate::icons::{self, Icon};
 use crate::output::ExportFormat;
 use crate::procedure::Kind;
 use crate::suggest::Procedure;
-use crate::theme::{self, Tokens};
+use crate::theme::Tokens;
 use mksigma_i18n::tr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -126,16 +126,17 @@ fn switch(ui: &mut egui::Ui, on: bool, name: &str) -> egui::Response {
 /// A filled accent button with a white icon shape and text, for the one main action of a panel.
 pub(crate) fn accent_button(ui: &mut egui::Ui, icon: Icon, text: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(13.0), egui::Color32::WHITE);
-    let size = egui::vec2(galley.size().x + 36.0, 24.0);
+    let ink = crate::theme::on_accent(&t);
+    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(13.0), ink);
+    let size = egui::vec2(galley.size().x + 36.0, 26.0);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
     let fill = if response.hovered() { t.accent.gamma_multiply(0.85) } else { t.accent };
     ui.painter().rect_filled(rect, 0.0, fill);
-    let mut white = t;
-    white.accent = egui::Color32::WHITE;
-    icons::paint(ui.painter(), egui::Rect::from_center_size(egui::pos2(rect.left() + 15.0, rect.center().y), egui::vec2(12.0, 12.0)), icon, &white);
-    ui.painter().galley(egui::pos2(rect.left() + 26.0, rect.center().y - galley.size().y / 2.0), galley, egui::Color32::WHITE);
+    let mut on = t;
+    on.accent = ink;
+    icons::paint(ui.painter(), egui::Rect::from_center_size(egui::pos2(rect.left() + 15.0, rect.center().y), egui::vec2(12.0, 12.0)), icon, &on);
+    ui.painter().galley(egui::pos2(rect.left() + 26.0, rect.center().y - galley.size().y / 2.0), galley, ink);
     response
 }
 
@@ -269,8 +270,8 @@ pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, collapsed: &mut bool, sta
     if *collapsed {
         return action;
     }
-    ui.add_space(2.0);
-    theme::card(&t).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
+    // The buttons sit on the chrome itself, under the tabs, with no frame of their own.
+    egui::Frame::new().inner_margin(egui::Margin { left: 4, right: 4, top: 2, bottom: 6 }).show(ui, |ui| {
         ui.set_min_size(egui::vec2(ui.available_width(), RIBBON_HEIGHT));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;

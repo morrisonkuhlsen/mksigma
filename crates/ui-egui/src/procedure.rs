@@ -505,13 +505,19 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                             ui.vertical(|ui| {
                                 ui.add_space(22.0);
                                 let back = dialog.picked_in.as_ref().is_some_and(|(s, _)| *s == k);
-                                let (label, tip) = if back {
-                                    ("<", tr!("dlg-take-out", slot = shown(slot.name)))
+                                let (label, icon, tip) = if back {
+                                    ("<", crate::icons::Icon::ChevronLeft, tr!("dlg-take-out", slot = shown(slot.name)))
                                 } else {
-                                    (">", tr!("dlg-put-in", slot = shown(slot.name)))
+                                    (">", crate::icons::Icon::ChevronRight, tr!("dlg-put-in", slot = shown(slot.name)))
                                 };
-                                let button = egui::Button::new(label).min_size(egui::vec2(28.0, 24.0));
-                                if ui.add(button).on_hover_text(tip).clicked() {
+                                // A square arrow button, a real target between the two lists.
+                                let (rect, response) = ui.allocate_exact_size(egui::vec2(34.0, 30.0), egui::Sense::click());
+                                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+                                let fill = if response.hovered() { t.accent_soft } else { t.ribbon };
+                                ui.painter().rect_filled(rect, 0.0, fill);
+                                ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                                crate::icons::paint(ui.painter(), egui::Rect::from_center_size(rect.center(), egui::vec2(14.0, 14.0)), icon, &t);
+                                if response.on_hover_text(tip).clicked() {
                                     if let Some((s, name)) = dialog.picked_in.take().filter(|(s, _)| *s == k) {
                                         dialog.remove(s, &name);
                                     } else if let Some(name) = dialog.picked.take() {
@@ -595,12 +601,12 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                     error = Some(e.clone());
                 }
                 ui.add_enabled_ui(built.is_ok(), |ui| {
-                    let ok = egui::Button::new(egui::RichText::new(tr!("dlg-ok")).color(egui::Color32::WHITE))
+                    let ok = egui::Button::new(egui::RichText::new(tr!("dlg-ok")).color(crate::theme::on_accent(&t)))
                         .fill(t.accent)
-                        .min_size(egui::vec2(64.0, 26.0));
+                        .min_size(egui::vec2(72.0, 28.0));
                     let run = ui.add(ok).clicked();
                     let paste =
-                        ui.add(egui::Button::new(tr!("dlg-paste")).min_size(egui::vec2(64.0, 26.0))).on_hover_text(tr!("dlg-paste-tip")).clicked();
+                        ui.add(egui::Button::new(tr!("dlg-paste")).min_size(egui::vec2(72.0, 28.0))).on_hover_text(tr!("dlg-paste-tip")).clicked();
                     if let Ok(s) = &built {
                         if run {
                             outcome = Outcome::Run(s.clone());
