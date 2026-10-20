@@ -4,6 +4,8 @@
 
 use thiserror::Error;
 
+mod dates;
+
 /// One cell of the data matrix.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -87,14 +89,18 @@ impl Format {
         Self { kind, width, decimals }
     }
 
-    /// `v` as this format shows it, without padding. Number formats are covered; date and time
-    /// formats show the underlying number until they are implemented.
+    /// `v` as this format shows it, without padding: numbers, and dates and times as SPSS's date
+    /// formats write them (a date is seconds from 14 October 1582; month and weekday names in
+    /// the reader's language).
     pub fn render(&self, v: &Value) -> String {
         let x = match v {
             Value::SysMis => return ".".to_string(),
             Value::Str(s) => return s.clone(),
             Value::Num(x) => *x,
         };
+        if let Some(text) = dates::render(self.kind, self.width, self.decimals, x) {
+            return text;
+        }
         let d = usize::from(self.decimals);
         match self.kind {
             FormatKind::Comma => grouped(x, d, ',', '.'),
