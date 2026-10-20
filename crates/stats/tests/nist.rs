@@ -18,8 +18,8 @@ use mksigma_stats::{OnewayOptions, RegressionOptions};
 // The fewest correct digits of any figure of each dataset, as MK Sigma computes it now: a
 // floor that no change may lower, raised when the accuracy improves. SmLs07–09 hold values of
 // 10¹² plus tenths, of which a double keeps about four digits: no algorithm gets more from
-// them. Filip is refused (its powers of x look collinear to REGRESSION), and the Wampler
-// polynomials lose digits in the normal equations.
+// them. REGRESSION, by QR, fits Filip's tenth-degree polynomial to 7 digits; Wampler4 and 5
+// add noise so large that their coefficients are poorly determined to begin with.
 const DIGITS_PIDIGITS: f64 = 14.0;
 const DIGITS_LOTTERY: f64 = 14.0;
 const DIGITS_LEW: f64 = 14.0;
@@ -40,22 +40,23 @@ const DIGITS_SMLS06: f64 = 9.0;
 const DIGITS_SMLS07: f64 = 3.0;
 const DIGITS_SMLS08: f64 = 3.0;
 const DIGITS_SMLS09: f64 = 3.0;
-const DIGITS_NORRIS: f64 = 11.0;
-const DIGITS_PONTIUS: f64 = 7.0;
-const DIGITS_FILIP: f64 = 0.0;
-const DIGITS_LONGLEY: f64 = 10.0;
-const DIGITS_WAMPLER1: f64 = 4.0;
-const DIGITS_WAMPLER2: f64 = 8.0;
-const DIGITS_WAMPLER3: f64 = 4.0;
-const DIGITS_WAMPLER4: f64 = 4.0;
-const DIGITS_WAMPLER5: f64 = 4.0;
+const DIGITS_NORRIS: f64 = 12.0;
+const DIGITS_PONTIUS: f64 = 11.0;
+const DIGITS_FILIP: f64 = 7.0;
+const DIGITS_LONGLEY: f64 = 12.0;
+const DIGITS_WAMPLER1: f64 = 9.0;
+const DIGITS_WAMPLER2: f64 = 12.0;
+const DIGITS_WAMPLER3: f64 = 8.0;
+const DIGITS_WAMPLER4: f64 = 7.0;
+const DIGITS_WAMPLER5: f64 = 5.0;
 
 /// Correct significant digits of `x` against `certified` (absolute digits when it is 0), at
 /// most 15.
 fn lre(x: f64, certified: f64) -> f64 {
-    // An F with no residual at all: infinite, or as large as a double goes.
+    // An F with no residual at all is infinite; one past 1/ε, whose residual is only rounding,
+    // is as good.
     if certified.is_infinite() {
-        return if x == certified || x.abs() > 1e300 { 15.0 } else { 0.0 };
+        return if x == certified || x.abs() > 1.0 / f64::EPSILON { 15.0 } else { 0.0 };
     }
     let error = if certified == 0.0 { (x - certified).abs() } else { ((x - certified) / certified).abs() };
     if error == 0.0 { 15.0 } else { (-error.log10()).min(15.0) }

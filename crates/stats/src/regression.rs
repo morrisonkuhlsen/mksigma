@@ -1,9 +1,11 @@
 //! `REGRESSION` with `/METHOD=ENTER`: ordinary least squares of one dependent variable on the
 //! predictors, cases missing any of them excluded (listwise), weights as frequencies.
 //!
-//! Computed on deviations from the weighted means, which keeps sums of squares accurate: the
-//! slopes solve `Sxx b = Sxy`, the constant is `ȳ − b·x̄`. Standard errors come from the inverse
-//! of `Sxx` and the residual mean square.
+//! Solved by a QR decomposition (Householder reflections) of the cases' design matrix, each row
+//! scaled by the square root of its weight, as accurate software does: it never forms `XᵀX`,
+//! whose condition number is the square of the data's, so ill-conditioned predictors (powers of
+//! one variable, say) keep their digits. The residual and regression sums of squares are read
+//! off `Qᵀy`; the standard errors come from `R⁻¹R⁻ᵀ = (XᵀX)⁻¹` and the residual mean square.
 
 use mksigma_core::Dataset;
 use mksigma_i18n::tr;
@@ -58,6 +60,89 @@ pub(crate) fn invert(m: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
     Some(inv)
 }
 
+/// A least-squares fit: the coefficients (the constant first), `(XᵀX)⁻¹`, and the regression
+/// and residual sums of squares.
+pub(crate) struct LeastSquares {
+    pub coefficients: Vec<f64>,
+    pub inverse: Vec<Vec<f64>>,
+    pub ss_regression: f64,
+    pub ss_residual: f64,
+}
+
+/// Least squares of `y` on a constant and `x`, each case weighted, by Householder QR. `None`
+/// when a column is (numerically) a combination of the ones before it.
+pub(crate) fn least_squares(cases: &[(f64, Vec<f64>, f64)], p: usize) -> Option<LeastSquares> {
+    let k = p + 1;
+    let n = cases.len();
+    // Fewer cases than coefficients (heavy weights can hide it) leave the fit undetermined.
+    if n < k {
+        return None;
+    }
+    // Column by column: the constant, then each predictor; and y.
+    let mut a: Vec<Vec<f64>> =
+        (0..k).map(|j| cases.iter().map(|(_, x, w)| w.sqrt() * if j == 0 { 1.0 } else { x.get(j - 1).copied().unwrap_or(0.0) }).collect()).collect();
+    let mut qty: Vec<f64> = cases.iter().map(|(y, _, w)| w.sqrt() * y).collect();
+    let norms: Vec<f64> = a.iter().map(|c| c.iter().map(|v| v * v).sum::<f64>().sqrt()).collect();
+    let mut diagonal = vec![0.0; k];
+    for j in 0..k {
+        let column: Vec<f64> = a.get(j)?.get(j..)?.to_vec();
+        let norm = column.iter().map(|v| v * v).sum::<f64>().sqrt();
+        // What is left of the column after the ones before it: next to nothing is collinear.
+        if norm <= 1e-13 * norms.get(j).copied().unwrap_or(0.0).max(f64::MIN_POSITIVE) {
+            return None;
+        }
+        let head = column.first().copied().unwrap_or(0.0);
+        let alpha = if head > 0.0 { -norm } else { norm };
+        let mut v = column;
+        if let Some(v0) = v.first_mut() {
+            *v0 -= alpha;
+        }
+        let vv: f64 = v.iter().map(|x| x * x).sum();
+        let reflect = |target: &mut [f64]| {
+            let s: f64 = v.iter().zip(target.iter()).map(|(a, b)| a * b).sum();
+            let f = 2.0 * s / vv;
+            for (t, vi) in target.iter_mut().zip(&v) {
+                *t -= f * vi;
+            }
+        };
+        if vv > 0.0 {
+            for c in a.iter_mut().skip(j) {
+                if let Some(tail) = c.get_mut(j..) {
+                    reflect(tail);
+                }
+            }
+            if let Some(tail) = qty.get_mut(j..) {
+                reflect(tail);
+            }
+        }
+        *diagonal.get_mut(j)? = alpha;
+    }
+    // R is upper triangular: R[i][j] = a[j][i] for i ≤ j, its diagonal the alphas.
+    let r =
+        |i: usize, j: usize| if i == j { diagonal.get(i).copied().unwrap_or(0.0) } else { a.get(j).and_then(|c| c.get(i)).copied().unwrap_or(0.0) };
+    let mut coefficients = vec![0.0; k];
+    for i in (0..k).rev() {
+        let s: f64 = ((i + 1)..k).map(|j| r(i, j) * coefficients.get(j).copied().unwrap_or(0.0)).sum();
+        *coefficients.get_mut(i)? = (qty.get(i).copied().unwrap_or(0.0) - s) / r(i, i);
+    }
+    // R⁻¹, column by column, then (XᵀX)⁻¹ = R⁻¹R⁻ᵀ.
+    let mut r_inv = vec![vec![0.0; k]; k];
+    for c in 0..k {
+        for i in (0..=c).rev() {
+            let s: f64 = ((i + 1)..=c).map(|j| r(i, j) * r_inv.get(j).and_then(|row| row.get(c)).copied().unwrap_or(0.0)).sum();
+            let identity = if i == c { 1.0 } else { 0.0 };
+            *r_inv.get_mut(i)?.get_mut(c)? = (identity - s) / r(i, i);
+        }
+    }
+    let inverse = (0..k)
+        .map(|i| (0..k).map(|j| r_inv.get(i).zip(r_inv.get(j)).map_or(0.0, |(a, b)| a.iter().zip(b).map(|(x, y)| x * y).sum())).collect())
+        .collect();
+    // Qᵀy: the constant's part, the predictors' (the regression), the rest (the residuals).
+    let ss_regression = qty.iter().take(k).skip(1).map(|v| v * v).sum();
+    let ss_residual = qty.iter().skip(k).map(|v| v * v).sum();
+    Some(LeastSquares { coefficients, inverse, ss_regression, ss_residual })
+}
+
 pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> {
     let (yi, yvar) = numeric(ds, &options.dependent)?;
     let xs = options.predictors.iter().map(|n| numeric(ds, n)).collect::<Result<Vec<_>, _>>()?;
@@ -78,28 +163,15 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
     }
     let my = cases.iter().map(|(y, _, w)| y * w).sum::<f64>() / n;
     let mx: Vec<f64> = (0..p).map(|j| cases.iter().map(|(_, x, w)| x.get(j).copied().unwrap_or(0.0) * w).sum::<f64>() / n).collect();
-    let dev = |x: &[f64], j: usize| x.get(j).copied().unwrap_or(0.0) - mx.get(j).copied().unwrap_or(0.0);
-    let mut sxx = vec![vec![0.0; p]; p];
-    let mut sxy = vec![0.0; p];
-    let mut syy = 0.0;
-    for (y, x, w) in &cases {
-        let dy = y - my;
-        syy += w * dy * dy;
-        let d: Vec<f64> = (0..p).map(|j| dev(x, j)).collect();
-        for ((row, s), dj) in sxx.iter_mut().zip(sxy.iter_mut()).zip(&d) {
-            *s += w * dj * dy;
-            for (cell, dk) in row.iter_mut().zip(&d) {
-                *cell += w * dj * dk;
-            }
-        }
-    }
-    let Some(inverse) = invert(&sxx) else {
+    // The dependent's and each predictor's sum of squared deviations, for R² and the betas.
+    let syy: f64 = cases.iter().map(|(y, _, w)| w * (y - my).powi(2)).sum();
+    let sxx: Vec<f64> =
+        mx.iter().enumerate().map(|(j, m)| cases.iter().map(|(_, x, w)| w * (x.get(j).copied().unwrap_or(0.0) - m).powi(2)).sum()).collect();
+    let Some(LeastSquares { coefficients, inverse, ss_regression, ss_residual }) = least_squares(&cases, p) else {
         return Ok(vec![Item::Warning(tr!("o-regression-collinear"))]);
     };
-    let b: Vec<f64> = (0..p).map(|j| (0..p).map(|k| inverse[j][k] * sxy[k]).sum()).collect();
-    let constant = my - b.iter().zip(&mx).map(|(b, m)| b * m).sum::<f64>();
-    let ss_regression: f64 = b.iter().zip(&sxy).map(|(b, s)| b * s).sum();
-    let ss_residual = (syy - ss_regression).max(0.0);
+    let constant = coefficients.first().copied().unwrap_or(f64::NAN);
+    let b: Vec<f64> = coefficients.iter().skip(1).copied().collect();
     let (df_regression, df_total) = (p as f64, n - 1.0);
     let ms_residual = ss_residual / df_residual;
     let ms_regression = ss_regression / df_regression;
@@ -157,14 +229,13 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
         }
         cells
     };
-    // Var(constant) = MSE (1/n + x̄ᵀ Sxx⁻¹ x̄).
-    let quad: f64 = (0..p).map(|j| (0..p).map(|k| mx[j] * inverse[j][k] * mx[k]).sum::<f64>()).sum();
-    let mut coefficients = vec![("1".to_string(), row(tr!("o-constant"), constant, (ms_residual * (1.0 / n + quad)).sqrt(), None))];
-    for j in 0..p {
-        let se = (ms_residual * inverse[j][j]).sqrt();
-        let sd_x = (sxx[j][j] / df_total).sqrt();
-        let beta = b[j] * sd_x / sd_y;
-        coefficients.push((String::new(), row(names[j].clone(), b[j], se, Some(beta).filter(|b| b.is_finite()))));
+    // Var(B) is the residual mean square times the diagonal of (XᵀX)⁻¹, the constant's first.
+    let se = |j: usize| (ms_residual * inverse.get(j).and_then(|r| r.get(j)).copied().unwrap_or(f64::NAN)).sqrt();
+    let mut coefficients = vec![("1".to_string(), row(tr!("o-constant"), constant, se(0), None))];
+    for ((j, name), (bj, sj)) in names.iter().enumerate().zip(b.iter().zip(&sxx)) {
+        let sd_x = (sj / df_total).sqrt();
+        let beta = bj * sd_x / sd_y;
+        coefficients.push((String::new(), row(name.clone(), *bj, se(j + 1), Some(beta).filter(|b| b.is_finite()))));
     }
     let mut columns = [String::new(), tr!("o-b"), tr!("o-std-error"), tr!("o-beta"), tr!("o-t"), tr!("o-sig")].map(String::from).to_vec();
     if let Some(level) = options.ci {
@@ -189,6 +260,21 @@ mod tests {
             Cell::Int(n) => *n as f64,
             other => panic!("not a number: {other:?}"),
         }
+    }
+
+    #[test]
+    fn two_heavy_cases_cannot_fit_three_coefficients() {
+        // N = 20 by the weights, but two points can't place a plane.
+        let mut ds = Dataset::new();
+        for name in ["y", "a", "b", "w"] {
+            ds.add_variable(Variable::numeric(name)).unwrap();
+        }
+        for row in [[1.0, 2.0, 3.0, 10.0], [2.0, 5.0, 1.0, 10.0]] {
+            ds.push_case(row.iter().map(|v| Value::Num(*v)).collect()).unwrap();
+        }
+        ds.weight = Some(3);
+        let items = regression(&ds, &Options { dependent: "y".into(), predictors: vec!["a".into(), "b".into()], ci: None }).unwrap();
+        assert!(matches!(&items[..], [Item::Warning(_)]), "{items:?}");
     }
 
     fn dataset(rows: &[(f64, f64, f64)]) -> Dataset {

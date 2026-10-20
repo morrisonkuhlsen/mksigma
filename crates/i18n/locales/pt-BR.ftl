@@ -796,6 +796,7 @@ ex-intervals-t = Para os intervalos de { $level }%, o t que deixa { $tail }% em 
 ex-constant-se = A constante, a = { $a }: o erro padrão dela, a partir do quadrado médio dos resíduos e das médias dos preditores:
 ex-coefficient-se = { $name }, b = { $b }: o erro padrão pela diagonal da inversa, t, significância e o beta em desvios padrão:
 ex-examine-interval = O intervalo de 95% da média, com o t que deixa 2,5% em cada cauda a { $df } graus de liberdade:
+ex-regression-by-qr = À mão, as inclinações resolvem as equações normais, o caminho dos livros. A tabela resolve os mesmos mínimos quadrados por uma decomposição QR, que guarda mais dígitos quando os preditores são quase colineares; nas casas decimais mostradas aqui, os dois concordam.
 ex-title-histogram = Histograma
 ex-title-bar-chart = Gráfico de barras
 ex-title-boxplot = Boxplot

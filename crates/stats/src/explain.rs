@@ -1739,7 +1739,7 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
     sections.push((tr!("ex-sums-of-products"), steps));
 
     // The slopes.
-    let mut steps = Vec::new();
+    let mut steps = vec![say(&tr!("ex-regression-by-qr"))];
     let inverse = if p == 1 {
         let s = at(&sxx, 0, 0);
         if s <= 0.0 {

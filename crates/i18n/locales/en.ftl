@@ -796,6 +796,7 @@ ex-intervals-t = For the { $level }% intervals, the t that leaves { $tail }% in 
 ex-constant-se = The constant, a = { $a }: its standard error, from the residuals' mean square and the means of the predictors:
 ex-coefficient-se = { $name }, b = { $b }: its standard error from the inverse's diagonal, t, significance, and the beta in standard deviations:
 ex-examine-interval = The 95% interval of the mean, with the t that leaves 2.5% in each tail at { $df } degrees of freedom:
+ex-regression-by-qr = By hand, the slopes solve the normal equations, the textbook route. The table solves the same least squares by a QR decomposition, which keeps more digits when predictors are nearly collinear; to the decimals shown here, the two agree.
 ex-title-histogram = Histogram
 ex-title-bar-chart = Bar Chart
 ex-title-boxplot = Boxplot
