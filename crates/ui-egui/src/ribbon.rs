@@ -109,16 +109,17 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, name: &str, enabled: bool) -> egui
     response.on_hover_text(name)
 }
 
-/// An on/off switch: a square track with a square knob.
+/// An on/off switch drawn as a pill with a knob.
 fn switch(ui: &mut egui::Ui, on: bool, name: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let (r, response) = ui.allocate_exact_size(egui::vec2(30.0, 16.0), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, on, name));
     let painter = ui.painter();
-    painter.rect_filled(r, 0.0, if on { t.accent } else { egui::Color32::TRANSPARENT });
-    painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, if on { t.accent } else { t.text_dim }), egui::StrokeKind::Inside);
+    // The one rounded control: a switch reads as a switch by its pill and round knob.
+    painter.rect_filled(r, 8.0, if on { t.accent } else { egui::Color32::TRANSPARENT });
+    painter.rect_stroke(r, 8.0, egui::Stroke::new(1.0, if on { t.accent } else { t.text_dim }), egui::StrokeKind::Inside);
     let knob = if on { egui::pos2(r.right() - 8.0, r.center().y) } else { egui::pos2(r.left() + 8.0, r.center().y) };
-    painter.rect_filled(egui::Rect::from_center_size(knob, egui::vec2(10.0, 10.0)), 0.0, if on { egui::Color32::WHITE } else { t.text_dim });
+    painter.circle_filled(knob, 5.0, if on { egui::Color32::WHITE } else { t.text_dim });
     response
 }
 
