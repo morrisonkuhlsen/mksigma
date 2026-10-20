@@ -90,7 +90,11 @@ fn main() -> eframe::Result {
                 .pick_file()
         })),
         pick_save: Some(Box::new(|suggested: &str| {
-            rfd::FileDialog::new().add_filter("SPSS Statistics data (.sav)", &["sav"]).set_file_name(suggested).save_file()
+            rfd::FileDialog::new()
+                .add_filter("SPSS Statistics data (.sav)", &["sav"])
+                .add_filter("Stata data (.dta)", &["dta"])
+                .set_file_name(suggested)
+                .save_file()
         })),
         now: Some(Box::new(now)),
         pick_export: Some(Box::new(|suggested: &str| {

@@ -3,7 +3,7 @@ name = "mksigma-dta"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "MK Sigma reader for Stata data files (.dta, formats 113 to 119), clean-room from StataCorp's published format description"
+description = "MK Sigma reader and writer for Stata data files (.dta: reads formats 113 to 119, writes 118), clean-room from StataCorp's published format description"
 
 [lints]
 workspace = true

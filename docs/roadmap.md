@@ -286,16 +286,18 @@ gretl). One vertical slice at a time; **the order of the modules is the user's t
     equations, and says the table takes the QR route. **Next:** the regressions through the
     origin (NoInt1, NoInt2) with `/ORIGIN`; the nonlinear datasets once there is a nonlinear
     regression.
-  - *Stata files — reading done:* `GET STATA FILE='x.dta'` (`crates/dta`, from StataCorp's
-    published description) reads formats 113–115 and 117–119 (Stata 8 and later) in either byte
-    order: numeric types, `str#` and `strL` (crosslinked too), value labels, variable and
-    dataset labels; `.a`–`.z` read as system-missing with a warning; `%td`, `%tc`, `%tm`, `%tq`
-    become dates; names Stata allows and MK Sigma doesn't (`_merge`) are renamed, with a
-    warning. File › Open, dropped files, `mksigma-cli --in` and MCP's `open_data` take `.dta`.
-    Dates now show as dates (every SPSS date and time format, month and weekday names in the
-    interface's language). Dates are typed in Data View as their format writes them (or as `2024-03-06`; months
-    by name in either language). **Next:** `SAVE TRANSLATE /TYPE=STATA` (#6); `SET EPOCH` for
-    two-digit years (#13).
+  - *Stata files — done:* `GET STATA FILE='x.dta'` (`crates/dta`, from StataCorp's published
+    description) reads formats 113–115 and 117–119 (Stata 8 and later) in either byte order:
+    numeric types, `str#` and `strL` (crosslinked too), value labels, variable and dataset
+    labels; `.a`–`.z` read as system-missing with a warning; `%td`, `%tc`, `%tm`, `%tq` become
+    dates; names Stata allows and MK Sigma doesn't (`_merge`) are renamed, with a warning.
+    `SAVE TRANSLATE OUTFILE='x.dta' /TYPE=STATA [/REPLACE]` writes format 118: each numeric
+    variable in the smallest type that holds it exactly, strings as `str#` up to 2045 bytes and
+    `strL` beyond, dates back to Stata's units, user-missing values as `.a`, `.b`, `.c`, value
+    labels of whole numbers, names and labels cut or renamed to Stata's limits, each change
+    a warning. File › Open and Save As, dropped files, `mksigma-cli --in/--out` and MCP's
+    `open_data`/`export` take `.dta`. Dates show as dates and are typed in Data View as their
+    format writes them. **Next:** `SET EPOCH` for two-digit years (#13).
   - *SAS transport files:* `.xpt` (XPORT, whose layout SAS publishes), the format regulators
     accept. `.sas7bdat` stays out: it is known only through third parties' reverse engineering.
   - *A parity matrix:* a table in code of every procedure against SPSS, SAS, Stata, JMP,

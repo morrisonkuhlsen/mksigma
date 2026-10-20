@@ -227,6 +227,33 @@ impl Session {
         Ok(())
     }
 
+    /// `SAVE TRANSLATE /TYPE=STATA`: the active dataset as a Stata file, overwriting one only
+    /// when asked. The data itself doesn't change.
+    fn save_translate(&mut self, path: &str, replace: bool) -> Result<(), EngineError> {
+        if !replace && std::path::Path::new(path).exists() {
+            return Err(EngineError::File(tr!("err-file-exists", path = path)));
+        }
+        let written = mksigma_dta::write(&self.dataset, "")?;
+        std::fs::write(path, &written.bytes).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        let ds = &self.dataset;
+        self.notes.push(tr!("note-file-written", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
+        self.notes.extend(written.warnings.iter().map(|w| format!("{path}: {w}")));
+        Ok(())
+    }
+
+    /// The active dataset as a Stata file (format 118), stamped with `unix_seconds`, and what it
+    /// couldn't keep. Marks the data saved, as `save_sav` does.
+    pub fn save_dta(&mut self, unix_seconds: i64) -> Result<(Vec<u8>, Vec<String>), EngineError> {
+        let written = mksigma_dta::write(&self.dataset, &mksigma_dta::timestamp(unix_seconds))?;
+        self.modified = false;
+        Ok((written.bytes, written.warnings))
+    }
+
+    /// The active dataset as a Stata file, as `data_sav` gives a system file.
+    pub fn data_dta(&self) -> Result<Vec<u8>, EngineError> {
+        Ok(mksigma_dta::write(&self.dataset, "")?.bytes)
+    }
+
     /// `GET STATA FILE`: a Stata file as the active dataset.
     fn get_stata(&mut self, path: &str) -> Result<(), EngineError> {
         let bytes = std::fs::read(path).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
@@ -264,7 +291,9 @@ impl Session {
     /// The data was written to the system file `path`: from now on it is where the data comes
     /// from, with the steps so far in it.
     pub fn saved_to(&mut self, path: &str) {
-        self.data_source = Some(format!("GET FILE={}.", mksigma_syntax::quote(path)));
+        let stata = std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("dta"));
+        let get = if stata { "GET STATA FILE" } else { "GET FILE" };
+        self.data_source = Some(format!("{get}={}.", mksigma_syntax::quote(path)));
         self.steps_in_source = self.steps.len();
     }
 
@@ -357,6 +386,7 @@ impl Session {
                 Command::GetData(spec) => Some(self.get_data(spec)),
                 Command::GetFile(path) => Some(self.get_file(path)),
                 Command::GetStata(path) => Some(self.get_stata(path)),
+                Command::SaveStata { file, replace } => Some(self.save_translate(file, *replace)),
                 Command::Dashboard(tiles) => Some(self.set_tiles(tiles)),
                 _ => None,
             };
@@ -2068,6 +2098,34 @@ mod tests {
         b.extend(table);
         b.extend(b"</lbl></value_labels></stata_dta>");
         b
+    }
+
+    #[test]
+    fn save_translate_writes_a_stata_file_that_reads_back() {
+        let path = std::env::temp_dir().join(format!("mksigma-save-stata-{}.dta", std::process::id()));
+        let file = quote(&path.display().to_string());
+        let _ = std::fs::remove_file(&path);
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax(&format!("SAVE TRANSLATE OUTFILE={file} /TYPE=STATA.")).unwrap();
+        assert!(s.take_notes()[0].ends_with("8 cases and 3 variables written"));
+        assert!(!s.modified, "saving a copy changes no data");
+        // Once there, only /REPLACE overwrites it.
+        assert!(matches!(s.run_syntax(&format!("SAVE TRANSLATE OUTFILE={file} /TYPE=STATA.")), Err(EngineError::File(_))));
+        s.run_syntax(&format!("SAVE TRANSLATE OUTFILE={file} /TYPE=STATA /REPLACE.")).unwrap();
+        let mut t = Session::new();
+        t.run_syntax(&format!("GET STATA FILE={file}.\nDESCRIPTIVES age income score.")).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            t.dataset.variables().iter().map(|v| v.label.clone()).collect::<Vec<_>>(),
+            s.dataset.variables().iter().map(|v| v.label.clone()).collect::<Vec<_>>()
+        );
+        for j in 0..3 {
+            assert_eq!(t.dataset.column(j), s.dataset.column(j));
+        }
+        // Saved as a .dta, the dashboard reads it back with GET STATA.
+        s.saved_to("/dados/turma.dta");
+        s.run_syntax("DESCRIPTIVES age.").unwrap();
+        assert!(s.dashboard_syntax().is_some_and(|d| d.contains("GET STATA FILE='/dados/turma.dta'.")));
     }
 
     #[test]

@@ -401,3 +401,155 @@ fn what_isnt_a_readable_stata_file() {
     assert_eq!(read(&file).unwrap_err(), DtaError::Release(120));
     assert!(is_dta(&strl_example(119, true, false, false)) && is_dta(&binary(114, true)) && !is_dta(b"age,score\n"));
 }
+
+/// A dataset with every kind of variable `write` handles.
+fn everything() -> Dataset {
+    let mut ds = Dataset::new();
+    ds.label = Some("Turma de 2024".into());
+    let mut grupo = Variable::numeric("grupo").with_label("Grupo");
+    grupo.value_labels = vec![(Value::Num(1.0), "Controle".into()), (Value::Num(2.0), "Tratamento".into())];
+    grupo.missing = mksigma_core::MissingValues::Discrete(vec![Value::Num(9.0)]);
+    let mut dia = Variable::numeric("dia");
+    dia.format = Format::new(FormatKind::Date, 11, 0);
+    let mut momento = Variable::numeric("momento");
+    momento.format = Format::new(FormatKind::DateTime, 20, 0);
+    let mut mes = Variable::numeric("mes");
+    mes.format = Format::new(FormatKind::MoYr, 8, 0);
+    for var in [
+        grupo,
+        Variable::numeric("contagem"),
+        Variable::numeric("populacao"),
+        Variable::numeric("renda"),
+        Variable::string("nome", 12),
+        Variable::string("relato", 3000),
+        dia,
+        momento,
+        mes,
+        Variable::numeric("@peso#"),
+        Variable::numeric("int"),
+    ] {
+        ds.add_variable(var).unwrap();
+    }
+    let epoch = 137_775.0 * 86_400.0;
+    let long = "á".repeat(1200);
+    for (g, c, p, r, nome, relato, d) in [
+        (1.0, 30000.0, 3_000_000.0, 1234.56, "Ana", long.as_str(), 0.0),
+        (2.0, -5.0, 7.0, -0.1, "Bárbara", "", 1.0),
+        (9.0, 0.0, 0.0, 0.0, "", "curto", 366.0),
+    ] {
+        ds.push_case(vec![
+            Value::Num(g),
+            Value::Num(c),
+            Value::Num(p),
+            Value::Num(r),
+            Value::Str(nome.into()),
+            Value::Str(relato.into()),
+            Value::Num(epoch + d * 86_400.0),
+            Value::Num(epoch + d * 86_400.0 + 3_723.0),
+            Value::Num(epoch + 31.0 * 86_400.0),
+            Value::Num(1.0),
+            Value::Num(2.0),
+        ])
+        .unwrap();
+    }
+    ds.push_case(
+        vec![Value::SysMis; 11].into_iter().enumerate().map(|(j, v)| if j == 4 || j == 5 { Value::Str(String::new()) } else { v }).collect(),
+    )
+    .unwrap();
+    ds
+}
+
+#[test]
+fn a_written_file_reads_back() {
+    let ds = everything();
+    let written = write(&ds, "20 Oct 2026 14:05").unwrap();
+    let back = read(&written.bytes).unwrap();
+    assert_eq!((back.release, back.timestamp.as_deref(), back.dataset.label.as_deref()), (118, Some("20 Oct 2026 14:05"), Some("Turma de 2024")));
+    let b = &back.dataset;
+    let names: Vec<&str> = b.variables().iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(names, ["grupo", "contagem", "populacao", "renda", "nome", "relato", "dia", "momento", "mes", "v_peso_", "int_"]);
+    assert_eq!(b.n_cases(), 4);
+    for (j, var) in ds.variables().iter().enumerate() {
+        for case in 0..4 {
+            let original = &ds.column(j).unwrap()[case];
+            let user_missing = var.is_missing(original) && *original != Value::SysMis;
+            let expected = if user_missing { Value::SysMis } else { original.clone() };
+            assert_eq!(b.column(j).unwrap()[case], expected, "{} case {case}", var.name);
+        }
+    }
+    let grupo = &b.variables()[0];
+    assert_eq!((grupo.label.as_deref(), grupo.value_labels.len()), (Some("Grupo"), 2));
+    assert_eq!(b.variables()[6].format.kind, FormatKind::Date);
+    assert_eq!(b.variables()[7].format.kind, FormatKind::DateTime);
+    assert_eq!(b.variables()[8].format.kind, FormatKind::MoYr);
+    // Renamed twice, user-missing once.
+    let renamed = written.warnings.iter().filter(|w| w.contains("renamed")).count();
+    assert_eq!(renamed, 2, "{:?}", written.warnings);
+    assert!(written.warnings.contains(&tr!("dta-warn-user-missing")));
+}
+
+#[test]
+fn the_written_file_follows_the_description() {
+    let written = write(&everything(), "").unwrap();
+    let bytes = &written.bytes;
+    assert!(
+        bytes.starts_with(
+            b"<stata_dta><header><release>118</release><byteorder>LSF</byteorder><K>\x0b\x00</K><N>\x04\x00\x00\x00\x00\x00\x00\x00</N>"
+        )
+    );
+    // The map: where each section starts, then the end of the file.
+    let at = bytes.windows(5).position(|w| w == b"<map>").unwrap() + 5;
+    let map: Vec<usize> = (0..14).map(|k| u64::from_le_bytes(bytes[at + 8 * k..at + 8 * k + 8].try_into().unwrap()) as usize).collect();
+    let tags = [
+        "<stata_dta>",
+        "<map>",
+        "<variable_types>",
+        "<varnames>",
+        "<sortlist>",
+        "<formats>",
+        "<value_label_names>",
+        "<variable_labels>",
+        "<characteristics>",
+        "<data>",
+        "<strls>",
+        "<value_labels>",
+        "</stata_dta>",
+    ];
+    for (position, tag) in map.iter().zip(tags) {
+        assert!(bytes[*position..].starts_with(tag.as_bytes()), "{tag} at {position}");
+    }
+    assert_eq!(map[13], bytes.len());
+    // Storage: grupo byte, contagem int (30000), populacao long, renda double (fractions),
+    // nome str8 ("Bárbara" is 8 bytes in UTF-8), relato strL (2400 bytes), dia int (366 days),
+    // momento double (milliseconds), mes byte (month 1), and the last two byte.
+    let types = map[2] + "<variable_types>".len();
+    let codes: Vec<u16> = (0..11).map(|k| u16::from_le_bytes([bytes[types + 2 * k], bytes[types + 2 * k + 1]])).collect();
+    assert_eq!(codes, [65530, 65529, 65528, 65526, 8, 32768, 65529, 65526, 65530, 65530, 65530]);
+}
+
+#[test]
+fn time_stamps_as_stata_writes_them() {
+    assert_eq!(timestamp(0), "01 Jan 1970 00:00");
+    assert_eq!(timestamp(1_792_505_100), "20 Oct 2026 14:05");
+    assert_eq!(civil(-3653), (1960, 1, 1));
+}
+
+#[test]
+fn what_stata_cant_hold() {
+    let mut ds = Dataset::new();
+    let mut s = Variable::string("s", 4);
+    s.value_labels = vec![(Value::Str("a".into()), "A".into())];
+    let mut x = Variable::numeric("x").with_label("l".repeat(100));
+    x.value_labels = vec![(Value::Num(1.5), "one and a half".into()), (Value::Num(2.0), "two".into())];
+    ds.add_variable(s).unwrap();
+    ds.add_variable(x).unwrap();
+    ds.push_case(vec![Value::Str("a".into()), Value::Num(2.0)]).unwrap();
+    let written = write(&ds, "").unwrap();
+    assert!(written.warnings.contains(&tr!("dta-warn-labels-dropped")) && written.warnings.contains(&tr!("dta-warn-labels-cut", n = 80)));
+    let back = read(&written.bytes).unwrap().dataset;
+    assert_eq!(back.variables()[1].value_labels, [(Value::Num(2.0), "two".to_string())]);
+    assert_eq!(back.variables()[1].label.as_deref().map(str::len), Some(80));
+    // Too many variables for the format.
+    assert_eq!(writer::variable_count(32_767), Ok(32_767));
+    assert_eq!(writer::variable_count(32_768), Err(DtaError::TooManyVariables(32_768)));
+}

@@ -1,6 +1,6 @@
 //! MK Sigma command-line interface.
 //!
-//! `mksigma-cli run [--in data.sav|data.dta] [--out result.sav] [--html report.html] [--pdf report.pdf]
+//! `mksigma-cli run [--in data.sav|data.dta] [--out result.sav|result.dta] [--html report.html] [--pdf report.pdf]
 //! '<syntax>'` runs
 //! syntax against a system file or delimited text (`.csv`, `.tsv`, `.txt`, read with `GET DATA`;
 //! without `--in`, the built-in sample dataset), prints the
@@ -105,7 +105,10 @@ fn run(args: &Args) -> Result<(), String> {
     }
     result.map_err(|e| e.to_string())?;
     if let Some(path) = &args.output {
-        let (bytes, warnings) = session.save_sav(mksigma_engine::timestamp(now())).map_err(|e| e.to_string())?;
+        // A .dta path saves a Stata file; anything else, a system file.
+        let stata = path.to_ascii_lowercase().ends_with(".dta");
+        let saved = if stata { session.save_dta(now()) } else { session.save_sav(mksigma_engine::timestamp(now())) };
+        let (bytes, warnings) = saved.map_err(|e| e.to_string())?;
         for w in warnings {
             eprintln!("warning: {path}: {w}");
         }

@@ -172,6 +172,33 @@ pub(crate) fn get_stata(rest: &[Token]) -> Result<Command, SyntaxError> {
     Ok(Command::GetStata(path.clone()))
 }
 
+/// `SAVE TRANSLATE OUTFILE='data.dta' /TYPE=STATA [/VERSION=n] [/EDITION=...] [/REPLACE]`:
+/// the active dataset written as a Stata file. Stata is the one type so far; the version and
+/// edition are accepted and the file is always format 118 (Stata 14 and later).
+pub(crate) fn save_translate(rest: &[Token]) -> Result<Command, SyntaxError> {
+    const CMD: &str = "SAVE TRANSLATE";
+    let (mut file, mut stata, mut replace) = (None, false, false);
+    for sub in rest.split(|t| *t == Token::Slash).filter(|s| !s.is_empty()) {
+        let (name, value) = match sub {
+            [Token::Word(n), Token::Equals, v @ ..] | [Token::Word(n), v @ ..] => (n.as_str(), v),
+            _ => return Err(SyntaxError::Expected { command: CMD, expected: "OUTFILE='path' /TYPE=STATA" }),
+        };
+        match (name.to_ascii_uppercase().as_str(), value) {
+            ("OUTFILE", [Token::Str(path)]) => file = Some(path.clone()),
+            ("TYPE", [Token::Word(t)]) if is_keyword(t, "STATA") => stata = true,
+            ("TYPE", _) => return Err(unsupported(CMD, "/TYPE")),
+            ("VERSION" | "EDITION", _) => {}
+            ("REPLACE", []) => replace = true,
+            (n, _) => return Err(unsupported(CMD, &format!("/{n}"))),
+        }
+    }
+    if !stata {
+        return Err(SyntaxError::Expected { command: CMD, expected: "/TYPE=STATA" });
+    }
+    let file = file.ok_or(SyntaxError::Expected { command: CMD, expected: "OUTFILE='path'" })?;
+    Ok(Command::SaveStata { file, replace })
+}
+
 /// `DASHBOARD /TILES=(analysis item [WIDE]) ...`: the dashboard's tiles, in order; a `WIDE`
 /// tile takes a whole row. An analysis is
 /// counted from 1 among the commands with output since the Output was last cleared, and an
@@ -235,6 +262,12 @@ mod tests {
         assert_eq!(parse("GET STATA FILE='/dados/pnad.dta'.").unwrap(), [Command::GetStata("/dados/pnad.dta".into())]);
         assert_eq!(parse("get stata file 'a.dta' /encoding='UTF8'.").unwrap(), [Command::GetStata("a.dta".into())]);
         assert!(parse("GET STATA 'a.dta'.").is_err() && parse("GET STATA FILE='a.dta' /KEEP=x.").is_err());
+        assert_eq!(
+            parse("SAVE TRANSLATE OUTFILE='/dados/turma.dta' /TYPE=STATA /VERSION=14 /REPLACE.").unwrap(),
+            [Command::SaveStata { file: "/dados/turma.dta".into(), replace: true }]
+        );
+        assert_eq!(parse("save translate /type=stata /outfile 'x.dta'.").unwrap(), [Command::SaveStata { file: "x.dta".into(), replace: false }]);
+        assert!(parse("SAVE TRANSLATE OUTFILE='x.xlsx' /TYPE=XLS.").is_err() && parse("SAVE TRANSLATE /TYPE=STATA.").is_err());
         assert_eq!(
             parse("DASHBOARD /TILES=(3 1) (1, 2) (2 1 wide).").unwrap(),
             [Command::Dashboard(vec![(3, 1, false), (1, 2, false), (2, 1, true)])]

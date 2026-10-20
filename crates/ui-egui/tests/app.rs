@@ -342,6 +342,29 @@ fn save_as_writes_a_file_that_reopens_the_same() {
 }
 
 #[test]
+fn save_as_a_dta_writes_a_stata_file() {
+    let path = temp_path("save-as.dta");
+    let picked = path.clone();
+    let services =
+        Services { pick_save: Some(Box::new(move |_: &str| Some(picked.clone()))), now: Some(Box::new(|| 951_782_400)), ..Services::default() };
+    let mut h = harness(SigmaApp::new(services));
+    h.state_mut().run_edit("VARIABLE LABELS age 'Idade'.");
+    h.run_steps(2);
+    h.get_all_by_label("Save").next().unwrap().click();
+    h.run_steps(3);
+    let app = h.state();
+    assert!(!app.session.modified && matches!(&app.status, Some(Status::Info(s)) if s.starts_with("Saved ")), "{:?}", app.status);
+    let bytes = std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(bytes.starts_with(b"<stata_dta><header><release>118</release>"));
+    assert!(bytes.windows(17).any(|w| w == b"29 Feb 2000 00:00"), "stamped with the time it was saved");
+    let mut reopened = SigmaApp::default();
+    assert!(reopened.open_bytes("again.dta", &bytes));
+    assert_eq!(reopened.session.dataset.variables(), app.session.dataset.variables());
+    assert_eq!(reopened.session.dataset.column(1), app.session.dataset.column(1));
+}
+
+#[test]
 fn save_goes_back_to_the_opened_file_without_asking() {
     let path = temp_path("opened.sav");
     std::fs::write(&path, tiny_sav()).unwrap();

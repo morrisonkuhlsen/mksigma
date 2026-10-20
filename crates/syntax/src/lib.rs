@@ -32,6 +32,9 @@ pub enum Command {
     GetFile(String),
     /// `GET STATA FILE='...'`: a new active dataset from a Stata file (`.dta`).
     GetStata(String),
+    /// `SAVE TRANSLATE OUTFILE='...' /TYPE=STATA [/REPLACE]`: the active dataset as a Stata
+    /// file; an existing file is overwritten only with `/REPLACE`.
+    SaveStata { file: String, replace: bool },
     /// `DASHBOARD /TILES=(analysis item [WIDE])...`: the dashboard's tiles, counted from 1, and
     /// whether each takes a whole row.
     Dashboard(Vec<(usize, usize, bool)>),
@@ -274,6 +277,9 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     }
     if is_keyword(name, "GET") && second("FILE") {
         return data::get_file(rest);
+    }
+    if is_keyword(name, "SAVE") && second("TRANSLATE") {
+        return data::save_translate(rest.get(1..).unwrap_or_default());
     }
     if is_keyword(name, "GET") && second("STATA") {
         return data::get_stata(rest.get(1..).unwrap_or_default());

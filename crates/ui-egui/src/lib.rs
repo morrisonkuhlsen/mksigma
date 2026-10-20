@@ -481,14 +481,17 @@ impl SigmaApp {
     /// file in place of the old one.
     pub fn save_to(&mut self, path: &Path) {
         let now = self.services.now.as_ref().map_or(0, |now| now());
-        let (bytes, warnings) = match self.session.save_sav(mksigma_engine::timestamp(now)) {
+        // A .dta path saves a Stata file; anything else, a system file.
+        let stata = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("dta"));
+        let saved = if stata { self.session.save_dta(now) } else { self.session.save_sav(mksigma_engine::timestamp(now)) };
+        let (bytes, warnings) = match saved {
             Ok(written) => written,
             Err(e) => {
                 self.status = Some(Status::Error(e.to_string()));
                 return;
             }
         };
-        let temporary = path.with_extension("sav.saving");
+        let temporary = path.with_extension(if stata { "dta.saving" } else { "sav.saving" });
         let written = std::fs::write(&temporary, &bytes).and_then(|()| std::fs::rename(&temporary, path));
         let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
         match written {

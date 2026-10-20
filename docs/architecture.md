@@ -8,7 +8,8 @@ ignoring case. `Value` is a number, a string or system-missing.
 ## Data files (`sav`, `csv`, `dta`)
 Each reads bytes into a `Dataset` and returns warnings for what it read leniently: `sav` SPSS
 system files (and writes them), `csv` delimited text (`GET DATA /TYPE=TXT`), `dta` Stata files of
-formats 113–115 and 117–119 (`GET STATA`), from StataCorp's published description. Every count
+formats 113–115 and 117–119 (`GET STATA`) and writes format 118 (`SAVE TRANSLATE /TYPE=STATA`),
+from StataCorp's published description. Every count
 and length in a file is checked against the bytes left before anything is allocated.
 
 ## Syntax (`syntax`)

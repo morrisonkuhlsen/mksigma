@@ -40,12 +40,12 @@ fn tools() -> Value {
         },
         {
             "name": "export",
-            "description": "Write a file: the Output as html, pdf or latex; the active data as sav; the dashboard (tiles set with DASHBOARD /TILES) as an interactive dashboard page, which holds the data; or the session as syntax that rebuilds it.",
+            "description": "Write a file: the Output as html, pdf or latex; the active data as sav or dta (Stata); the dashboard (tiles set with DASHBOARD /TILES) as an interactive dashboard page, which holds the data; or the session as syntax that rebuilds it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string"},
-                    "format": {"type": "string", "enum": ["html", "pdf", "latex", "sav", "dashboard", "syntax"]}
+                    "format": {"type": "string", "enum": ["html", "pdf", "latex", "sav", "dta", "dashboard", "syntax"]}
                 },
                 "required": ["path", "format"]
             }
@@ -203,6 +203,7 @@ impl Server {
             "pdf" => Ok(out.to_pdf(title)),
             "latex" => Ok(out.to_latex(title).into_bytes()),
             "sav" => self.session.data_sav().map_err(|e| e.to_string()),
+            "dta" => self.session.data_dta().map_err(|e| e.to_string()),
             "syntax" => {
                 self.session.dashboard_syntax().map(String::into_bytes).ok_or_else(|| "the data didn't come from a file (use open_data)".to_string())
             }
