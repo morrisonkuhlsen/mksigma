@@ -1856,7 +1856,7 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
                 row(vec![text("1"), text("−"), paren(row(vec![text("1"), text("−"), n(r2)])), text("·"), frac(n(df_total), n(df_residual))]),
                 approx(adjusted),
             ]),
-            equals(vec![text("SE of the estimate"), sqrt(n(ms_residual)), approx(ms_residual.sqrt())]),
+            equals(vec![text(&tr!("o-std-error-of-the-estimate")), sqrt(n(ms_residual)), approx(ms_residual.sqrt())]),
         ],
     ));
     sections.push((tr!("ex-the-analysis-of-variance-and-the-model-summary"), steps));
