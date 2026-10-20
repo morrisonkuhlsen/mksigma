@@ -1,39 +1,61 @@
 # MK Sigma — instructions for agents
 
-MK Sigma is a clean-room, open-source, Rust-native statistics package targeting the IBM SPSS
-Statistics workflow: Data View / Variable View, command syntax, procedures and an Output Viewer.
-On top of that core it adds the best of Power BI: recorded data preparation, cross-filtering and
-publishable dashboards. Scope and order: `docs/roadmap.md`.
+MK Sigma is a clean-room, open-source, Rust-native statistics package targeting IBM SPSS Statistics parity — Data View / Variable View, command syntax, procedures and an Output Viewer — and superiority: every figure with its calculation by hand (Σ), a study section (Learn), and on top the best of Power BI: recorded data preparation, cross-filtering and publishable dashboards. It runs natively on Linux, Windows and macOS; its engine also runs in the browser as WebAssembly, inside exported dashboards. A Morrison Kühlsen project.
+
+## Start every session here
+1. Read [`docs/roadmap.md`](docs/roadmap.md): what is done, and the **Next:** items, which are the work list; then the relevant section of [`docs/architecture.md`](docs/architecture.md). Behaviour reference: IBM's public documentation (Command Syntax Reference, Algorithms guide), the public `.sav` format description, and observation (`plan/`).
+2. Work autonomously through the next item: build it, test it, look at it, commit it when the gates pass. Stop to ask only for what is the user's to decide: priorities and scope, brand and visual identity, anything published or shared (pushing, releases), and anything destructive.
+
+`plan/` is gitignored (local only): notes and observations of SPSS and Power BI, and their screenshots.
+
+## Assets and iconography — absolute rule
+**No IBM, Microsoft, Adobe (or any other vendor's) iconography, images, artwork, fonts, templates, themes or sample files — ever.** This is the most important rule in this repository; breaking it is a serious failure.
+- Every asset in the repo is original work by MK Sigma's contributors, or public domain / CC0, or licensed for redistribution, or one of Morrison Kühlsen's brand assets below.
+- Every asset file has a row in [`ATTRIBUTION.md`](ATTRIBUTION.md) (author, source, terms). `cargo xtask assets` enforces it. Adding an asset without a row is a bug.
+- Prefer art generated in code: the UI icon set (`crates/ui-egui/src/icons.rs`), the charts, the themes (`crates/ui-egui/src/theme.rs`), the Output styles and the sample dataset are drawn or defined in code and original.
+- Never copy SPSS's or Power BI's icons, toolbar artwork, Output templates, table looks, sample files (`.sav` that ship with SPSS) or wording beyond feature names. Feature and command *names* (`DESCRIPTIVES`, `FREQUENCIES`, "Variable View", "slicer") are fine.
+- Screenshots of IBM or Microsoft software are never committed (they live only in `plan/`).
+- The Morrison Kühlsen brand files in `crates/ui-egui/assets/` (the σ mark, the wordmark, the spiral staircase) are the house's, used with its permission, listed in `ATTRIBUTION.md`: the one exception.
+
+## Never crash
+People trust MK Sigma with their data and their results; a crash loses their work. **This outranks feature work.**
+- **No panics in non-test code:** no `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!`, `unimplemented!`; no `unsafe` (`unsafe_code = "forbid"`).
+- **Errors are `Result<T, E>`** through each crate's error type and `?`; their messages come from the catalogs (see Languages).
+- **Input-derived numbers are hostile** (`.sav` and text files, syntax, MCP params, dashboard pages): `get()` instead of indexing, checked/saturating arithmetic, cap input-sized allocations (a file's declared counts, a `TO` range, a slicer's values).
+- **Bound recursion** (nested expressions in syntax, `RECODE` and `COMPUTE` chains).
+- **Prove it:** every crash fix lands with a regression test that feeds the input that crashed.
+- Crates carry `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]`; `cargo xtask panics` enforces it.
 
 ## Non-negotiables
-- **Clean-room.** SPSS may be *observed* black-box (run it on synthetic data, compare output).
-  The same applies to Power BI. Never read, disassemble or copy anything inside an SPSS or
-  Power BI installation, never commit files produced by either, never copy GPL/AGPL/LGPL code
-  (PSPP, R and its packages…). Behaviour comes from public documentation (Command Syntax
-  Reference, Algorithms guide, the public `.sav` format description) and observation.
-- **Numerical parity is a feature.** Every procedure lands with tests against reference values
-  computed independently (by hand, or with a documented external tool whose output is
-  re-typed as constants, never vendored code). State tolerances explicitly.
-- **Never crash.** No `unwrap`/`expect`/`panic!`/`todo!`/`unreachable!` outside tests, no
-  `unsafe` (`unsafe_code = "forbid"`). Errors are `Result` through each crate's error type.
-  Input-derived sizes (files, syntax) are hostile: `get()` over indexing, checked arithmetic,
-  capped allocations.
-- **Everything goes through the engine.** Menus, syntax, CLI and (later) MCP all call
-  `Session`; the UI never computes statistics itself.
-- **Layering:** `core`/`output` (L0) → `syntax`/`sav`/`csv`/`stats` (L1) → `engine` (L2) →
-  `ui-egui`/`web` (L3) → `apps/*` (L4). Nothing below L3 depends on egui/eframe.
-- **The one `unsafe` attribute.** `crates/web` exports functions to WebAssembly with
-  `#[unsafe(no_mangle)]`, which `forbid` can't allow: that crate alone has `unsafe_code = "deny"`
-  and `#[allow(unsafe_code)]` on those four attributes. It has no `unsafe` block; keep it so.
-- **No vendor assets.** No IBM or Microsoft iconography, artwork, sample files or templates.
-  Feature and command names (`DESCRIPTIVES`, `FREQUENCIES`, "Variable View") are fine.
+- **Clean-room.** IBM SPSS Statistics and Power BI may be *observed* black-box: run them on synthetic data, compare the output, take screenshots stored only under `plan/`. Never read, disassemble or copy anything inside an SPSS or Power BI installation, never commit files produced by either, never copy GPL/AGPL/LGPL code (PSPP, R and its packages, jamovi, JASP…). Behaviour comes from public documentation and observation.
+- **Numerical parity is a feature.** Every procedure lands with tests against reference values computed independently (by hand, or with a documented external tool whose output is re-typed as constants, never vendored code), with explicit tolerances.
+- **Every figure has its calculation.** A procedure lands with its Σ (`crates/stats/src/explain.rs`): the formula, the data's numbers in it, every sum, down to the table's figure; its tests hold every number of the table against the calculation, and its exported `.tex` compiles with pdflatex.
+- **Fonts are never committed.** The app uses egui's defaults; text the fonts lack (→, bold) is drawn in code or done without.
+- **Test data is built in code.** Real SPSS-authored files never enter the repository (`/corpus` is gitignored); tests build their datasets and files in code.
+- **Everything goes through the engine.** User-visible behaviour is command syntax (`crates/syntax`) run by `Session` (`crates/engine`), or a `Session` method, plus tests. Menus, dialogs, Learn's examples, the CLI and the MCP server all reach the same `Session`; the UI never computes statistics itself.
+- **Programmatic calls never open dialogs.** Syntax, the CLI and MCP run with what they are given or return an error; only the ribbon, the search and Learn's links open a dialog, and a dialog only writes syntax (OK runs it, Paste pastes it).
+- **Layering** is enforced by `cargo xtask layers`: `core`/`output`/`i18n` (L0) → `syntax`/`sav`/`csv`/`stats`/`learn` (L1) → `engine` (L2) → `ui-egui`/`web` (L3) → `apps/*` (L4). A crate depends only on its layer and below. Nothing below L3 depends on egui/eframe/winit/rfd. **The UI crate is swappable.**
+- **The UI is thin**: views read `Session` state and act through syntax or `Session` methods. Colours come from `theme::Tokens`. Platform services (file dialogs, settings) come in through `Services`.
+- **Languages.** Every user-visible text — interface, Output, Σ, Learn, errors — comes from the catalogs in `crates/i18n/locales/*.ftl` through `tr!`, in every language (English and Português (Brasil)); their tests fail on a missing message or placeholder. Command syntax is never translated. Numbers shown take the language's decimal mark; syntax and files keep the point.
+- **Learn.** An article per procedure and concept, in every language (`crates/learn/articles/`), written for MK Sigma; its examples run on the sample data, its links resolve, both languages give the same examples (tests enforce all three).
+- **Rust only** (no handwritten JS/TS). **Never break wasm** (`cargo xtask wasm`): the exported dashboards embed the engine.
+- **The one `unsafe` attribute.** `crates/web` exports functions to WebAssembly with `#[unsafe(no_mangle)]`, which `forbid` can't allow: that crate alone has `unsafe_code = "deny"` and `#[allow(unsafe_code)]` on those attributes. It has no `unsafe` block; keep it so.
+- **Quality gates** before every commit: `cargo xtask ci` (fmt, clippy -D warnings, tests, assets, layers, panics, wasm). A commit lands only when they all pass. One change per commit, its message saying what and why. Push only when the user asks.
 
-## Looking at the UI
-Render it offscreen: `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav]
-[--variables] [--labels] [--run 'SYNTAX'] out.png`. Never screenshot the desktop: it captures
-whatever else the person has open. UI behaviour is tested headless with `egui_kittest`
-(`crates/ui-egui/tests/`); platform services such as the file dialog come in through `Services`.
+## Running and looking at the app
+- `cargo run --release -p mksigma -- [data.sav]` (without a file, the sample dataset). On the maintainer's machine, `mksigma` (or MK Sigma in the applications menu) rebuilds the release build from this checkout and opens it.
+- Headless: `mksigma-cli run [--in data.sav] [--out result.sav] [--html report.html] [--pdf report.pdf] [--tex report.tex] [--dashboard board.html] '<syntax>'`; without `--in`, the sample dataset.
+- Agents: `mksigma-mcp` is a Model Context Protocol server over stdio (open data, describe it, run syntax, read and export the Output): `claude mcp add mksigma -- mksigma-mcp`.
+- **Offscreen UI render** (no window): `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav] [--variables] [--labels] [--run 'SYNTAX'] [--tab NAME] [--backstage] [--learn ID|list] [--dialog KIND] [--explain ITEM [--every-term]] [--splash] [--lang pt-BR] [--size 1280x800] out.png`. Never screenshot the desktop: it captures whatever else the person has open.
+- UI behaviour is tested headless with `egui_kittest` (`crates/ui-egui/tests/`); a control below the window's bottom can't be clicked there, so size the harness for it.
+- **For UI work, look at the result** (the snapshot PNG), in both languages; for the Σ, compile its `.tex` with pdflatex and look at a page.
+- Shell gotchas: `cargo fmt` reformats code, so re-read a file before an exact-text edit of what it touched; a gate run chained with `;` doesn't stop on a failure — use `cargo xtask ci && git commit …`.
+- Parallel agents: a separate `CARGO_TARGET_DIR` per agent; edit only the crates you own; delete your target dir when done.
 
-## Quality gates
-`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` before every
-commit.
+## Roadmap
+[`docs/roadmap.md`](docs/roadmap.md) (committed) is the plan and the progress log: the milestones (M0 skeleton, M1 data in, M2 the introductory-course core, M3 Output Viewer, M4 dashboards), then the sections that followed them (the calculation by hand, languages, Learn), each with what is done and its **Next:** items, then Later and Out of scope. [`docs/architecture.md`](docs/architecture.md) describes the crates and how they fit. Update the affected sections whenever work lands: what was done, and what comes next.
+
+## Credits
+- MK Sigma is a Morrison Kühlsen project; its name, motto and brand appear in the app (splash screen, File backstage).
+- Commits made by an agent end with the attribution lines its session gives.
+- Never add, edit, guess or copy anyone's name or credit (not from git config, commit authors or GitHub profiles).

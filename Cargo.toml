@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/*"]
+members = ["crates/*", "apps/*", "xtask"]
 default-members = ["crates/*", "apps/mksigma", "apps/mksigma-cli", "apps/mksigma-mcp"]
 
 [workspace.package]

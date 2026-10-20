@@ -10,7 +10,19 @@ fn main() {
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap_or_default());
     let wasm = out.join("mksigma_web.wasm");
     let target = std::env::var("TARGET").unwrap_or_default();
-    for dir in ["src", "../engine/src", "../stats/src", "../output/src", "../syntax/src", "../sav/src", "../csv/src", "../core/src"] {
+    // Everything the engine is built from, so the embedded engine is never stale.
+    for dir in [
+        "src",
+        "../engine/src",
+        "../stats/src",
+        "../output/src",
+        "../syntax/src",
+        "../sav/src",
+        "../csv/src",
+        "../core/src",
+        "../i18n/src",
+        "../i18n/locales",
+    ] {
         println!("cargo:rerun-if-changed={dir}");
     }
     println!("cargo:rerun-if-changed=build.rs");
