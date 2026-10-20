@@ -703,7 +703,7 @@ impl Session {
             Command::Oneway { .. } | Command::NparTests(_) => Some((run, None)),
             // After the summary.
             Command::Examine { descriptives: true, .. } if place == 1 => Some((run, None)),
-            Command::Regression { .. } => Some((run, None)),
+            Command::Regression { .. } | Command::Logistic { .. } => Some((run, None)),
             _ => None,
         }
     }
@@ -754,6 +754,16 @@ impl Session {
             Command::Regression { dependent, predictors, ci } => {
                 let options = mksigma_stats::RegressionOptions { dependent: dependent.clone(), predictors: predictors.clone(), ci: *ci };
                 explain::regression(&ds, &options, full)?
+            }
+            Command::Logistic { dependent, covariates, ci, iterations, cut } => {
+                let options = mksigma_stats::LogisticOptions {
+                    dependent: dependent.clone(),
+                    covariates: covariates.clone(),
+                    ci: *ci,
+                    iterations: *iterations,
+                    cut: *cut,
+                };
+                explain::logistic(&ds, &options, full)?
             }
             Command::Oneway { .. } => match oneway_options(&command) {
                 Some(options) => explain::oneway(&ds, &options, full)?,
@@ -1252,6 +1262,17 @@ mod tests {
         assert_eq!(tables.len(), 3);
         for i in tables {
             assert_eq!(s.explain(i, false).unwrap().title, "Regression");
+        }
+    }
+
+    #[test]
+    fn explains_every_table_of_a_logistic_regression() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("COMPUTE y = score >= 72.\nLOGISTIC REGRESSION VARIABLES y /METHOD=ENTER age /PRINT=CI(95).").unwrap();
+        let tables: Vec<usize> = (0..s.output.items.len()).filter(|&i| matches!(s.output.items[i], Item::Table(_))).collect();
+        assert_eq!(tables.len(), 5);
+        for i in tables {
+            assert_eq!(s.explain(i, false).unwrap().title, "Logistic Regression");
         }
     }
 

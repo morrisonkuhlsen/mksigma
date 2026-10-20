@@ -215,9 +215,18 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   the sums and mean ranks, U and W, T− and T+, H, the correction for ties, z; Explore's
   Descriptives with the 5% trimmed mean (partial weights at the cuts), the median and quartiles
   by the weighted average at (W + 1)p, and G1 and G2 with their standard errors.
-- **Next:** REGRESSION and LOGISTIC REGRESSION (a matrix in the notation, for (XᵀX)⁻¹Xᵀy and
-  Newton–Raphson's iterations); then the charts (a histogram's bins, a bar's mean, a box's
-  hinges).
+- **REGRESSION — done:** the cross-products of the deviations, the slopes from Sxx b = Sxy
+  (Sxx inverted by Gauss–Jordan, every row operation shown, with two predictors or more), the
+  constant, the analysis of variance, R², and each coefficient's standard error, t, beta and
+  interval.
+- **LOGISTIC REGRESSION — done:** the coding of the dependent, the constant-only model (its
+  probability, log odds and −2LL), every Newton–Raphson iteration (the first with the gradient
+  and the information written out case by case; then g, H, H⁻¹, the step and the new
+  estimates), the stopping rule, the final probabilities, −2LL, the chi-square, Cox and
+  Snell's and Nagelkerke's R², the classification, and each coefficient's standard error from
+  the inverted information (Gauss–Jordan), Wald, Exp(B) and its interval. The iterations are
+  the engine's own run, shared with the table.
+- **Next:** the charts (a histogram's bins, a bar's mean, a box's hinges).
 
 ## Languages — done (English and Português (Brasil))
 - The interface, the Output (titles, labels, notes, warnings, exports), the Σ explanations and

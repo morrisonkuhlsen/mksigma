@@ -2,7 +2,7 @@
 //! coded 0, the higher 1) on numeric covariates, fitted by maximum likelihood with
 //! Newton–Raphson. Cases missing any variable are left out; weights count as frequencies.
 
-use mksigma_core::{Dataset, Value};
+use mksigma_core::{Dataset, Value, Variable};
 use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 use statrs::distribution::{ContinuousCDF, Normal};
@@ -29,13 +29,13 @@ impl Default for Options {
     }
 }
 
-fn probability(x: &[f64], beta: &[f64]) -> f64 {
+pub(crate) fn probability(x: &[f64], beta: &[f64]) -> f64 {
     let eta: f64 = x.iter().zip(beta).map(|(a, b)| a * b).sum();
     1.0 / (1.0 + (-eta).exp())
 }
 
 /// Weighted log-likelihood of 0/1 outcomes.
-fn log_likelihood(rows: &[(f64, Vec<f64>, f64)], beta: &[f64]) -> f64 {
+fn log_likelihood(rows: &[Row], beta: &[f64]) -> f64 {
     rows.iter()
         .map(|(y, x, w)| {
             let p = probability(x, beta).clamp(1e-300, 1.0 - 1e-16);
@@ -44,11 +44,25 @@ fn log_likelihood(rows: &[(f64, Vec<f64>, f64)], beta: &[f64]) -> f64 {
         .sum()
 }
 
-pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> {
+/// A case: y coded 0 or 1, x with a leading 1 for the constant, and its weight.
+pub(crate) type Row = (f64, Vec<f64>, f64);
+
+/// The cases a model is fitted on, and what they were coded from.
+pub(crate) struct Model<'a> {
+    pub yvar: &'a Variable,
+    pub xs: Vec<(usize, &'a Variable)>,
+    /// The dependent's values coded 0 and 1.
+    pub low: f64,
+    pub high: f64,
+    pub rows: Vec<Row>,
+}
+
+/// The cases valid on every variable (listwise) with a positive weight, the dependent coded 0
+/// and 1; `Ok(Err((name, n)))` when the dependent has `n` values instead of two.
+pub(crate) fn model<'a>(ds: &'a Dataset, options: &Options) -> Result<Result<Model<'a>, (String, usize)>, StatsError> {
     let (yi, yvar) = numeric(ds, &options.dependent)?;
     let xs = options.covariates.iter().map(|n| numeric(ds, n)).collect::<Result<Vec<_>, _>>()?;
-    // Listwise; x gets a leading 1 for the constant.
-    let raw: Vec<(f64, Vec<f64>, f64)> = (0..ds.n_cases())
+    let raw: Vec<Row> = (0..ds.n_cases())
         .filter_map(|c| {
             let w = ds.case_weight(c);
             let y = valid(ds, yi, c)?;
@@ -62,14 +76,64 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
     let mut levels: Vec<f64> = raw.iter().map(|(y, _, _)| *y).collect();
     levels.sort_by(f64::total_cmp);
     levels.dedup();
-    let [low, high] = levels[..] else {
-        return Ok(vec![Item::Warning(tr!("o-logistic-two-values", name = yvar.name.as_str(), n = levels.len()))]);
-    };
-    let rows: Vec<(f64, Vec<f64>, f64)> = raw.into_iter().map(|(y, x, w)| (if y == high { 1.0 } else { 0.0 }, x, w)).collect();
+    let [low, high] = levels[..] else { return Ok(Err((yvar.name.clone(), levels.len()))) };
+    let rows = raw.into_iter().map(|(y, x, w)| (if y == high { 1.0 } else { 0.0 }, x, w)).collect();
+    Ok(Ok(Model { yvar, xs, low, high, rows }))
+}
+
+/// The gradient of the log-likelihood, Σ w (y − p) x, and the information matrix,
+/// Σ w p (1 − p) x xᵀ, at `beta`.
+pub(crate) fn derivatives(rows: &[Row], beta: &[f64]) -> (Vec<f64>, Vec<Vec<f64>>) {
+    let k = beta.len();
+    let mut gradient = vec![0.0; k];
+    let mut information = vec![vec![0.0; k]; k];
+    for (y, x, w) in rows {
+        let p = probability(x, beta);
+        let v = w * p * (1.0 - p);
+        for ((g, row), xa) in gradient.iter_mut().zip(information.iter_mut()).zip(x) {
+            *g += w * (y - p) * xa;
+            for (h, xb) in row.iter_mut().zip(x) {
+                *h += v * xa * xb;
+            }
+        }
+    }
+    (gradient, information)
+}
+
+/// One Newton–Raphson iteration.
+pub(crate) struct Iteration {
+    pub gradient: Vec<f64>,
+    pub information: Vec<Vec<f64>>,
+    /// `None` when the information can't be inverted: the iterations stop there.
+    pub inverse: Option<Vec<Vec<f64>>>,
+    /// The inverse times the gradient, added to the estimates.
+    pub step: Vec<f64>,
+    pub to: Vec<f64>,
+    pub ll: f64,
+}
+
+/// A model fitted by maximum likelihood.
+pub(crate) struct Fit {
+    /// The weighted number of cases and of ones.
+    pub n: f64,
+    pub ones: f64,
+    /// The constant-only model: its probability and log-likelihood.
+    pub p0: f64,
+    pub ll0: f64,
+    pub iterations: Vec<Iteration>,
+    pub beta: Vec<f64>,
+    pub ll: f64,
+    pub converged: bool,
+    /// The information at the final estimates, and its inverse (the estimates' covariance; the
+    /// last iteration's inverse when this one has none).
+    pub information: Vec<Vec<f64>>,
+    pub covariance: Option<Vec<Vec<f64>>>,
+}
+
+/// Newton–Raphson from the constant-only model, at most `max` iterations.
+pub(crate) fn fit(rows: &[Row], k: usize, max: usize) -> Fit {
     let n: f64 = rows.iter().map(|(_, _, w)| w).sum();
     let ones: f64 = rows.iter().map(|(y, _, w)| y * w).sum();
-    let k = xs.len() + 1;
-
     // The constant-only model has a closed form.
     let p0 = ones / n;
     let ll0 = ones * p0.ln() + (n - ones) * (1.0 - p0).ln();
@@ -77,49 +141,44 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
     if let Some(b0) = beta.first_mut() {
         *b0 = (p0 / (1.0 - p0)).ln();
     }
-    let mut ll = log_likelihood(&rows, &beta);
-    let (mut iterations, mut converged, mut information) = (0, false, None);
-    while iterations < options.iterations.max(1) {
-        iterations += 1;
-        let mut gradient = vec![0.0; k];
-        let mut hessian = vec![vec![0.0; k]; k];
-        for (y, x, w) in &rows {
-            let p = probability(x, &beta);
-            let v = w * p * (1.0 - p);
-            for ((g, row), xa) in gradient.iter_mut().zip(hessian.iter_mut()).zip(x) {
-                *g += w * (y - p) * xa;
-                for (h, xb) in row.iter_mut().zip(x) {
-                    *h += v * xa * xb;
-                }
-            }
-        }
-        let Some(inverse) = invert(&hessian) else { break };
+    let mut ll = log_likelihood(rows, &beta);
+    let (mut iterations, mut converged, mut last_inverse) = (Vec::new(), false, None);
+    while iterations.len() < max.max(1) {
+        let (gradient, information) = derivatives(rows, &beta);
+        let Some(inverse) = invert(&information) else {
+            iterations.push(Iteration { gradient, information, inverse: None, step: Vec::new(), to: beta.clone(), ll });
+            break;
+        };
         let step: Vec<f64> = inverse.iter().map(|row| row.iter().zip(&gradient).map(|(a, g)| a * g).sum()).collect();
         for (b, s) in beta.iter_mut().zip(&step) {
             *b += s;
         }
-        let new_ll = log_likelihood(&rows, &beta);
+        let new_ll = log_likelihood(rows, &beta);
         // SPSS's default: stop when no estimate changes by more than 0.1%.
         let small = step.iter().zip(&beta).all(|(s, b)| s.abs() <= 0.001 * b.abs().max(1e-8));
         let flat = (new_ll - ll).abs() <= 1e-10 * new_ll.abs().max(1.0);
         ll = new_ll;
-        information = Some(inverse);
+        last_inverse = Some(inverse.clone());
+        iterations.push(Iteration { gradient, information, inverse: Some(inverse), step, to: beta.clone(), ll });
         if small || flat {
             converged = true;
             break;
         }
     }
     // Standard errors from the information at the final estimates.
-    let mut hessian = vec![vec![0.0; k]; k];
-    for (_, x, w) in &rows {
-        let p = probability(x, &beta);
-        for (row, xa) in hessian.iter_mut().zip(x) {
-            for (h, xb) in row.iter_mut().zip(x) {
-                *h += w * p * (1.0 - p) * xa * xb;
-            }
-        }
-    }
-    let covariance = invert(&hessian).or(information);
+    let (_, information) = derivatives(rows, &beta);
+    let covariance = invert(&information).or(last_inverse);
+    Fit { n, ones, p0, ll0, iterations, beta, ll, converged, information, covariance }
+}
+
+pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> {
+    let Model { yvar, xs, low, high, rows } = match model(ds, options)? {
+        Ok(m) => m,
+        Err((name, levels)) => return Ok(vec![Item::Warning(tr!("o-logistic-two-values", name = name.as_str(), n = levels))]),
+    };
+    let k = xs.len() + 1;
+    let Fit { n, p0: _, ll0, iterations, beta, ll, converged, covariance, .. } = fit(&rows, k, options.iterations);
+    let iterations = iterations.len();
     let Some(covariance) = covariance else {
         return Ok(vec![Item::Warning(tr!("o-logistic-collinear"))]);
     };

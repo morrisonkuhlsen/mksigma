@@ -21,6 +21,12 @@ pub(crate) fn t_quantile(p: f64, df: f64) -> Option<f64> {
     Some(d.inverse_cdf(p))
 }
 
+/// The standard normal value with `p` of the distribution below it.
+pub(crate) fn normal_quantile(p: f64) -> Option<f64> {
+    let d = statrs::distribution::Normal::new(0.0, 1.0).ok()?;
+    Some(d.inverse_cdf(p))
+}
+
 /// P(F ≥ f) with `df1`, `df2` degrees of freedom.
 pub(crate) fn f_sig(f: f64, df1: f64, df2: f64) -> Option<f64> {
     let d = FisherSnedecor::new(df1, df2).ok()?;

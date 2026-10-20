@@ -1952,6 +1952,420 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
     Ok(Explanation { title: tr!("ex-title-regression"), sections })
 }
 
+/// A column vector of numbers.
+fn column_of(v: &[f64]) -> Math {
+    matrix(v.iter().map(|x| vec![n(*x)]).collect())
+}
+
+/// Items separated by commas (a list that wraps), the first ten and the last three of many
+/// unless `full`.
+fn listed(items: Vec<Math>, full: bool) -> Math {
+    let items = if !full && items.len() > SHOWN * 2 {
+        let count = items.len();
+        let mut short: Vec<Math> = items.iter().take(10).cloned().collect();
+        short.push(text("⋯"));
+        short.extend(items.iter().skip(count - 3).cloned());
+        short
+    } else {
+        items
+    };
+    let mut out = Vec::with_capacity(items.len() * 2);
+    for (k, item) in items.into_iter().enumerate() {
+        if k > 0 {
+            out.push(text(",   "));
+        }
+        out.push(item);
+    }
+    row(out)
+}
+
+/// `LOGISTIC REGRESSION`: the coding of the dependent, the constant-only model, every
+/// Newton–Raphson iteration (the first with each sum written out), the stopping rule, the fit
+/// (−2LL, the chi-square, the two R²), the classification, and each coefficient's standard
+/// error from the inverse of the information, Wald's statistic, Exp(B) and its interval. The
+/// iterations are the engine's own (`logistic::fit`), so every figure is the table's.
+pub fn logistic(ds: &Dataset, options: &crate::LogisticOptions, full: bool) -> Result<Explanation, StatsError> {
+    use crate::logistic::{Fit, Model, fit, model, probability};
+    let title = tr!("ex-title-logistic");
+    let Model { yvar, xs, low, high, rows } = match model(ds, options)? {
+        Ok(m) => m,
+        Err((name, levels)) => {
+            let steps = vec![say(&tr!("o-logistic-two-values", name = name.as_str(), n = levels))];
+            return Ok(Explanation { title, sections: vec![(tr!("ex-the-model"), steps)] });
+        }
+    };
+    let p = xs.len();
+    let k = p + 1;
+    let w = weighted(ds);
+    let at = |m: &[Vec<f64>], j: usize, c: usize| m.get(j).and_then(|r| r.get(c)).copied().unwrap_or(0.0);
+    let item = |v: &[f64], j: usize| v.get(j).copied().unwrap_or(0.0);
+    // Coefficient 0 is the constant; x₀ = 1.
+    let x_name = |j: usize| if p == 1 { var("x") } else { sub(var("x"), text(&j.to_string())) };
+    let b_name = |j: usize| sub(var("b"), text(&j.to_string()));
+    let b_at = |m: usize| sup(var("b"), text(&format!("({m})")));
+    let Fit { n: big_n, ones, p0, ll0, iterations, beta, ll, converged, information, covariance } = fit(&rows, k, options.iterations);
+
+    // The data.
+    let mut steps = Vec::new();
+    let legend: Vec<String> = xs
+        .iter()
+        .enumerate()
+        .map(|(j, (_, v))| tr!("ex-x-is", n = if p == 1 { String::new() } else { (j + 1).to_string() }, name = v.display_name()))
+        .collect();
+    let cases = if w {
+        tr!("ex-logistic-cases-weighted", y = yvar.display_name(), covariates = legend.join(", "))
+    } else {
+        tr!("ex-logistic-cases", y = yvar.display_name(), covariates = legend.join(", "))
+    };
+    steps.push(step(&cases, equals(vec![var("N"), n(big_n)])));
+    let (low_text, high_text) = (value_text(yvar, &mksigma_core::Value::Num(low)), value_text(yvar, &mksigma_core::Value::Num(high)));
+    steps.extend(several(
+        &tr!("ex-logistic-coding", low = low_text.as_str(), high = high_text.as_str()),
+        vec![
+            row(vec![text(&low_text), text("→"), equals(vec![indexed("y", "i"), n(0.0)])]),
+            row(vec![text(&high_text), text("→"), equals(vec![indexed("y", "i"), n(1.0)])]),
+        ],
+    ));
+    let each: Vec<Math> = rows.iter().map(|(y, _, wi)| weighted_term(w, *wi, n(*y))).collect();
+    steps.push(step(
+        &tr!("ex-logistic-ones"),
+        equals(vec![
+            sub(var("n"), text("1")),
+            sum(None, None, if w { row(vec![indexed("w", "i"), indexed("y", "i")]) } else { indexed("y", "i") }),
+            terms(each, full),
+            n(ones),
+        ]),
+    ));
+    let mut sections = vec![(tr!("ex-the-data"), steps)];
+
+    // The constant-only model.
+    let mut steps = Vec::new();
+    let b0 = (p0 / (1.0 - p0)).ln();
+    steps.extend(several(
+        &tr!("ex-logistic-p0"),
+        vec![
+            equals(vec![sub(var("p"), text("0")), frac(sub(var("n"), text("1")), var("N")), frac(n(ones), n(big_n)), approx(p0)]),
+            equals(vec![
+                b_name(0),
+                row(vec![text("ln"), paren(frac(sub(var("p"), text("0")), row(vec![text("1"), text("−"), sub(var("p"), text("0"))])))]),
+                row(vec![text("ln"), paren(frac(n(p0), n(1.0 - p0)))]),
+                approx(b0),
+            ]),
+        ],
+    ));
+    let ll0_math = sub(var("LL"), text("0"));
+    steps.extend(several(
+        &tr!("ex-logistic-ll0"),
+        vec![
+            equals(vec![
+                ll0_math.clone(),
+                row(vec![
+                    sub(var("n"), text("1")),
+                    text("ln"),
+                    paren(sub(var("p"), text("0"))),
+                    text("+"),
+                    paren(row(vec![var("N"), text("−"), sub(var("n"), text("1"))])),
+                    text("ln"),
+                    paren(row(vec![text("1"), text("−"), sub(var("p"), text("0"))])),
+                ]),
+                row(vec![n(ones), text("·"), text("ln"), paren(n(p0)), text("+"), n(big_n - ones), text("·"), text("ln"), paren(n(1.0 - p0))]),
+                approx(ll0),
+            ]),
+            equals(vec![row(vec![n(-2.0), ll0_math.clone()]), approx(-2.0 * ll0)]),
+        ],
+    ));
+    sections.push((tr!("ex-logistic-block-0"), steps));
+
+    // The iterations.
+    let mut steps = Vec::new();
+    let eta = |values: Option<&[f64]>| -> Math {
+        plus(
+            (0..k)
+                .map(|j| match (values, j) {
+                    (None, 0) => b_name(0),
+                    (None, _) => row(vec![b_name(j), sub(x_name(j), var("i"))]),
+                    (Some(b), 0) => n(item(b, 0)),
+                    (Some(b), _) => row(vec![val(item(b, j)), sub(x_name(j), var("i"))]),
+                })
+                .collect(),
+        )
+    };
+    let logistic_of = |inside: Math| frac(text("1"), row(vec![text("1"), text("+"), sup(var("e"), row(vec![text("−"), paren(inside)]))]));
+    steps.push(step(&tr!("ex-logistic-model"), equals(vec![indexed("p", "i"), logistic_of(eta(None))])));
+    let wi = |m: Math| if w { row(vec![indexed("w", "i"), m]) } else { m };
+    steps.extend(several(
+        &tr!("ex-logistic-derivatives"),
+        vec![
+            equals(vec![
+                indexed("g", "j"),
+                sum(None, None, wi(row(vec![paren(row(vec![indexed("y", "i"), text("−"), indexed("p", "i")])), sub(var("x"), var("ij"))]))),
+            ]),
+            equals(vec![
+                sub(var("H"), var("jk")),
+                sum(
+                    None,
+                    None,
+                    wi(row(vec![
+                        indexed("p", "i"),
+                        paren(row(vec![text("1"), text("−"), indexed("p", "i")])),
+                        sub(var("x"), var("ij")),
+                        sub(var("x"), var("ik")),
+                    ])),
+                ),
+            ]),
+            equals(vec![sup(var("b"), text("new")), row(vec![var("b"), text("+"), sup(var("H"), text("−1")), var("g")])]),
+        ],
+    ));
+    let mut start = vec![0.0; k];
+    if let Some(s) = start.first_mut() {
+        *s = b0;
+    }
+    steps.push(step(&tr!("ex-logistic-start"), equals(vec![b_at(0), column_of(&start)])));
+    let mut stop = None;
+    for (m, it) in iterations.iter().enumerate() {
+        let m = m + 1;
+        if m == 1 {
+            // At the start every case has the constant's probability: the sums are short.
+            steps.push(step(&tr!("ex-logistic-first-p"), equals(vec![indexed("p", "i"), logistic_of(n(b0)), approx(p0)])));
+            let v0 = p0 * (1.0 - p0);
+            let x_of = |x: &[f64], j: usize| x.get(j).copied().unwrap_or(0.0);
+            let mut maths = Vec::new();
+            for j in 0..k {
+                let each: Vec<Math> = rows
+                    .iter()
+                    .map(|(y, x, wi)| {
+                        let d = row(vec![paren(row(vec![n(*y), text("−"), n(p0)]))]);
+                        weighted_term(w, *wi, if j == 0 { d } else { row(vec![d, text("·"), val(x_of(x, j))]) })
+                    })
+                    .collect();
+                maths.push(equals(vec![indexed("g", &j.to_string()), terms(each, full), approx(item(&it.gradient, j))]));
+            }
+            steps.extend(several(&tr!("ex-logistic-gradient"), maths));
+            let mut maths = Vec::new();
+            for j in 0..k {
+                for c in j..k {
+                    let products: Vec<Math> = rows
+                        .iter()
+                        .map(|(_, x, wi)| {
+                            let product = match (j, c) {
+                                (0, 0) => n(1.0),
+                                (0, c) => val(x_of(x, c)),
+                                (j, c) => row(vec![val(x_of(x, j)), text("·"), val(x_of(x, c))]),
+                            };
+                            weighted_term(w, *wi, product)
+                        })
+                        .collect();
+                    maths.push(equals(vec![
+                        sub(var("H"), text(&format!("{j}{c}"))),
+                        row(vec![n(v0), text("·"), paren(terms(products, full))]),
+                        approx(at(&it.information, j, c)),
+                    ]));
+                }
+            }
+            steps.extend(several(&tr!("ex-logistic-information", v = number_text(v0)), maths));
+            steps.push(step(&tr!("ex-logistic-information-matrix"), equals(vec![var("H"), matrix(numbers(&it.information))])));
+        } else {
+            steps.extend(several(
+                &tr!("ex-logistic-iteration", n = m, before = m - 1),
+                vec![equals(vec![var("g"), column_of(&it.gradient)]), equals(vec![var("H"), matrix(numbers(&it.information))])],
+            ));
+        }
+        let Some(inverse) = &it.inverse else {
+            stop = Some(say(&tr!("ex-logistic-stop-singular")));
+            break;
+        };
+        steps.push(step(&tr!("ex-logistic-information-inverse"), equals(vec![sup(var("H"), text("−1")), matrix(numbers(inverse))])));
+        let mut maths = Vec::new();
+        for j in 0..k {
+            maths.push(equals(vec![
+                sub(var("Δ"), text(&j.to_string())),
+                plus((0..k).map(|c| row(vec![val(at(inverse, j, c)), text("·"), val(item(&it.gradient, c))])).collect()),
+                approx(item(&it.step, j)),
+            ]));
+        }
+        maths.push(equals(vec![b_at(m), row(vec![b_at(m - 1), text("+"), var("Δ")]), column_of(&it.to)]));
+        steps.extend(several(&tr!("ex-logistic-step"), maths));
+        steps.push(step(
+            &tr!("ex-logistic-ll", n = m),
+            equals(vec![row(vec![n(-2.0), sup(var("LL"), text(&format!("({m})")))]), approx(-2.0 * it.ll)]),
+        ));
+        let last = m == iterations.len();
+        if last && converged {
+            let small = it.step.iter().zip(&it.to).all(|(s, b)| s.abs() <= 0.001 * b.abs().max(1e-8));
+            stop = Some(if small {
+                let ratios: Vec<Math> = (0..k)
+                    .map(|j| {
+                        let ratio = item(&it.step, j).abs() / item(&it.to, j).abs().max(1e-8);
+                        equals(vec![
+                            frac(row(vec![text("|"), sub(var("Δ"), text(&j.to_string())), text("|")]), row(vec![text("|"), b_name(j), text("|")])),
+                            approx(ratio),
+                        ])
+                    })
+                    .collect();
+                step(&tr!("ex-logistic-stop-small", n = m), listed(ratios, true))
+            } else {
+                say(&tr!("ex-logistic-stop-flat", n = m))
+            });
+        } else if last {
+            stop = Some(say(&tr!("ex-logistic-stop-max", n = m)));
+        }
+    }
+    steps.extend(stop);
+    sections.push((tr!("ex-logistic-newton"), steps));
+    let Some(covariance) = covariance else {
+        return Ok(Explanation { title, sections });
+    };
+
+    // The fit.
+    let mut steps = Vec::new();
+    let probabilities: Vec<f64> = rows.iter().map(|(_, x, _)| probability(x, &beta)).collect();
+    steps.push(step(&tr!("ex-logistic-final-p"), equals(vec![indexed("p", "i"), logistic_of(eta(Some(&beta)))])));
+    steps.push(step(
+        "",
+        listed(probabilities.iter().enumerate().map(|(i, q)| equals(vec![sub(var("p"), text(&(i + 1).to_string())), n(*q)])).collect(), full),
+    ));
+    let each: Vec<Math> = rows
+        .iter()
+        .zip(&probabilities)
+        .map(|((y, _, wi), q)| weighted_term(w, *wi, row(vec![text("ln"), paren(n(if *y == 1.0 { *q } else { 1.0 - q }))])))
+        .collect();
+    steps.extend(several(
+        &tr!("ex-logistic-ll-final"),
+        vec![equals(vec![var("LL"), terms(each, full), approx(ll)]), equals(vec![row(vec![n(-2.0), var("LL")]), approx(-2.0 * ll)])],
+    ));
+    let chi = 2.0 * (ll - ll0);
+    steps.extend(several(
+        &tr!("ex-logistic-chi"),
+        vec![
+            equals(vec![
+                sup(var("χ"), text("2")),
+                row(vec![paren(row(vec![n(-2.0), ll0_math.clone()])), text("−"), paren(row(vec![n(-2.0), var("LL")]))]),
+                row(vec![n(-2.0 * ll0), text("−"), n(-2.0 * ll)]),
+                approx(chi),
+            ]),
+            equals(vec![var("df"), n(p as f64)]),
+        ],
+    ));
+    if let Some(sig) = dist::chi_square_sig(chi, p as f64) {
+        steps.push(step(&tr!("ex-logistic-chi-sig", df = p), equals(vec![var("p"), approx(sig)])));
+    }
+    let cox_snell = 1.0 - (2.0 / big_n * (ll0 - ll)).exp();
+    let largest = 1.0 - (2.0 * ll0 / big_n).exp();
+    let r2 = |tag: &str| sup(sub(var("R"), text(tag)), text("2"));
+    steps.extend(several(
+        &tr!("ex-logistic-r2"),
+        vec![
+            equals(vec![
+                r2("CS"),
+                row(vec![
+                    text("1"),
+                    text("−"),
+                    sup(var("e"), row(vec![frac(text("2"), var("N")), paren(row(vec![ll0_math.clone(), text("−"), var("LL")]))])),
+                ]),
+                row(vec![text("1"), text("−"), sup(var("e"), row(vec![frac(text("2"), n(big_n)), paren(row(vec![n(ll0), text("−"), val(ll)]))]))]),
+                approx(cox_snell),
+            ]),
+            equals(vec![
+                r2("N"),
+                frac(r2("CS"), row(vec![text("1"), text("−"), sup(var("e"), row(vec![frac(row(vec![text("2"), ll0_math]), var("N"))]))])),
+                frac(n(cox_snell), n(largest)),
+                approx(cox_snell / largest),
+            ]),
+        ],
+    ));
+    sections.push((tr!("ex-logistic-fit"), steps));
+
+    // The classification.
+    let mut steps = Vec::new();
+    let mut counts = [[0.0; 2]; 2];
+    for ((y, _, wi), q) in rows.iter().zip(&probabilities) {
+        let predicted = usize::from(*q >= options.cut);
+        let observed = usize::from(*y == 1.0);
+        if let Some(cell) = counts.get_mut(observed).and_then(|r| r.get_mut(predicted)) {
+            *cell += wi;
+        }
+    }
+    let count = |o: usize, q: usize| counts.get(o).and_then(|r| r.get(q)).copied().unwrap_or(0.0);
+    let cell = |o: usize, q: usize| sub(var("n"), text(&format!("{o}{q}")));
+    steps.push(step(
+        &tr!("ex-logistic-cut", cut = number_text(options.cut)),
+        listed((0..2).flat_map(|o| (0..2).map(move |q| (o, q))).map(|(o, q)| equals(vec![cell(o, q), n(count(o, q))])).collect(), true),
+    ));
+    let mut maths = Vec::new();
+    for o in 0..2 {
+        let total = count(o, 0) + count(o, 1);
+        if total > 0.0 {
+            maths.push(equals(vec![
+                frac(cell(o, o), row(vec![cell(o, 0), text("+"), cell(o, 1)])),
+                row(vec![frac(n(count(o, o)), n(total)), text("·"), text("100")]),
+                approx(count(o, o) / total * 100.0),
+            ]));
+        }
+    }
+    let right = count(0, 0) + count(1, 1);
+    maths.push(equals(vec![
+        frac(row(vec![cell(0, 0), text("+"), cell(1, 1)]), var("N")),
+        row(vec![frac(n(right), n(big_n)), text("·"), text("100")]),
+        approx(right / big_n * 100.0),
+    ]));
+    steps.extend(several(&tr!("ex-logistic-correct"), maths));
+    sections.push((tr!("ex-logistic-classification"), steps));
+
+    // Each coefficient.
+    let mut steps = Vec::new();
+    steps.push(step(&tr!("ex-logistic-covariance"), equals(vec![var("H"), matrix(numbers(&information))])));
+    if gauss_jordan_steps(&information, &mut steps).is_none() {
+        steps.push(say(&tr!("ex-logistic-last-inverse")));
+    }
+    steps.push(step(&tr!("ex-logistic-covariance-inverse"), equals(vec![var("V"), sup(var("H"), text("−1")), matrix(numbers(&covariance))])));
+    let z = options.ci.and_then(|level| dist::normal_quantile(0.5 + level / 2.0));
+    if let (Some(level), Some(z)) = (options.ci, z) {
+        steps.push(step(
+            &tr!("ex-logistic-z", level = number_text(level * 100.0), tail = number_text((1.0 - level) / 2.0 * 100.0)),
+            equals(vec![sub(var("z"), num(0.5 + level / 2.0, 4)), approx(z)]),
+        ));
+    }
+    let constant = tr!("o-constant");
+    // In the table's order: the covariates, then the constant.
+    for j in (1..k).chain(std::iter::once(0)) {
+        let b = item(&beta, j);
+        let variance = at(&covariance, j, j);
+        let se = variance.sqrt();
+        let wald = (b / se).powi(2);
+        let name = if j == 0 { constant.clone() } else { xs.get(j - 1).map_or(String::new(), |(_, v)| v.display_name().to_string()) };
+        let mut maths = vec![
+            equals(vec![text("B"), b_name(j), approx(b)]),
+            equals(vec![sub(var("SE"), b_name(j)), sqrt(sub(var("V"), text(&format!("{j}{j}")))), sqrt(n(variance)), approx(se)]),
+            equals(vec![
+                text("Wald"),
+                sup(paren(frac(b_name(j), sub(var("SE"), b_name(j)))), text("2")),
+                sup(paren(frac(n(b), n(se))), text("2")),
+                approx(wald),
+            ]),
+            equals(vec![var("df"), text("1")]),
+        ];
+        if let Some(sig) = dist::chi_square_sig(wald, 1.0) {
+            maths.push(equals(vec![var("p"), approx(sig)]));
+        }
+        maths.push(equals(vec![text("Exp(B)"), sup(var("e"), b_name(j)), sup(var("e"), n(b)), approx(b.exp())]));
+        if let Some(z) = z {
+            maths.push(equals(vec![
+                text(&tr!("ex-word-lower-cap")),
+                sup(var("e"), row(vec![n(b), text("−"), n(z), text("·"), n(se)])),
+                approx((b - z * se).exp()),
+            ]));
+            maths.push(equals(vec![
+                text(&tr!("ex-word-upper-cap")),
+                sup(var("e"), row(vec![n(b), text("+"), n(z), text("·"), n(se)])),
+                approx((b + z * se).exp()),
+            ]));
+        }
+        steps.extend(several(&tr!("ex-logistic-coefficient", name = name.as_str(), b = number_text(b)), maths));
+    }
+    sections.push((tr!("ex-each-coefficient"), steps));
+    Ok(Explanation { title, sections })
+}
+
 /// `CROSSTABS`' chi-square tests for each row × column pair: the counts and their totals, the
 /// expected counts, Pearson's chi-square, the likelihood ratio, for a 2 × 2 table the
 /// continuity correction and Fisher's exact test, and the linear-by-linear association.
@@ -2838,6 +3252,64 @@ mod tests {
         let options = crate::RegressionOptions { dependent: "y".into(), predictors: vec!["x".into()], ci: None };
         let tex = latex(&regression(&ds, &options, false).unwrap());
         assert!(tex.contains("\\frac{6}{10} = 0.6") && tex.contains("= 2.2"), "{tex}");
+    }
+
+    #[test]
+    fn logistic_regression_by_hand_agrees_with_the_tables() {
+        // y = 1 when the score is 72 or more; ages overlap, so the estimates exist.
+        let mut ds = Dataset::new();
+        for name in ["y", "age", "income"] {
+            ds.add_variable(Variable::numeric(name)).unwrap();
+        }
+        let sample = sample();
+        for case in 0..sample.n_cases() {
+            let at = |v: usize| sample.column(v).unwrap()[case].as_num().unwrap();
+            let y = if at(2) >= 72.0 { 1.0 } else { 0.0 };
+            ds.push_case(vec![Value::Num(y), Value::Num(at(0)), Value::Num(at(1))]).unwrap();
+        }
+        for covariates in [vec!["age"], vec!["age", "income"]] {
+            let options = crate::LogisticOptions {
+                dependent: "y".into(),
+                covariates: covariates.iter().map(|c| c.to_string()).collect(),
+                ci: Some(0.95),
+                ..crate::LogisticOptions::default()
+            };
+            let e = logistic(&ds, &options, false).unwrap();
+            let tex = latex(&e);
+            let items = crate::logistic(&ds, &options).unwrap();
+            for t in tables(&items) {
+                for (_, cells) in &t.rows {
+                    for cell in cells {
+                        let x = match cell {
+                            Cell::Num { value, .. } => *value,
+                            Cell::Int(k) => *k as f64,
+                            _ => continue,
+                        };
+                        let shown = number(x, 3);
+                        assert!(tex.contains(&format!("\\approx {shown}")) || tex.contains(&format!("= {shown}")), "{x} of {} in {tex}", t.title);
+                    }
+                }
+            }
+            assert!(e.to_latex().is_ascii(), "pdflatex takes it as it is");
+        }
+        // The 2 × 2 table: x = 0 → 3 of 10 are 1, x = 1 → 7 of 10. p₀ = 10/20, b₀ = ln 1 = 0, and
+        // the slope converges to the log odds ratio, ln((7/3)/(3/7)) = 1.6946.
+        let mut ds = Dataset::new();
+        for name in ["y", "x"] {
+            ds.add_variable(Variable::numeric(name)).unwrap();
+        }
+        for (x, ones) in [(0.0, 3), (1.0, 7)] {
+            for i in 0..10 {
+                ds.push_case(vec![Value::Num(if i < ones { 1.0 } else { 0.0 }), Value::Num(x)]).unwrap();
+            }
+        }
+        let options = crate::LogisticOptions { dependent: "y".into(), covariates: vec!["x".into()], ..crate::LogisticOptions::default() };
+        let tex = latex(&logistic(&ds, &options, false).unwrap());
+        assert!(tex.contains("\\frac{10}{20} = 0.5"), "{tex}");
+        assert!(tex.contains("{e}^{1.6946}"), "Exp(B) of the converged slope: {tex}");
+        // Iteration 1 from p = 0.5: g₁ = Σ (y − 0.5) x = 7 − 5 = 2, H₁₁ = 0.25 · 10 = 2.5.
+        assert!(tex.contains("= 2\n") || tex.contains("= 2 "), "{tex}");
+        assert!(tex.contains("0.25 \\cdot \\left("), "{tex}");
     }
 
     #[test]
