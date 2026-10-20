@@ -795,6 +795,7 @@ ex-regression-cases-weighted = Os casos válidos em y ({ $y }) e em todos os pre
 ex-intervals-t = Para os intervalos de { $level }%, o t que deixa { $tail }% em cada cauda a { $df } graus de liberdade:
 ex-constant-se = A constante, a = { $a }: o erro padrão dela, a partir do quadrado médio dos resíduos e das médias dos preditores:
 ex-coefficient-se = { $name }, b = { $b }: o erro padrão pela diagonal da inversa, t, significância e o beta em desvios padrão:
+ex-examine-interval = O intervalo de 95% da média, com o t que deixa 2,5% em cada cauda a { $df } graus de liberdade:
 ex-title-logistic = Regressão logística
 ex-logistic-cases = Os casos válidos em y ({ $y }) e em todas as covariáveis ({ $covariates }):
 ex-logistic-cases-weighted = Os casos válidos em y ({ $y }) e em todas as covariáveis ({ $covariates }), ponderados:

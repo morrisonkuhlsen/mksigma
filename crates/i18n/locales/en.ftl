@@ -795,6 +795,7 @@ ex-regression-cases-weighted = The cases valid on y ({ $y }) and on every predic
 ex-intervals-t = For the { $level }% intervals, the t that leaves { $tail }% in each tail at { $df } degrees of freedom:
 ex-constant-se = The constant, a = { $a }: its standard error, from the residuals' mean square and the means of the predictors:
 ex-coefficient-se = { $name }, b = { $b }: its standard error from the inverse's diagonal, t, significance, and the beta in standard deviations:
+ex-examine-interval = The 95% interval of the mean, with the t that leaves 2.5% in each tail at { $df } degrees of freedom:
 ex-title-logistic = Logistic Regression
 ex-logistic-cases = The cases valid on y ({ $y }) and on every covariate ({ $covariates }):
 ex-logistic-cases-weighted = The cases valid on y ({ $y }) and on every covariate ({ $covariates }), weighted:

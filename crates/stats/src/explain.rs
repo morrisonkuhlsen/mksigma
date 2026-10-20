@@ -1375,10 +1375,7 @@ fn examine_steps(sorted: &crate::examine::Sorted, w: bool, full: bool) -> Vec<St
         if let Some(critical) = dist::t_quantile(0.975, big_w - 1.0) {
             let half = critical * se;
             steps.extend(several(
-                &format!(
-                    "The 95% interval of the mean, with the t that leaves 2.5% in each tail at {} degrees of freedom:",
-                    number_text(big_w - 1.0)
-                ),
+                &tr!("ex-examine-interval", df = number_text(big_w - 1.0)),
                 vec![
                     equals(vec![sub(var("t"), text("0.975")), approx(critical)]),
                     equals(vec![text(&tr!("ex-word-lower-cap")), row(vec![n(mean), text("−"), n(critical), text("·"), n(se)]), approx(mean - half)]),
