@@ -1,20 +1,20 @@
 # MK Sigma — instructions for agents
 
-MK Sigma is a clean-room, open-source, Rust-native statistics package targeting IBM SPSS Statistics parity — Data View / Variable View, command syntax, procedures and an Output Viewer — and superiority: every figure with its calculation by hand (Σ), a study section (Learn), and on top the best of Power BI: recorded data preparation, cross-filtering and publishable dashboards. It runs natively on Linux, Windows and macOS; its engine also runs in the browser as WebAssembly, inside exported dashboards. A Morrison Kühlsen project.
+MK Sigma is a clean-room, open-source, Rust-native statistics package targeting IBM SPSS Statistics parity — Data View / Variable View, command syntax, procedures and an Output Viewer — and superiority: every figure with its calculation by hand (Σ), a study section (Learn), and on top the best of Power BI: recorded data preparation, cross-filtering and publishable dashboards. Beyond SPSS, it brings together what the other reference packages do — SAS, Stata, JMP, Minitab, JASP and jamovi — in one engine, one command syntax and one Output (see *Beyond SPSS*). It runs natively on Linux, Windows and macOS; its engine also runs in the browser as WebAssembly, inside exported dashboards. A Morrison Kühlsen project.
 
 ## Start every session here
-1. Read [`docs/roadmap.md`](docs/roadmap.md): what is done, and the **Next:** items, which are the work list; then the relevant section of [`docs/architecture.md`](docs/architecture.md). Behaviour reference: IBM's public documentation (Command Syntax Reference, Algorithms guide), the public `.sav` format description, and observation (`plan/`).
+1. Read [`docs/roadmap.md`](docs/roadmap.md): what is done, and the **Next:** items, which are the work list; then the relevant section of [`docs/architecture.md`](docs/architecture.md). Behaviour reference: IBM's public documentation (Command Syntax Reference, Algorithms guide), the public `.sav` format description, the other vendors' public manuals (Stata's PDF manuals, SAS's, Minitab's and JMP's documentation), textbooks and papers, and observation (`plan/`).
 2. Work autonomously through the next item: build it, test it, look at it, commit it when the gates pass. Stop to ask only for what is the user's to decide: priorities and scope, brand and visual identity, anything published or shared (pushing, releases), and anything destructive.
 
-`plan/` is gitignored (local only): notes and observations of SPSS and Power BI, and their screenshots.
+`plan/` is gitignored (local only): notes and observations of SPSS, Power BI and the other reference packages, and their screenshots.
 
 ## Assets and iconography — absolute rule
-**No IBM, Microsoft, Adobe (or any other vendor's) iconography, images, artwork, fonts, templates, themes or sample files — ever.** This is the most important rule in this repository; breaking it is a serious failure.
+**No IBM, Microsoft, Adobe, SAS, StataCorp, Minitab, JASP, jamovi (or any other vendor's) iconography, images, artwork, fonts, templates, themes or sample files — ever.** This is the most important rule in this repository; breaking it is a serious failure.
 - Every asset in the repo is original work by MK Sigma's contributors, or public domain / CC0, or licensed for redistribution, or one of Morrison Kühlsen's brand assets below.
 - Every asset file has a row in [`ATTRIBUTION.md`](ATTRIBUTION.md) (author, source, terms). `cargo xtask assets` enforces it. Adding an asset without a row is a bug.
 - Prefer art generated in code: the UI icon set (`crates/ui-egui/src/icons.rs`), the charts, the themes (`crates/ui-egui/src/theme.rs`), the Output styles and the sample dataset are drawn or defined in code and original.
-- Never copy SPSS's or Power BI's icons, toolbar artwork, Output templates, table looks, sample files (`.sav` that ship with SPSS) or wording beyond feature names. Feature and command *names* (`DESCRIPTIVES`, `FREQUENCIES`, "Variable View", "slicer") are fine.
-- Screenshots of IBM or Microsoft software are never committed (they live only in `plan/`).
+- Never copy any reference package's icons, toolbar artwork, Output templates, table looks, sample files (the `.sav` that ship with SPSS, Stata's example `.dta`, Minitab's and JMP's sample data) or wording beyond feature names. Feature and command *names* (`DESCRIPTIVES`, `FREQUENCIES`, "Variable View", "slicer", "Xbar-R chart", "process capability") are fine.
+- Screenshots of IBM, Microsoft or any other vendor's software are never committed (they live only in `plan/`).
 - The Morrison Kühlsen brand files in `crates/ui-egui/assets/` (the σ mark, the wordmark, the spiral staircase) are the house's, used with its permission, listed in `ATTRIBUTION.md`: the one exception.
 
 ## Never crash
@@ -22,13 +22,16 @@ People trust MK Sigma with their data and their results; a crash loses their wor
 - **No panics in non-test code:** no `unwrap()`, `expect()`, `panic!`, `unreachable!`, `todo!`, `unimplemented!`; no `unsafe` (`unsafe_code = "forbid"`).
 - **Errors are `Result<T, E>`** through each crate's error type and `?`; their messages come from the catalogs (see Languages).
 - **Input-derived numbers are hostile** (`.sav` and text files, syntax, MCP params, dashboard pages): `get()` instead of indexing, checked/saturating arithmetic, cap input-sized allocations (a file's declared counts, a `TO` range, a slicer's values).
+- **Statistics' own hostile inputs** become a `Result` with an explainable, catalogued message, never a panic or a silent NaN: a singular or near-singular matrix, n = 0 or n = 1, zero variance, missing values and NaN, perfect separation in logistic regression, an optimizer that does not converge, a factor with a million levels. Iterative methods carry an iteration cap.
 - **Bound recursion** (nested expressions in syntax, `RECODE` and `COMPUTE` chains).
 - **Prove it:** every crash fix lands with a regression test that feeds the input that crashed.
 - Crates carry `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]`; `cargo xtask panics` enforces it.
 
 ## Non-negotiables
-- **Clean-room.** IBM SPSS Statistics and Power BI may be *observed* black-box: run them on synthetic data, compare the output, take screenshots stored only under `plan/`. Never read, disassemble or copy anything inside an SPSS or Power BI installation, never commit files produced by either, never copy GPL/AGPL/LGPL code (PSPP, R and its packages, jamovi, JASP…). Behaviour comes from public documentation and observation.
-- **Numerical parity is a feature.** Every procedure lands with tests against reference values computed independently (by hand, or with a documented external tool whose output is re-typed as constants, never vendored code), with explicit tolerances.
+- **Clean-room.** IBM SPSS Statistics, Power BI, SAS, Stata, JMP, Minitab, JASP and jamovi may be *observed* black-box: run them on synthetic data, compare the output, take screenshots stored only under `plan/`. Never read, disassemble or copy anything inside their installations, never commit files any of them produced (`.spv`, Stata logs, Minitab projects, JMP tables, their sample datasets), never copy GPL/AGPL/LGPL code (PSPP, gretl, R and CRAN's packages, jamovi, JASP…): reading their *documentation* is allowed, their code is not. Behaviour comes from public documentation, textbooks and papers, and observation.
+- **File formats** come from public specifications: `.sav` from its public description, `.dta` from StataCorp's published specification. `.sas7bdat` is known only through third parties' reverse engineering: out of scope until the user decides otherwise.
+- **Dependencies** are permissively licensed (MIT, Apache-2.0, BSD, Zlib or similar), and below L3 they build for wasm; anything missing — mixed models, structural equations, complex samples, DOE, SPC — is written here, from the literature.
+- **Numerical parity is a feature.** Every procedure lands with tests against reference values computed independently (by hand, or with a documented external tool whose output is re-typed as constants, never vendored code), with explicit tolerances. Where NIST's Statistical Reference Datasets (StRD, public domain, certified values) cover a procedure — univariate statistics, ANOVA, linear and nonlinear regression — its tests hold it against them, the datasets built in code.
 - **Every figure has its calculation.** A procedure lands with its Σ (`crates/stats/src/explain.rs`): the formula, the data's numbers in it, every sum, down to the table's figure; its tests hold every number of the table against the calculation, and its exported `.tex` compiles with pdflatex.
 - **Fonts are never committed.** The app uses egui's defaults; text the fonts lack (→, bold) is drawn in code or done without.
 - **Test data is built in code.** Real SPSS-authored files never enter the repository (`/corpus` is gitignored); tests build their datasets and files in code.
@@ -41,6 +44,17 @@ People trust MK Sigma with their data and their results; a crash loses their wor
 - **Rust only** (no handwritten JS/TS). **Never break wasm** (`cargo xtask wasm`): the exported dashboards embed the engine.
 - **The one `unsafe` attribute.** `crates/web` exports functions to WebAssembly with `#[unsafe(no_mangle)]`, which `forbid` can't allow: that crate alone has `unsafe_code = "deny"` and `#[allow(unsafe_code)]` on those attributes. It has no `unsafe` block; keep it so.
 - **Quality gates** before every commit: `cargo xtask ci` (fmt, clippy -D warnings, tests, assets, layers, panics, wasm). A commit lands only when they all pass. One change per commit, its message saying what and why. Push only when the user asks.
+
+## Beyond SPSS: what the others do
+SPSS parity comes first; the other packages' strengths join as modules of the same engine, each a set of commands in the one syntax, with its Σ, its Learn articles and its parity tests — never a separate program or a second syntax:
+- **Stata** — econometrics: panel data (fixed and random effects), instrumental variables, survey data with complex samples, epidemiology.
+- **SAS** — large data, validated and auditable analyses.
+- **JMP** — visual, interactive exploration and design of experiments (DOE, response surfaces).
+- **Minitab** — quality: control charts (SPC), process capability, Six Sigma.
+- **JASP** — Bayesian analyses side by side with the frequentist ones.
+- **jamovi** — results that update as the analysis is edited; teaching.
+
+Scope is the main risk: finish one vertical slice before opening the next module, and the order of modules is the user's to decide (`docs/roadmap.md`).
 
 ## Running and looking at the app
 - `cargo run --release -p mksigma -- [data.sav]` (without a file, the sample dataset). On the maintainer's machine, `mksigma` (or MK Sigma in the applications menu) rebuilds the release build from this checkout and opens it.
