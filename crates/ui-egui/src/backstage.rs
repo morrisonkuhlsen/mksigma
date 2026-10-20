@@ -84,9 +84,9 @@ fn place(ui: &mut egui::Ui, icon: Icon, label: &str, on: bool) -> bool {
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, label));
     let pill = slot.shrink2(egui::vec2(14.0, 3.0));
     if on {
-        ui.painter().rect_filled(pill, 10.0, BRAND);
+        ui.painter().rect_filled(pill, 0.0, BRAND);
     } else if response.hovered() {
-        ui.painter().rect_filled(pill, 10.0, egui::Color32::from_white_alpha(18));
+        ui.painter().rect_filled(pill, 0.0, egui::Color32::from_white_alpha(18));
     }
     let color = if on { ON_INK } else { ON_INK_SOFT };
     icons::paint(
@@ -214,7 +214,7 @@ pub(crate) fn show(ui: &mut egui::Ui, view: &View) -> Option<Action> {
     // Back to the data, in the page's corner.
     let corner = egui::Rect::from_min_size(egui::pos2(content.right() - 200.0, content.top() - 6.0), egui::vec2(200.0, 32.0));
     let mut back = ui.new_child(egui::UiBuilder::new().max_rect(corner).layout(egui::Layout::right_to_left(egui::Align::Center)));
-    let button = back.add(egui::Button::new(egui::RichText::new(tr!("bs-back")).size(13.5)).min_size(egui::vec2(0.0, 30.0)).corner_radius(15));
+    let button = back.add(egui::Button::new(egui::RichText::new(tr!("bs-back")).size(13.5)).min_size(egui::vec2(0.0, 30.0)));
     if button.on_hover_text("Esc").clicked() {
         action = Some(Action::Back);
     }
@@ -275,12 +275,7 @@ fn pages(ui: &mut egui::Ui, view: &View) -> Option<Action> {
         Page::Open => {
             heading(ui, &tr!("open"), &tr!("bs-open-sub"));
             if ui
-                .add(
-                    egui::Button::new(egui::RichText::new(tr!("bs-browse")).size(14.0).color(ON_INK))
-                        .fill(BRAND)
-                        .min_size(egui::vec2(130.0, 34.0))
-                        .corner_radius(17),
-                )
+                .add(egui::Button::new(egui::RichText::new(tr!("bs-browse")).size(14.0).color(ON_INK)).fill(BRAND).min_size(egui::vec2(130.0, 34.0)))
                 .on_hover_text("Ctrl+O")
                 .clicked()
             {
@@ -295,23 +290,18 @@ fn pages(ui: &mut egui::Ui, view: &View) -> Option<Action> {
         Page::Info => {
             heading(ui, view.file_name.unwrap_or(&tr!("untitled")), &view.file_path.map_or_else(|| tr!("bs-not-saved"), |p| p.display().to_string()));
             if view.confirm_close {
-                egui::Frame::new()
-                    .fill(t.accent_soft)
-                    .stroke(egui::Stroke::new(1.0, BRAND))
-                    .corner_radius(12)
-                    .inner_margin(egui::Margin::same(14))
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new(tr!("bs-unsaved")).strong());
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            if ui.add(egui::Button::new(egui::RichText::new(tr!("save")).color(ON_INK)).fill(BRAND).corner_radius(14)).clicked() {
-                                action = Some(Action::Save);
-                            }
-                            if ui.add(egui::Button::new(tr!("bs-close-without")).corner_radius(14)).clicked() {
-                                action = Some(Action::Discard);
-                            }
-                        });
+                egui::Frame::new().fill(t.accent_soft).stroke(egui::Stroke::new(1.0, BRAND)).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
+                    ui.label(egui::RichText::new(tr!("bs-unsaved")).strong());
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Button::new(egui::RichText::new(tr!("save")).color(ON_INK)).fill(BRAND)).clicked() {
+                            action = Some(Action::Save);
+                        }
+                        if ui.add(egui::Button::new(tr!("bs-close-without"))).clicked() {
+                            action = Some(Action::Discard);
+                        }
                     });
+                });
                 ui.add_space(18.0);
             }
             ui.horizontal_wrapped(|ui| {
@@ -353,8 +343,8 @@ fn start_card(ui: &mut egui::Ui, icon: Icon, title: &str, text: &str) -> bool {
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title));
     let hot = response.hovered() && ui.is_enabled();
     let p = ui.painter();
-    p.rect_filled(rect, 14.0, t.ribbon);
-    p.rect_stroke(rect, 14.0, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { BRAND } else { t.border }), egui::StrokeKind::Inside);
+    p.rect_filled(rect, 0.0, t.ribbon);
+    p.rect_stroke(rect, 0.0, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { BRAND } else { t.border }), egui::StrokeKind::Inside);
     let badge = egui::pos2(rect.left() + 34.0, rect.top() + 34.0);
     p.circle_filled(badge, 18.0, if hot { BRAND } else { t.accent_soft });
     let ink = if hot { on_ink(&t) } else { t };
@@ -373,14 +363,11 @@ fn start_card(ui: &mut egui::Ui, icon: Icon, title: &str, text: &str) -> bool {
 /// One fact about the data on Info: a small card with a figure.
 fn fact(ui: &mut egui::Ui, name: &str, value: &str) {
     let t = Tokens::get(ui.ctx());
-    egui::Frame::new().fill(t.ribbon).stroke(egui::Stroke::new(1.0, t.border)).corner_radius(12).inner_margin(egui::Margin::symmetric(16, 12)).show(
-        ui,
-        |ui| {
-            ui.set_min_width(130.0);
-            ui.label(egui::RichText::new(name).size(12.0).color(t.text_dim));
-            ui.label(egui::RichText::new(value).size(20.0).color(t.text));
-        },
-    );
+    egui::Frame::new().fill(t.ribbon).stroke(egui::Stroke::new(1.0, t.border)).inner_margin(egui::Margin::symmetric(16, 12)).show(ui, |ui| {
+        ui.set_min_width(130.0);
+        ui.label(egui::RichText::new(name).size(12.0).color(t.text_dim));
+        ui.label(egui::RichText::new(value).size(20.0).color(t.text));
+    });
 }
 
 /// How long ago, in words: "just now", "5 min ago", "3 h ago", "2 days ago".
@@ -412,7 +399,7 @@ fn recent(ui: &mut egui::Ui, files: &[PathBuf]) -> Option<Action> {
         let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 44.0), if exists { egui::Sense::click() } else { egui::Sense::hover() });
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, exists, &name));
         if response.hovered() && exists {
-            ui.painter().rect_filled(rect, 10.0, t.hover);
+            ui.painter().rect_filled(rect, 0.0, t.hover);
         }
         let kind = match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
             Some("sps") => (Icon::Grid, &tr!("bs-kind-dashboard")),

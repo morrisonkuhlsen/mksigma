@@ -935,14 +935,14 @@ impl SigmaApp {
             response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &name));
             let painter = row.painter();
             if on {
-                painter.rect_filled(tab, egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, t.ribbon);
+                painter.rect_filled(tab, 0.0, t.ribbon);
                 painter.rect_filled(
                     egui::Rect::from_min_max(tab.left_bottom() - egui::vec2(-10.0, 3.0), tab.right_bottom() - egui::vec2(10.0, 0.0)),
-                    1.5,
+                    0.0,
                     t.accent,
                 );
             } else if response.hovered() {
-                painter.rect_filled(tab, 6.0, t.hover);
+                painter.rect_filled(tab, 0.0, t.hover);
             }
             icons::paint(painter, egui::Rect::from_center_size(egui::pos2(tab.left() + 16.0, tab.center().y), egui::vec2(14.0, 14.0)), icon, &t);
             painter.galley(egui::pos2(tab.left() + 28.0, tab.center().y - galley.size().y / 2.0), galley, t.text);
@@ -1003,7 +1003,7 @@ impl SigmaApp {
         let table_height = (ui.available_height() - syntax_height).max(120.0);
         let mut edits = Vec::new();
         let mut commits = Vec::new();
-        let grid = egui::Frame::new().fill(t.grid_bg).stroke(egui::Stroke::new(1.0, t.border)).corner_radius(8).inner_margin(egui::Margin::same(1));
+        let grid = egui::Frame::new().fill(t.grid_bg).stroke(egui::Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(1));
         grid.show(ui, |ui| {
             let size = egui::vec2(ui.available_width(), table_height - 2.0);
             ui.allocate_ui(size, |ui| {
@@ -1239,7 +1239,7 @@ fn zoom_button(ui: &mut egui::Ui, icon: Icon, name: &str) -> bool {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
     if response.hovered() {
-        ui.painter().rect_filled(rect, 3.0, t.hover);
+        ui.painter().rect_filled(rect, 0.0, t.hover);
     }
     icons::paint(ui.painter(), rect.shrink(4.0), icon, &t);
     response.on_hover_text(name).clicked()

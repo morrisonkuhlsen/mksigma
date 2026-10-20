@@ -46,11 +46,7 @@ fn index(ui: &mut egui::Ui) -> Option<Action> {
         ui.label(egui::RichText::new(caption).size(11.5).color(t.text_dim));
         ui.add_space(4.0);
         for article in of_kind {
-            let frame = egui::Frame::new()
-                .fill(t.ribbon)
-                .stroke(egui::Stroke::new(1.0, t.border))
-                .corner_radius(10)
-                .inner_margin(egui::Margin::symmetric(14, 10));
+            let frame = egui::Frame::new().fill(t.ribbon).stroke(egui::Stroke::new(1.0, t.border)).inner_margin(egui::Margin::symmetric(14, 10));
             let response = frame
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width().min(720.0));
@@ -102,7 +98,7 @@ fn show_article(ui: &mut egui::Ui, article: &Article) -> Option<Action> {
                 ui.add_space(6.0);
             }
             Block::Note(pieces) => {
-                egui::Frame::new().fill(t.accent_soft).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                egui::Frame::new().fill(t.accent_soft).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     inline(ui, pieces, &mut action);
                 });
@@ -117,27 +113,20 @@ fn show_article(ui: &mut egui::Ui, article: &Article) -> Option<Action> {
                 ui.add_space(8.0);
             }
             Block::Example(syntax) => {
-                egui::Frame::new()
-                    .fill(t.ribbon)
-                    .stroke(egui::Stroke::new(1.0, t.border))
-                    .corner_radius(8)
-                    .inner_margin(egui::Margin::same(10))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.label(egui::RichText::new(syntax).monospace().color(t.text));
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            if crate::ribbon::accent_button(ui, crate::icons::Icon::Run, &tr!("learn-run"))
-                                .on_hover_text(tr!("learn-run-tip"))
-                                .clicked()
-                            {
-                                action = Some(Action::Run(syntax.clone()));
-                            }
-                            if ui.button(tr!("learn-paste")).on_hover_text(tr!("learn-paste-tip")).clicked() {
-                                action = Some(Action::Paste(syntax.clone()));
-                            }
-                        });
+                egui::Frame::new().fill(t.ribbon).stroke(egui::Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(egui::RichText::new(syntax).monospace().color(t.text));
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if crate::ribbon::accent_button(ui, crate::icons::Icon::Run, &tr!("learn-run")).on_hover_text(tr!("learn-run-tip")).clicked()
+                        {
+                            action = Some(Action::Run(syntax.clone()));
+                        }
+                        if ui.button(tr!("learn-paste")).on_hover_text(tr!("learn-paste-tip")).clicked() {
+                            action = Some(Action::Paste(syntax.clone()));
+                        }
                     });
+                });
                 ui.add_space(8.0);
             }
         }

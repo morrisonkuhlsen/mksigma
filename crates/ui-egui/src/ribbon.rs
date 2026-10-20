@@ -97,7 +97,7 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, name: &str, enabled: bool) -> egui
     let (rect, response) = ui.allocate_exact_size(egui::vec2(28.0, 26.0), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
     if enabled && response.hovered() {
-        ui.painter().rect_filled(rect, 4.0, t.hover);
+        ui.painter().rect_filled(rect, 0.0, t.hover);
     }
     let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0));
     // Disabled: the same drawing, faded.
@@ -109,16 +109,16 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, name: &str, enabled: bool) -> egui
     response.on_hover_text(name)
 }
 
-/// An on/off switch drawn as a pill with a knob.
+/// An on/off switch: a square track with a square knob.
 fn switch(ui: &mut egui::Ui, on: bool, name: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let (r, response) = ui.allocate_exact_size(egui::vec2(30.0, 16.0), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, on, name));
     let painter = ui.painter();
-    painter.rect_filled(r, 8.0, if on { t.accent } else { egui::Color32::TRANSPARENT });
-    painter.rect_stroke(r, 8.0, egui::Stroke::new(1.0, if on { t.accent } else { t.text_dim }), egui::StrokeKind::Inside);
+    painter.rect_filled(r, 0.0, if on { t.accent } else { egui::Color32::TRANSPARENT });
+    painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, if on { t.accent } else { t.text_dim }), egui::StrokeKind::Inside);
     let knob = if on { egui::pos2(r.right() - 8.0, r.center().y) } else { egui::pos2(r.left() + 8.0, r.center().y) };
-    painter.circle_filled(knob, 5.0, if on { egui::Color32::WHITE } else { t.text_dim });
+    painter.rect_filled(egui::Rect::from_center_size(knob, egui::vec2(10.0, 10.0)), 0.0, if on { egui::Color32::WHITE } else { t.text_dim });
     response
 }
 
@@ -130,7 +130,7 @@ pub(crate) fn accent_button(ui: &mut egui::Ui, icon: Icon, text: &str) -> egui::
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
     let fill = if response.hovered() { t.accent.gamma_multiply(0.85) } else { t.accent };
-    ui.painter().rect_filled(rect, 5.0, fill);
+    ui.painter().rect_filled(rect, 0.0, fill);
     let mut white = t;
     white.accent = egui::Color32::WHITE;
     icons::paint(ui.painter(), egui::Rect::from_center_size(egui::pos2(rect.left() + 15.0, rect.center().y), egui::vec2(12.0, 12.0)), icon, &white);
@@ -248,7 +248,7 @@ pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, collapsed: &mut bool, sta
             if on {
                 let r = response.rect;
                 let bar = egui::Rect::from_min_max(egui::pos2(r.left() + 4.0, r.bottom() - 3.0), egui::pos2(r.right() - 4.0, r.bottom()));
-                ui.painter().rect_filled(bar, 1.5, t.accent);
+                ui.painter().rect_filled(bar, 0.0, t.accent);
             }
             if response.double_clicked() {
                 *collapsed = !*collapsed;
@@ -417,7 +417,7 @@ fn output_style(ui: &mut egui::Ui, style: &mksigma_engine::output::Style) -> Opt
                         .horizontal(|ui| {
                             let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
                             let [r, g, b] = p.colors().map_or([t.accent.r(), t.accent.g(), t.accent.b()], |(bar, _)| bar);
-                            ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb(r, g, b));
+                            ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgb(r, g, b));
                             ui.selectable_label(style.palette == p, title(p.name()))
                         })
                         .inner;
@@ -510,9 +510,9 @@ fn large(ui: &mut egui::Ui, icon: Icon, label: &str, tip: &str, enabled: bool, o
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, label));
     let painter = ui.painter();
     if on {
-        painter.rect_filled(rect, 5.0, t.accent_soft);
+        painter.rect_filled(rect, 0.0, t.accent_soft);
     } else if enabled && response.hovered() {
-        painter.rect_filled(rect, 5.0, if response.is_pointer_button_down_on() { t.pressed } else { t.hover });
+        painter.rect_filled(rect, 0.0, if response.is_pointer_button_down_on() { t.pressed } else { t.hover });
     }
     let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.top() + 22.0), egui::vec2(30.0, 30.0));
     let mut icon_painter = painter.clone();

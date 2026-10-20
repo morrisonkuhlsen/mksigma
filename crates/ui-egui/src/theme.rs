@@ -132,10 +132,10 @@ pub fn apply(ctx: &egui::Context) {
         v.widgets.active.weak_bg_fill = t.pressed;
         v.widgets.active.bg_fill = t.pressed;
         for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
-            w.corner_radius = egui::CornerRadius::same(4);
+            w.corner_radius = egui::CornerRadius::ZERO;
         }
-        v.window_corner_radius = egui::CornerRadius::same(10);
-        v.menu_corner_radius = egui::CornerRadius::same(8);
+        v.window_corner_radius = egui::CornerRadius::ZERO;
+        v.menu_corner_radius = egui::CornerRadius::ZERO;
         v.popup_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(if t.dark { 90 } else { 40 }) };
         v.window_shadow = v.popup_shadow;
         v.striped = true;
@@ -159,5 +159,5 @@ pub fn apply(ctx: &egui::Context) {
 
 /// A white (or dark) panel with a hairline border: the ribbon, the syntax editor, the Output.
 pub fn card(t: &Tokens) -> egui::Frame {
-    egui::Frame::new().fill(t.ribbon).stroke(Stroke::new(1.0, t.border)).corner_radius(8).inner_margin(egui::Margin::same(8))
+    egui::Frame::new().fill(t.ribbon).stroke(Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(8))
 }

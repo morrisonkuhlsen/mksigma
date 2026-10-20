@@ -434,9 +434,9 @@ fn row(ui: &mut egui::Ui, var: &Variable, on: bool, enabled: bool) -> (bool, boo
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, enabled, on, &var.name));
     if on {
-        ui.painter().rect_filled(rect, 4.0, t.accent_soft);
+        ui.painter().rect_filled(rect, 0.0, t.accent_soft);
     } else if response.hovered() && enabled {
-        ui.painter().rect_filled(rect, 4.0, t.hover);
+        ui.painter().rect_filled(rect, 0.0, t.hover);
     }
     let mut painter = ui.painter().clone();
     if !enabled {
@@ -468,38 +468,33 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                 // The file's variables, those not in a slot.
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(shown("Variables")).color(t.text_dim));
-                    egui::Frame::new()
-                        .fill(t.input_bg)
-                        .stroke(egui::Stroke::new(1.0, t.border))
-                        .corner_radius(6)
-                        .inner_margin(egui::Margin::same(4))
-                        .show(ui, |ui| {
-                            ui.set_width(200.0);
-                            ui.set_min_height(240.0);
-                            egui::ScrollArea::vertical().id_salt("dialog-source").max_height(240.0).show(ui, |ui| {
-                                for var in session.dataset.variables() {
-                                    if dialog.used(&var.name) {
-                                        continue;
-                                    }
-                                    let fits = dialog.slots.iter().any(|s| !s.numeric || var.var_type == VarType::Numeric);
-                                    let on = dialog.picked.as_deref() == Some(var.name.as_str());
-                                    let (clicked, double) = row(ui, var, on, fits);
-                                    if double {
-                                        // Into the first slot that takes it.
-                                        let name = var.name.clone();
-                                        if let Some(k) = (0..dialog.slots.len())
-                                            .find(|k| dialog.slots.get(*k).is_some_and(|s| !s.numeric || var.var_type == VarType::Numeric))
-                                        {
-                                            dialog.add(session, k, &name);
-                                        }
-                                        dialog.picked = None;
-                                    } else if clicked {
-                                        dialog.picked = Some(var.name.clone());
-                                        dialog.picked_in = None;
-                                    }
+                    egui::Frame::new().fill(t.input_bg).stroke(egui::Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
+                        ui.set_width(200.0);
+                        ui.set_min_height(240.0);
+                        egui::ScrollArea::vertical().id_salt("dialog-source").max_height(240.0).show(ui, |ui| {
+                            for var in session.dataset.variables() {
+                                if dialog.used(&var.name) {
+                                    continue;
                                 }
-                            });
+                                let fits = dialog.slots.iter().any(|s| !s.numeric || var.var_type == VarType::Numeric);
+                                let on = dialog.picked.as_deref() == Some(var.name.as_str());
+                                let (clicked, double) = row(ui, var, on, fits);
+                                if double {
+                                    // Into the first slot that takes it.
+                                    let name = var.name.clone();
+                                    if let Some(k) = (0..dialog.slots.len())
+                                        .find(|k| dialog.slots.get(*k).is_some_and(|s| !s.numeric || var.var_type == VarType::Numeric))
+                                    {
+                                        dialog.add(session, k, &name);
+                                    }
+                                    dialog.picked = None;
+                                } else if clicked {
+                                    dialog.picked = Some(var.name.clone());
+                                    dialog.picked_in = None;
+                                }
+                            }
                         });
+                    });
                 });
                 ui.add_space(6.0);
                 // The slots, each with its arrow.
@@ -530,7 +525,6 @@ pub(crate) fn show(ctx: &egui::Context, dialog: &mut Dialog, session: &Session) 
                                 egui::Frame::new()
                                     .fill(t.input_bg)
                                     .stroke(egui::Stroke::new(1.0, t.border))
-                                    .corner_radius(6)
                                     .inner_margin(egui::Margin::same(4))
                                     .show(ui, |ui| {
                                         ui.set_width(220.0);

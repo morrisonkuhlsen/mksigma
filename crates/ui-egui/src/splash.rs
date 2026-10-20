@@ -108,8 +108,8 @@ fn paint(painter: &egui::Painter, ctx: &egui::Context, rect: egui::Rect, progres
     let shown = ((progress * COMPONENTS.len() as f32) as usize).min(COMPONENTS.len() - 1);
     let status = COMPONENTS.get(shown).map_or_else(String::new, |c| tr!("splash-loading", component = mksigma_i18n::message(c, &[])));
     painter.text(bar.left_top() - egui::vec2(0.0, 10.0), egui::Align2::LEFT_BOTTOM, status, egui::FontId::proportional(12.0), ON_INK_SOFT);
-    painter.rect_filled(bar, 1.5, egui::Color32::from_white_alpha(28));
-    painter.rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * progress, bar.height())), 1.5, BRAND);
+    painter.rect_filled(bar, 0.0, egui::Color32::from_white_alpha(28));
+    painter.rect_filled(egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * progress, bar.height())), 0.0, BRAND);
 
     // The house: its logo and line at the foot.
     let foot = words.bottom() - 28.0;

@@ -81,7 +81,7 @@ fn pane_tab(ui: &mut egui::Ui, on: bool, icon: crate::icons::Icon, name: &str, t
         let r = response.rect;
         ui.painter().rect_filled(
             egui::Rect::from_min_max(egui::pos2(r.left(), r.bottom() + 1.0), egui::pos2(r.right(), r.bottom() + 3.0)),
-            1.0,
+            0.0,
             t.accent,
         );
     }
@@ -206,7 +206,7 @@ fn card(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, tiles: &[
     let (&i, item) = tiles.get(k).and_then(|i| Some((i, session.output.items.get(*i)?)))?;
     let wide = session.is_wide(i);
     let mut action = None;
-    egui::Frame::new().fill(t.paper).stroke(egui::Stroke::new(1.0, t.border)).corner_radius(8).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+    egui::Frame::new().fill(t.paper).stroke(egui::Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -239,9 +239,9 @@ fn pin_button(ui: &mut egui::Ui, pinned: bool) -> bool {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(22.0, 20.0), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, pinned, &name));
     if pinned {
-        ui.painter().rect_filled(rect, 4.0, t.accent_soft);
+        ui.painter().rect_filled(rect, 0.0, t.accent_soft);
     } else if response.hovered() {
-        ui.painter().rect_filled(rect, 4.0, t.hover);
+        ui.painter().rect_filled(rect, 0.0, t.hover);
     }
     crate::icons::paint(ui.painter(), rect.shrink2(egui::vec2(4.0, 3.0)), crate::icons::Icon::Pin, &t);
     response.on_hover_text(name).clicked()
