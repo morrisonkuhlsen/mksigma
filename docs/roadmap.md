@@ -4,6 +4,8 @@ MK Sigma covers one workflow end to end: **get data in → prepare it → analys
 interactive dashboard of the results**, every step recorded as syntax, so it is reproducible and
 drivable by agents. The core is a solid SPSS-style statistics package; the Power BI-style
 features (recorded data preparation, cross-filtering, dashboards) are a layer on top of it.
+Beyond SPSS, the strengths of the other reference packages (SAS, Stata, JMP, Minitab, JASP,
+jamovi) join as modules of the same engine: see *Beyond SPSS* below.
 
 ## M0 — skeleton (done)
 Workspace, core data model, output model, syntax for `DESCRIPTIVES`, `DESCRIPTIVES` itself,
@@ -263,10 +265,71 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   (levels of measurement, distributions, sampling, confidence intervals, effect sizes, power,
   assumptions); sources cited per article; the articles in the exported web pages.
 
+## Beyond SPSS: what the other packages bring — not started
+SPSS parity comes first (its remaining procedures are under Later); then each package's
+strength joins as a module of the same engine: commands in the one syntax (SPSS's names where
+SPSS has the procedure, MK Sigma's own otherwise), dialogs that only write syntax, a Σ for every
+figure, Learn articles in both languages, parity tests against independently computed values,
+and nothing that breaks wasm. Clean-room: the packages are observed black-box on synthetic
+data and their public manuals read; no code from the GPL ones (jamovi, JASP, R and CRAN, PSPP,
+gretl). One vertical slice at a time; **the order of the modules is the user's to decide.**
+
+- **Foundations, before any module:**
+  - *NIST StRD audit:* the Statistical Reference Datasets (public domain) for univariate
+    statistics, ANOVA, and linear and nonlinear regression, built in code, their certified
+    values as constants, each procedure held to the digits NIST certifies. It audits what
+    exists (DESCRIPTIVES, ONEWAY, REGRESSION) before anything new is built on it.
+  - *Stata files:* `GET STATA` and `SAVE TRANSLATE /TYPE=STATA` for `.dta` (formats 117–119,
+    from StataCorp's published description): value labels, missing values `.a`–`.z`.
+  - *SAS transport files:* `.xpt` (XPORT, whose layout SAS publishes), the format regulators
+    accept. `.sas7bdat` stays out: it is known only through third parties' reverse engineering.
+  - *A parity matrix:* a table in code of every procedure against SPSS, SAS, Stata, JMP,
+    Minitab, JASP and jamovi (has it, part of it, not yet), printed by an xtask and in the
+    docs, so the unification is visible and measured.
+- **Minitab — quality and Six Sigma:** control charts (X̄-R, X̄-S, I-MR, p, np, c, u) with the
+  tests for special causes (the published run rules), process capability (Cp, Cpk, Pp, Ppk,
+  with the normal probability plot), gage R&R by the ANOVA method, Pareto and run charts. The
+  Σ shows the limits from the published control-chart constants (d₂, A₂, D₃, D₄); control
+  charts cross-filter and go on dashboards like every chart. Few free tools cover this, and
+  industry pays for it.
+- **JMP — exploration and design of experiments:** generated designs as datasets (full and
+  fractional factorials with their resolution, Plackett–Burman, central composite,
+  Box–Behnken; randomized run order), their analysis (effects, a Pareto of effects, the
+  response surface and its stationary point), and a one-click distribution view of a variable
+  (histogram, boxplot, quantiles and moments together). Linked views extend cross-filtering:
+  selecting in one chart highlights the same cases in the others.
+- **Stata — econometrics and epidemiology:** robust (HC) and cluster-robust standard errors;
+  panel data (fixed, random and between effects, the Hausman test); instrumental variables by
+  two-stage least squares with the first-stage F; probit, ordered and multinomial logit,
+  Poisson and negative binomial; marginal effects; complex survey designs (strata, clusters,
+  weights, Taylor linearization) for means, proportions, totals and regressions; risk and odds
+  ratios with Mantel–Haenszel. Time series after these.
+- **SAS — large and auditable:** data larger than memory (columnar, read in chunks, procedures
+  that stream), and an audit trail: every Output item carries its syntax, a checksum of the
+  data it ran on and MK Sigma's version, so a result can be run again and verified, as
+  regulated work needs.
+- **JASP — Bayesian beside frequentist:** Bayes factors for t tests, correlation, contingency
+  tables, ANOVA and regression, with prior and posterior plots and a robustness check over
+  the prior's width, the Σ showing the integrals' numbers; an APA-style Output style of MK
+  Sigma's own design.
+- **jamovi — live results:** a dialog's results update in the Output as its choices change
+  (the dialog still only writes syntax), and editing an earlier analysis runs it again in
+  place.
+
+What MK Sigma brings that none of them has together: every figure with its calculation by
+hand (Σ), exportable as LaTeX; a Learn article beside every table; recorded data preparation;
+dashboards published as one offline page with the engine inside; one engine for the window,
+the command line and agents (MCP); Brazilian Portuguese throughout; open source, natively on
+Linux, Windows and macOS.
+
+Candidates for the first module, for the user to choose: quality and SPC (Minitab's niche:
+little free competition, short formulas that suit the Σ), the foundations (the NIST audit and
+`.dta`), or the Bayesian t test and correlation (JASP's best-known feature).
+
 ## Later
 - Multiple related tables (star-schema data model) and measures
 - Connectors: PostgreSQL, SQLite, Parquet, HTTP/JSON
-- `GLM`, `UNIANOVA`, `FACTOR`, `RELIABILITY`, `NPAR TESTS`, `MIXED`
+- SPSS's remaining procedures: `GLM`, `UNIANOVA`, `FACTOR`, `RELIABILITY`, `MIXED`
 - Web build of the whole app
 
 ## Out of scope for now
