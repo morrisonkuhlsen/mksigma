@@ -121,18 +121,6 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
             }
         });
     });
-    if let Some(syntax) = slicers(ui, session, state) {
-        action = OutputAction::Syntax(syntax);
-    }
-    let selected = session.cross_filter();
-    if let Some(category) = selected {
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(tr!("fact-filtered", filters = category.label.as_str())).color(ui.visuals().hyperlink_color));
-            if ui.small_button(tr!("out-clear-filter")).on_hover_text(tr!("out-clear-filter-tip")).clicked() {
-                action = OutputAction::ClearFilter;
-            }
-        });
-    }
     ui.add_space(4.0);
     ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), egui::Stroke::new(1.0, t.border));
     ui.add_space(8.0);
@@ -317,29 +305,99 @@ fn text_of(style: &Style) -> (f32, egui::FontFamily) {
     (style.scale() as f32, family)
 }
 
-/// The slicer strip: a chip per slicer (click it to pick values or a range) and a button to
-/// add one. Returns the `SLICE` command a change asks for.
-fn slicers(ui: &mut egui::Ui, session: &Session, state: &mut OutputState) -> Option<String> {
+/// The Filters pane at the window's right, as in report designers: every filter on the Output,
+/// each on its own card (the slicers, then the cross-filter), and a button to add a slicer.
+/// Collapsed, it is a narrow strip with its name written downwards and how many filters are on.
+pub(crate) fn filters_pane(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, open: &mut bool) -> OutputAction {
+    use crate::icons::{self, Icon};
     let t = crate::theme::Tokens::get(ui.ctx());
+    let rect = ui.max_rect();
+    ui.painter().rect_filled(rect, 0.0, t.ribbon);
+    ui.painter().vline(rect.left(), rect.y_range(), egui::Stroke::new(1.0, t.border));
     let ds = &session.dataset;
     state.pending.retain(|v| ds.variable(v).is_some() && !session.slicers().iter().any(|s| &s.variable == v));
-    let mut syntax = None;
+    let count = session.slicers().len() + usize::from(session.cross_filter().is_some());
+    if !*open {
+        let name = tr!("filters-show");
+        let response = ui.interact(rect, ui.id().with("filters-strip"), egui::Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        let painter = ui.painter();
+        if response.hovered() {
+            painter.rect_filled(rect.shrink2(egui::vec2(1.0, 0.0)), 0.0, t.hover);
+        }
+        let x = rect.center().x;
+        icons::paint(painter, egui::Rect::from_center_size(egui::pos2(x, rect.top() + 16.0), egui::vec2(14.0, 14.0)), Icon::ChevronLeft, &t);
+        let galley = painter.layout_no_wrap(tr!("filters"), egui::FontId::proportional(13.0), t.text);
+        let length = galley.size().x;
+        // Turned a quarter clockwise, it reads downwards and its height lies to the left of `at`.
+        let at = egui::pos2(x + galley.size().y / 2.0, rect.top() + 34.0);
+        painter.add(egui::epaint::TextShape::new(at, galley, t.text).with_angle(std::f32::consts::FRAC_PI_2));
+        let below = rect.top() + 34.0 + length + 16.0;
+        icons::paint(painter, egui::Rect::from_center_size(egui::pos2(x, below), egui::vec2(12.0, 12.0)), Icon::Filter, &t);
+        if count > 0 {
+            painter.text(egui::pos2(x, below + 16.0), egui::Align2::CENTER_CENTER, count.to_string(), egui::FontId::proportional(12.0), t.accent);
+        }
+        if response.on_hover_text(name).clicked() {
+            *open = true;
+        }
+        return OutputAction::None;
+    }
+
+    let mut action = OutputAction::None;
+    let mut pane =
+        ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 8.0))).layout(egui::Layout::top_down(egui::Align::Min)));
+    let ui = &mut pane;
+    ui.spacing_mut().item_spacing.y = 6.0;
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(tr!("filters")).size(15.0).color(t.text));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if crate::icon_button(ui, Icon::ChevronRight, &tr!("filters-hide")) {
+                *open = false;
+            }
+        });
+    });
+    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), egui::Stroke::new(1.0, t.border));
     ui.add_space(4.0);
-    ui.horizontal_wrapped(|ui| {
-        crate::icons::show(ui, crate::icons::Icon::Filter, 14.0);
-        ui.label(egui::RichText::new(tr!("out-slicers")).color(t.text_dim));
+    let card = egui::Frame::new().fill(t.paper).stroke(egui::Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(8));
+    egui::ScrollArea::vertical().id_salt("filters").auto_shrink([false, false]).show(ui, |ui| {
         let names: Vec<String> = session.slicers().iter().map(|s| s.variable.clone()).chain(state.pending.iter().cloned()).collect();
+        if !names.is_empty() {
+            ui.horizontal(|ui| {
+                icons::show(ui, Icon::Filter, 12.0);
+                ui.label(egui::RichText::new(tr!("out-slicers")).color(t.text_dim));
+            });
+        }
         for name in names {
             let current = session.slicers().iter().find(|s| s.variable == name);
             let text = current.map_or_else(|| tr!("out-slicer-all", name = name.as_str()), |s| s.describe(ds));
-            let chip = ui.add(
-                egui::Button::new(egui::RichText::new(text).color(if current.is_some() { t.accent } else { t.text_dim })).selected(current.is_some()),
-            );
-            egui::Popup::from_toggle_button_response(&chip).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-                if let Some(s) = slicer_editor(ui, session, state, &name, current) {
-                    syntax = Some(s);
+            let title = ds.variable(&name).map_or(name.as_str(), |(_, v)| v.display_name()).to_string();
+            card.show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(egui::RichText::new(title).strong());
+                let chip = ui.add(
+                    egui::Button::new(egui::RichText::new(text).color(if current.is_some() { t.accent } else { t.text_dim }))
+                        .selected(current.is_some())
+                        .truncate(),
+                );
+                egui::Popup::from_toggle_button_response(&chip).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                    if let Some(s) = slicer_editor(ui, session, state, &name, current) {
+                        action = OutputAction::Syntax(s);
+                    }
+                });
+            });
+        }
+        if let Some(category) = session.cross_filter() {
+            card.show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(egui::RichText::new(tr!("filters-cross")).strong());
+                ui.label(egui::RichText::new(category.label.as_str()).color(t.accent));
+                if ui.small_button(tr!("out-clear-filter")).on_hover_text(tr!("out-clear-filter-tip")).clicked() {
+                    action = OutputAction::ClearFilter;
                 }
             });
+        }
+        if count == 0 && state.pending.is_empty() {
+            ui.label(egui::RichText::new(tr!("filters-empty")).color(t.text_dim).small());
         }
         let add = ui.small_button(tr!("out-add-slicer")).on_hover_text(tr!("out-add-slicer-tip"));
         egui::Popup::menu(&add).show(|ui| {
@@ -354,7 +412,7 @@ fn slicers(ui: &mut egui::Ui, session: &Session, state: &mut OutputState) -> Opt
             });
         });
     });
-    syntax
+    action
 }
 
 /// Picks a slicer's values (checkboxes with counts) or, for a Scale variable with many values,

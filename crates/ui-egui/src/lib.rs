@@ -39,6 +39,10 @@ use theme::Tokens;
 
 const SHEET_TABS_HEIGHT: f32 = 30.0;
 const STATUS_HEIGHT: f32 = 24.0;
+/// The view rail at the left, and the Filters pane at the right, open and collapsed.
+const RAIL_WIDTH: f32 = 44.0;
+const FILTERS_WIDTH: f32 = 240.0;
+const FILTERS_STRIP: f32 = 30.0;
 
 use edit::{Commit, syntax_for, value_labels_syntax};
 use views::DialogOutcome;
@@ -125,6 +129,8 @@ pub struct SigmaApp {
     pub search: Option<String>,
     /// The window's zoom, in percent.
     pub zoom: u32,
+    /// The Filters pane is open (not only its strip).
+    pub filters_open: bool,
     services: Services,
     title: String,
     themed: bool,
@@ -172,6 +178,7 @@ impl SigmaApp {
             autosave: false,
             search: None,
             zoom: 100,
+            filters_open: true,
             services,
             title: String::new(),
             themed: false,
@@ -706,15 +713,18 @@ impl SigmaApp {
         let bottom = SHEET_TABS_HEIGHT + STATUS_HEIGHT;
         let body = (ui.available_height() - bottom - 8.0).max(100.0);
         ui.add_space(6.0);
-        // Data and Variable View get 62% of the width, the Output Viewer the rest; the dashboard,
-        // like a report canvas, takes it all.
+        // Between the view rail and the Filters pane, Data and Variable View get 62% of the width
+        // and the Output Viewer the rest; the dashboard, like a report canvas, takes it all.
         let gap = 6.0;
         let dashboard = self.output_state.dashboard;
-        let left_width = if dashboard { 0.0 } else { ((ui.available_width() - gap) * 0.62).floor() };
-        let right_width = ui.available_width() - if dashboard { 0.0 } else { gap + left_width };
+        let filters_width = if self.filters_open { FILTERS_WIDTH } else { FILTERS_STRIP };
+        let room = ui.available_width() - RAIL_WIDTH - filters_width - 2.0 * gap;
+        let left_width = if dashboard { 0.0 } else { ((room - gap) * 0.62).floor() };
+        let right_width = room - if dashboard { 0.0 } else { gap + left_width };
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(gap, 0.0);
             let top_down = egui::Layout::top_down(egui::Align::Min);
+            self.view_rail(ui, body);
             if !dashboard {
                 ui.allocate_ui_with_layout(egui::vec2(left_width, body), top_down, |ui| {
                     ui.set_width(left_width);
@@ -730,6 +740,12 @@ impl SigmaApp {
                     let action = output::output_view(ui, &self.session, &mut self.output_state);
                     self.output_action(action);
                 });
+            });
+            ui.allocate_ui_with_layout(egui::vec2(filters_width, body), top_down, |ui| {
+                ui.set_width(filters_width);
+                ui.set_height(body);
+                let action = output::filters_pane(ui, &self.session, &mut self.output_state, &mut self.filters_open);
+                self.output_action(action);
             });
         });
         ui.add_space(2.0);
@@ -917,6 +933,41 @@ impl SigmaApp {
         } else {
             Status::Info(tr!("status-template-added"))
         });
+    }
+
+    /// The view rail down the window's left, as in report designers: the report (the dashboard on
+    /// the whole canvas), the table (Data View) and the model (Variable View), each beside the
+    /// Output.
+    fn view_rail(&mut self, ui: &mut egui::Ui, height: f32) {
+        let t = Tokens::get(ui.ctx());
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(RAIL_WIDTH, height), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 0.0, t.ribbon);
+        ui.painter().vline(rect.right(), rect.y_range(), egui::Stroke::new(1.0, t.border));
+        let dashboard = self.output_state.dashboard;
+        let views = [
+            (Icon::Bars, tr!("rail-report"), tr!("rail-report-tip"), dashboard, None),
+            (Icon::Grid, tr!("rail-table"), tr!("rail-table-tip"), !dashboard && self.view == View::Data, Some(View::Data)),
+            (Icon::List, tr!("rail-model"), tr!("rail-model-tip"), !dashboard && self.view == View::Variables, Some(View::Variables)),
+        ];
+        for (k, (icon, name, tip, on, view)) in views.into_iter().enumerate() {
+            let slot = egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 4.0 + 42.0 * k as f32), egui::vec2(RAIL_WIDTH - 1.0, 40.0));
+            let response = ui.interact(slot, ui.id().with(("rail", k)), egui::Sense::click());
+            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &name));
+            let painter = ui.painter();
+            if on {
+                painter.rect_filled(slot, 0.0, t.accent_soft);
+                painter.rect_filled(egui::Rect::from_min_size(slot.min, egui::vec2(3.0, slot.height())), 0.0, t.accent);
+            } else if response.hovered() {
+                painter.rect_filled(slot, 0.0, t.hover);
+            }
+            icons::paint(painter, egui::Rect::from_center_size(slot.center(), egui::vec2(20.0, 20.0)), icon, &t);
+            if response.on_hover_text(tip).clicked() {
+                self.output_state.dashboard = view.is_none();
+                if let Some(view) = view {
+                    self.view = view;
+                }
+            }
+        }
     }
 
     /// Data View and Variable View as tabs under the grid, like a workbook's sheets.
@@ -1211,12 +1262,12 @@ impl SigmaApp {
             if percent.on_hover_text(tr!("zoom-reset")).clicked() {
                 zoom = 100;
             }
-            if zoom_button(ui, Icon::Plus, &tr!("zoom-in")) {
+            if icon_button(ui, Icon::Plus, &tr!("zoom-in")) {
                 zoom = (zoom / 10 * 10 + 10).min(200);
             }
             ui.spacing_mut().slider_width = 110.0;
             ui.add(egui::Slider::new(&mut zoom, 50..=200).show_value(false)).on_hover_text(tr!("zoom"));
-            if zoom_button(ui, Icon::Minus, &tr!("zoom-out")) {
+            if icon_button(ui, Icon::Minus, &tr!("zoom-out")) {
                 zoom = (zoom.div_ceil(10) * 10).saturating_sub(10).max(50);
             }
             ui.add_space(16.0);
@@ -1233,8 +1284,8 @@ impl SigmaApp {
     }
 }
 
-/// A small icon button for the status bar.
-fn zoom_button(ui: &mut egui::Ui, icon: Icon, name: &str) -> bool {
+/// A small icon button, for the status bar and the panes' headers.
+fn icon_button(ui: &mut egui::Ui, icon: Icon, name: &str) -> bool {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));

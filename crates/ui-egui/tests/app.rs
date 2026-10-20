@@ -689,7 +689,8 @@ fn pinned_items_make_the_dashboard_and_it_exports() {
     let services = Services { pick_export: Some(Box::new(move |_: &str| Some(picked.clone()))), ..Services::default() };
     let mut app = SigmaApp::new(services);
     app.session.run_syntax("DESCRIPTIVES age income.\nGRAPH /HISTOGRAM=income /TITLE='Renda'.").unwrap();
-    let mut h = harness(app);
+    // The chart's pin, at its right, needs the Output wider than beside an open Filters pane.
+    let mut h = sized(app, 1600.0);
     // The table's pin, then the chart's.
     h.get_all_by_label("Pin to the dashboard").next().unwrap().click();
     h.run_steps(3);
@@ -941,4 +942,35 @@ fn learn_shows_articles_runs_their_examples_and_opens_from_a_table() {
     h.get_by_label("Open Crosstabs").click();
     h.run_steps(3);
     assert!(h.state().backstage.is_none() && h.state().procedure_dialog.is_some());
+}
+
+#[test]
+fn the_view_rail_switches_between_the_report_the_table_and_the_model() {
+    let mut h = harness(SigmaApp::default());
+    h.get_by_label("Report view").click();
+    h.run_steps(3);
+    assert!(h.state().output_state.dashboard, "the dashboard on the whole window");
+    h.get_by_label("Model view").click();
+    h.run_steps(3);
+    assert!(!h.state().output_state.dashboard && h.state().view == View::Variables);
+    h.get_by_label("Table view").click();
+    h.run_steps(3);
+    assert!(!h.state().output_state.dashboard && h.state().view == View::Data);
+}
+
+#[test]
+fn the_filters_pane_collapses_to_a_strip_and_opens_again() {
+    let mut app = SigmaApp::new(Services::default());
+    app.session.run_syntax("SLICE age (20 THRU 40).\nDESCRIPTIVES age.").unwrap();
+    let mut h = harness(app);
+    let chip = h.state().session.slicers().first().unwrap().describe(&h.state().session.dataset);
+    assert!(shows(&h, "Filters") && shows(&h, &chip), "the slicer's card: {chip}");
+    h.get_by_label("Hide filters").click();
+    h.run_steps(3);
+    assert!(!h.state().filters_open);
+    assert!(h.query_by_label("+ Slicer").is_none(), "only the strip shows");
+    h.get_by_label("Show filters").click();
+    h.run_steps(3);
+    assert!(h.state().filters_open && h.query_by_label("+ Slicer").is_some());
+    assert_eq!(h.state().session.slicers().len(), 1, "collapsing changes no filter");
 }
