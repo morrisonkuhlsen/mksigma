@@ -41,6 +41,8 @@ pub enum EngineError {
     Sav(#[from] mksigma_sav::SavError),
     #[error(transparent)]
     Csv(#[from] mksigma_csv::CsvError),
+    #[error(transparent)]
+    Dta(#[from] mksigma_dta::DtaError),
     #[error("{0}")]
     File(String),
     #[error("{}", mksigma_i18n::tr!("err-unknown-variable", name = .0.as_str()))]
@@ -109,6 +111,7 @@ fn changes_data(command: &Command) -> bool {
             | Command::Dashboard(_)
             | Command::OutputStyle(_)
             | Command::GetFile(_)
+            | Command::GetStata(_)
             | Command::GetData(_)
     )
 }
@@ -143,6 +146,14 @@ impl Session {
     /// Replaces the active dataset with a system file's. Returns the reader's warnings.
     pub fn open_sav(&mut self, bytes: &[u8]) -> Result<Vec<String>, EngineError> {
         let file = mksigma_sav::read(bytes)?;
+        self.load(file.dataset);
+        Ok(file.warnings)
+    }
+
+    /// Replaces the active dataset with a Stata file's (`.dta`, formats 113 to 119), as `open_sav`
+    /// does. Returns the reader's warnings.
+    pub fn open_dta(&mut self, bytes: &[u8]) -> Result<Vec<String>, EngineError> {
+        let file = mksigma_dta::read(bytes)?;
         self.load(file.dataset);
         Ok(file.warnings)
     }
@@ -191,8 +202,14 @@ impl Session {
         };
         let file = mksigma_csv::read(&bytes, &options)?;
         let ds = &file.dataset;
-        let delimiter = if file.delimiter == '\t' { "tab".to_string() } else { format!("'{}'", file.delimiter) };
-        self.notes.push(format!("{}: {} cases, {} variables (delimiter {delimiter})", spec.file, ds.n_cases(), ds.variables().len()));
+        let delimiter = if file.delimiter == '\t' { tr!("note-tab") } else { format!("'{}'", file.delimiter) };
+        self.notes.push(tr!(
+            "note-text-read",
+            path = spec.file.as_str(),
+            cases = ds.n_cases(),
+            variables = ds.variables().len(),
+            delimiter = delimiter.as_str()
+        ));
         self.notes.extend(file.warnings.iter().map(|w| format!("{}: {w}", spec.file)));
         self.load(file.dataset);
         self.loaded_file = Some(spec.file.clone());
@@ -204,7 +221,18 @@ impl Session {
         let bytes = std::fs::read(path).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
         let warnings = self.open_sav(&bytes)?;
         let ds = &self.dataset;
-        self.notes.push(format!("{path}: {} cases, {} variables", ds.n_cases(), ds.variables().len()));
+        self.notes.push(tr!("note-file-read", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
+        self.notes.extend(warnings.iter().map(|w| format!("{path}: {w}")));
+        self.loaded_file = Some(path.to_string());
+        Ok(())
+    }
+
+    /// `GET STATA FILE`: a Stata file as the active dataset.
+    fn get_stata(&mut self, path: &str) -> Result<(), EngineError> {
+        let bytes = std::fs::read(path).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        let warnings = self.open_dta(&bytes)?;
+        let ds = &self.dataset;
+        self.notes.push(tr!("note-file-read", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
         self.notes.extend(warnings.iter().map(|w| format!("{path}: {w}")));
         self.loaded_file = Some(path.to_string());
         Ok(())
@@ -328,12 +356,13 @@ impl Session {
             let special = match &command {
                 Command::GetData(spec) => Some(self.get_data(spec)),
                 Command::GetFile(path) => Some(self.get_file(path)),
+                Command::GetStata(path) => Some(self.get_stata(path)),
                 Command::Dashboard(tiles) => Some(self.set_tiles(tiles)),
                 _ => None,
             };
             if let Some(result) = special {
                 result?;
-                if matches!(command, Command::GetData(_) | Command::GetFile(_)) {
+                if matches!(command, Command::GetData(_) | Command::GetFile(_) | Command::GetStata(_)) {
                     self.data_source = Some(source.clone());
                 }
                 self.journal.push(source);
@@ -1972,6 +2001,70 @@ mod tests {
         assert!(again.is_wide(1) && !again.is_wide(0), "widths come back too");
         assert_eq!(again.dashboard_output().0.to_text(), s.dashboard_output().0.to_text(), "the same dashboard, filtered the same");
         assert!(again.run_syntax("DASHBOARD /TILES=(9 1).").is_err());
+    }
+
+    /// A Stata file (format 118, LSF) of a byte `grupo` labelled 1 A, 2 B and a str3 `nome`.
+    fn stata_file() -> Vec<u8> {
+        let mut b: Vec<u8> = Vec::new();
+        let fixed = |b: &mut Vec<u8>, s: &str, width: usize| {
+            let mut t = s.as_bytes().to_vec();
+            t.resize(width, 0);
+            b.extend(t);
+        };
+        b.extend(b"<stata_dta><header><release>118</release><byteorder>LSF</byteorder><K>");
+        b.extend(2u16.to_le_bytes());
+        b.extend(b"</K><N>");
+        b.extend(3u64.to_le_bytes());
+        b.extend(b"</N><label>");
+        b.extend(0u16.to_le_bytes());
+        b.extend(b"</label><timestamp>\0</timestamp></header><map>");
+        b.extend([0u8; 112]);
+        b.extend(b"</map><variable_types>");
+        b.extend(65530u16.to_le_bytes());
+        b.extend(3u16.to_le_bytes());
+        b.extend(b"</variable_types><varnames>");
+        fixed(&mut b, "grupo", 129);
+        fixed(&mut b, "nome", 129);
+        b.extend(b"</varnames><sortlist>");
+        b.extend([0u8; 6]);
+        b.extend(b"</sortlist><formats>");
+        fixed(&mut b, "%8.0g", 57);
+        fixed(&mut b, "%9s", 57);
+        b.extend(b"</formats><value_label_names>");
+        fixed(&mut b, "g", 129);
+        fixed(&mut b, "", 129);
+        b.extend(b"</value_label_names><variable_labels>");
+        fixed(&mut b, "Grupo", 321);
+        fixed(&mut b, "", 321);
+        b.extend(b"</variable_labels><characteristics></characteristics><data>");
+        for (g, nome) in [(1u8, b"Ana"), (2, b"Bia"), (1, b"Caio".first_chunk::<3>().unwrap())] {
+            b.push(g);
+            b.extend(nome);
+        }
+        b.extend(b"</data><strls></strls><value_labels><lbl>");
+        let table: Vec<u8> = [2u32, 4, 0, 2, 1, 2].iter().flat_map(|v| v.to_le_bytes()).chain(*b"A\0B\0").collect();
+        b.extend((table.len() as u32).to_le_bytes());
+        fixed(&mut b, "g", 129);
+        b.extend(b"...");
+        b.extend(table);
+        b.extend(b"</lbl></value_labels></stata_dta>");
+        b
+    }
+
+    #[test]
+    fn get_stata_reads_a_stata_file() {
+        let path = std::env::temp_dir().join(format!("mksigma-get-stata-{}.dta", std::process::id()));
+        std::fs::write(&path, stata_file()).unwrap();
+        let mut s = Session::new();
+        s.run_syntax(&format!("GET STATA FILE={}.\nFREQUENCIES grupo.", quote(&path.display().to_string()))).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(s.dataset.n_cases(), 3);
+        assert!(s.take_notes()[0].ends_with("3 cases, 2 variables"));
+        let text = s.output.to_text();
+        assert!(text.contains("A") && text.contains("66.7"), "the value labels, two of three in A: {text}");
+        assert!(s.dashboard_syntax().is_some_and(|d| d.contains("GET STATA FILE=")), "the dashboard reads it again");
+        assert!(matches!(s.run_syntax("GET STATA FILE='/nonexistent.dta'."), Err(EngineError::File(_))));
+        assert!(matches!(s.open_dta(b"not stata"), Err(EngineError::Dta(_))));
     }
 
     #[test]

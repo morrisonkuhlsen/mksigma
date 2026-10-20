@@ -13,15 +13,16 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-/// Each internal crate's layer: L0 `core`/`output`/`i18n` → L1 `syntax`/`sav`/`csv`/`stats`/
+/// Each internal crate's layer: L0 `core`/`output`/`i18n` → L1 `syntax`/`sav`/`csv`/`dta`/`stats`/
 /// `learn` → L2 `engine` → L3 `ui-egui`/`web` → L4 `apps/*`.
-const LAYERS: [(&str, u8); 13] = [
+const LAYERS: [(&str, u8); 14] = [
     ("mksigma-i18n", 0),
     ("mksigma-core", 0),
     ("mksigma-output", 0),
     ("mksigma-syntax", 1),
     ("mksigma-sav", 1),
     ("mksigma-csv", 1),
+    ("mksigma-dta", 1),
     ("mksigma-stats", 1),
     ("mksigma-learn", 1),
     ("mksigma-engine", 2),

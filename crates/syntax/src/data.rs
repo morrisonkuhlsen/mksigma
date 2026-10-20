@@ -155,6 +155,23 @@ pub(crate) fn get_file(rest: &[Token]) -> Result<Command, SyntaxError> {
     }
 }
 
+/// `GET STATA FILE='data.dta'`: a Stata file as the new active dataset. `/ENCODING` is
+/// accepted and ignored: a file says how its text is encoded.
+pub(crate) fn get_stata(rest: &[Token]) -> Result<Command, SyntaxError> {
+    let path = match rest {
+        [Token::Word(file), Token::Equals, Token::Str(path), ..] | [Token::Word(file), Token::Str(path), ..] if is_keyword(file, "FILE") => path,
+        _ => return Err(SyntaxError::Expected { command: "GET STATA", expected: "FILE='path'" }),
+    };
+    let tail = rest.iter().skip_while(|t| !matches!(t, Token::Str(_))).skip(1).collect::<Vec<_>>();
+    match tail.as_slice() {
+        [] => {}
+        [Token::Slash, Token::Word(e), Token::Equals, Token::Str(_)] | [Token::Slash, Token::Word(e), Token::Str(_)] if is_keyword(e, "ENCODING") => {
+        }
+        _ => return Err(SyntaxError::Expected { command: "GET STATA", expected: "FILE='path' [/ENCODING='name']" }),
+    }
+    Ok(Command::GetStata(path.clone()))
+}
+
 /// `DASHBOARD /TILES=(analysis item [WIDE]) ...`: the dashboard's tiles, in order; a `WIDE`
 /// tile takes a whole row. An analysis is
 /// counted from 1 among the commands with output since the Output was last cleared, and an
@@ -215,6 +232,9 @@ mod tests {
     #[test]
     fn get_file_and_dashboard() {
         assert_eq!(parse("GET FILE='/dados/turma.sav'.").unwrap(), [Command::GetFile("/dados/turma.sav".into())]);
+        assert_eq!(parse("GET STATA FILE='/dados/pnad.dta'.").unwrap(), [Command::GetStata("/dados/pnad.dta".into())]);
+        assert_eq!(parse("get stata file 'a.dta' /encoding='UTF8'.").unwrap(), [Command::GetStata("a.dta".into())]);
+        assert!(parse("GET STATA 'a.dta'.").is_err() && parse("GET STATA FILE='a.dta' /KEEP=x.").is_err());
         assert_eq!(
             parse("DASHBOARD /TILES=(3 1) (1, 2) (2 1 wide).").unwrap(),
             [Command::Dashboard(vec![(3, 1, false), (1, 2, false), (2, 1, true)])]

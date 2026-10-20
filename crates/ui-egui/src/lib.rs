@@ -196,7 +196,7 @@ impl SigmaApp {
         }
     }
 
-    /// Opens a system file from disk.
+    /// Opens a data file from disk: a system file, a Stata file, delimited text or syntax.
     pub fn open_path(&mut self, path: &Path) {
         if is_text(path) {
             // Read through syntax, so the History says how the text was read.
@@ -216,7 +216,9 @@ impl SigmaApp {
             self.open_syntax(path);
             return;
         }
-        let syntax = format!("GET FILE={}.", mksigma_engine::quote(&path.display().to_string()));
+        let file = mksigma_engine::quote(&path.display().to_string());
+        let stata = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("dta"));
+        let syntax = if stata { format!("GET STATA FILE={file}.") } else { format!("GET FILE={file}.") };
         let result = self.session.run_syntax(&syntax);
         if result.is_ok() {
             self.remember(path);
@@ -512,7 +514,9 @@ impl SigmaApp {
     /// Opens a system file's bytes (a path read, or a file dropped where there is no path).
     /// Returns whether it opened; on failure the open dataset stays.
     pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) -> bool {
-        match self.session.open_sav(bytes) {
+        let stata = Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("dta"));
+        let opened = if stata { self.session.open_dta(bytes) } else { self.session.open_sav(bytes) };
+        match opened {
             Ok(warnings) => {
                 let ds = &self.session.dataset;
                 let summary = tr!("status-opened", name = name, cases = ds.n_cases(), variables = ds.variables().len());

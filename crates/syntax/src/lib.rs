@@ -30,6 +30,8 @@ pub enum Command {
     OutputStyle(StyleSpec),
     /// `GET FILE='...'`: a new active dataset from a system file.
     GetFile(String),
+    /// `GET STATA FILE='...'`: a new active dataset from a Stata file (`.dta`).
+    GetStata(String),
     /// `DASHBOARD /TILES=(analysis item [WIDE])...`: the dashboard's tiles, counted from 1, and
     /// whether each takes a whole row.
     Dashboard(Vec<(usize, usize, bool)>),
@@ -272,6 +274,9 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     }
     if is_keyword(name, "GET") && second("FILE") {
         return data::get_file(rest);
+    }
+    if is_keyword(name, "GET") && second("STATA") {
+        return data::get_stata(rest.get(1..).unwrap_or_default());
     }
     if is_keyword(name, "DASHBOARD") {
         return data::dashboard(rest);

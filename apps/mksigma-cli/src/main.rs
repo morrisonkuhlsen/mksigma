@@ -1,6 +1,6 @@
 //! MK Sigma command-line interface.
 //!
-//! `mksigma-cli run [--in data.sav] [--out result.sav] [--html report.html] [--pdf report.pdf]
+//! `mksigma-cli run [--in data.sav|data.dta] [--out result.sav] [--html report.html] [--pdf report.pdf]
 //! '<syntax>'` runs
 //! syntax against a system file or delimited text (`.csv`, `.tsv`, `.txt`, read with `GET DATA`;
 //! without `--in`, the built-in sample dataset), prints the
@@ -59,6 +59,14 @@ fn run(args: &Args) -> Result<(), String> {
             let mut s = Session::new();
             let tab = if path.to_ascii_lowercase().ends_with(".tsv") { " /DELIMITERS=\"\\t\"" } else { "" };
             s.run_syntax(&format!("GET DATA /TYPE=TXT /FILE={}{tab}.", mksigma_engine::quote(path))).map_err(|e| e.to_string())?;
+            for note in s.take_notes() {
+                eprintln!("{note}");
+            }
+            s
+        }
+        Some(path) if path.to_ascii_lowercase().ends_with(".dta") => {
+            let mut s = Session::new();
+            s.run_syntax(&format!("GET STATA FILE={}.", mksigma_engine::quote(path))).map_err(|e| e.to_string())?;
             for note in s.take_notes() {
                 eprintln!("{note}");
             }

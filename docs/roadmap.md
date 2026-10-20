@@ -286,8 +286,14 @@ gretl). One vertical slice at a time; **the order of the modules is the user's t
     equations, and says the table takes the QR route. **Next:** the regressions through the
     origin (NoInt1, NoInt2) with `/ORIGIN`; the nonlinear datasets once there is a nonlinear
     regression.
-  - *Stata files:* `GET STATA` and `SAVE TRANSLATE /TYPE=STATA` for `.dta` (formats 117–119,
-    from StataCorp's published description): value labels, missing values `.a`–`.z`.
+  - *Stata files — reading done:* `GET STATA FILE='x.dta'` (`crates/dta`, from StataCorp's
+    published description) reads formats 113–115 and 117–119 (Stata 8 and later) in either byte
+    order: numeric types, `str#` and `strL` (crosslinked too), value labels, variable and
+    dataset labels; `.a`–`.z` read as system-missing with a warning; `%td`, `%tc`, `%tm`, `%tq`
+    become dates; names Stata allows and MK Sigma doesn't (`_merge`) are renamed, with a
+    warning. File › Open, dropped files, `mksigma-cli --in` and MCP's `open_data` take `.dta`.
+    **Next:** `SAVE TRANSLATE /TYPE=STATA` (writing format 118); dates shown as dates once
+    formats render them.
   - *SAS transport files:* `.xpt` (XPORT, whose layout SAS publishes), the format regulators
     accept. `.sas7bdat` stays out: it is known only through third parties' reverse engineering.
   - *A parity matrix:* a table in code of every procedure against SPSS, SAS, Stata, JMP,

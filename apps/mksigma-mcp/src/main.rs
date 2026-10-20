@@ -20,7 +20,7 @@ fn tools() -> Value {
     json!([
         {
             "name": "open_data",
-            "description": "Open a data file as the active dataset: an SPSS system file (.sav) or delimited text (.csv, .tsv, .txt; names from the first line, types inferred, delimiter detected). Replaces the data; the Output stays.",
+            "description": "Open a data file as the active dataset: an SPSS system file (.sav), a Stata file (.dta, Stata 8 and later) or delimited text (.csv, .tsv, .txt; names from the first line, types inferred, delimiter detected). Replaces the data; the Output stays.",
             "inputSchema": {"type": "object", "properties": {"path": {"type": "string", "description": "Path to the file"}}, "required": ["path"]}
         },
         {
@@ -129,6 +129,8 @@ impl Server {
             format!("GET DATA /TYPE=TXT /FILE={file}.")
         } else if lower.ends_with(".tsv") {
             format!("GET DATA /TYPE=TXT /FILE={file} /DELIMITERS=\"\\t\".")
+        } else if lower.ends_with(".dta") {
+            format!("GET STATA FILE={file}.")
         } else {
             format!("GET FILE={file}.")
         };

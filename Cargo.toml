@@ -16,6 +16,7 @@ mksigma-i18n = { path = "crates/i18n" }
 mksigma-learn = { path = "crates/learn" }
 mksigma-sav = { path = "crates/sav" }
 mksigma-csv = { path = "crates/csv" }
+mksigma-dta = { path = "crates/dta" }
 mksigma-stats = { path = "crates/stats" }
 mksigma-syntax = { path = "crates/syntax" }
 mksigma-output = { path = "crates/output" }

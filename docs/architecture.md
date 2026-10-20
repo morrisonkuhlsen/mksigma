@@ -5,6 +5,12 @@ A `Dataset` is a list of `Variable`s (the dictionary: name, label, type, measure
 value labels, user-missing values) and their values stored **by column**. Names are unique
 ignoring case. `Value` is a number, a string or system-missing.
 
+## Data files (`sav`, `csv`, `dta`)
+Each reads bytes into a `Dataset` and returns warnings for what it read leniently: `sav` SPSS
+system files (and writes them), `csv` delimited text (`GET DATA /TYPE=TXT`), `dta` Stata files of
+formats 113–115 and 117–119 (`GET STATA`), from StataCorp's published description. Every count
+and length in a file is checked against the bytes left before anything is allocated.
+
 ## Syntax (`syntax`)
 Commands end with a period at the end of a line or of the input. Keywords are case-insensitive
 and may be shortened to three letters. `parse` returns typed `Command`s; adding a command means
