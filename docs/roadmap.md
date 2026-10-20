@@ -275,10 +275,16 @@ data and their public manuals read; no code from the GPL ones (jamovi, JASP, R a
 gretl). One vertical slice at a time; **the order of the modules is the user's to decide.**
 
 - **Foundations, before any module:**
-  - *NIST StRD audit:* the Statistical Reference Datasets (public domain) for univariate
-    statistics, ANOVA, and linear and nonlinear regression, built in code, their certified
-    values as constants, each procedure held to the digits NIST certifies. It audits what
-    exists (DESCRIPTIVES, ONEWAY, REGRESSION) before anything new is built on it.
+  - *NIST StRD audit — first part done* (`crates/stats/tests/nist.rs`): 9 univariate, 11
+    ANOVA and 9 linear-regression datasets, built in code, certified values as constants, each
+    with a floor of correct digits (LRE) no change may lower. Measured: DESCRIPTIVES 8.3–15
+    digits (NumAcc4 the lowest); ONEWAY 8.8–14.8, except SmLs07–09 at 3.3, the limit of the
+    data themselves in a double (10¹² plus tenths); REGRESSION 10.9–11.4 on Longley and Norris,
+    8.0 on Pontius, but 4.5 on the Wampler polynomials (the constant, through the normal
+    equations), and Filip refused as collinear. **Next:** REGRESSION by a QR decomposition
+    (Householder) instead of the normal equations, to bring the Wampler polynomials to 9 digits
+    or more and fit Filip; the regressions through the origin (NoInt1, NoInt2) with `/ORIGIN`;
+    the nonlinear datasets once there is a nonlinear regression.
   - *Stata files:* `GET STATA` and `SAVE TRANSLATE /TYPE=STATA` for `.dta` (formats 117–119,
     from StataCorp's published description): value labels, missing values `.a`–`.z`.
   - *SAS transport files:* `.xpt` (XPORT, whose layout SAS publishes), the format regulators

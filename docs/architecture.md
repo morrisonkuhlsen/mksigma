@@ -17,7 +17,10 @@ touches the UI.
 ### Numerical parity
 Each procedure documents which public algorithm it follows and is tested against
 independently computed values, with explicit tolerances. Accumulations use numerically stable
-methods (Welford for moments).
+methods (Welford for moments). `crates/stats/tests/nist.rs` audits the engine against NIST's
+Statistical Reference Datasets (univariate, ANOVA, linear regression; data built in code,
+certified values as constants): each dataset has a floor of correct digits (LRE) that no change
+may lower.
 
 ## Output (`output`)
 Tables, text and warnings as plain data. Frontends render them: text (CLI, tests), egui (app),
