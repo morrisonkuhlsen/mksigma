@@ -689,8 +689,21 @@ impl Session {
     /// table when the table is one variable's (a frequency table).
     fn explained(&self, item: usize) -> Option<(usize, Option<String>)> {
         let (run, place) = self.locate(item)?;
-        let Item::Table(table) = self.output.items.get(item)? else { return None };
-        match &self.runs.get(run)?.command {
+        let command = &self.runs.get(run)?.command;
+        let table = match self.output.items.get(item)? {
+            Item::Table(table) => table,
+            // A histogram, a bar chart, or EXAMINE's boxplot of the variable it is titled by.
+            Item::Chart(chart) => {
+                use mksigma_syntax::GraphSpec;
+                return match command {
+                    Command::Graph { chart: GraphSpec::Histogram { .. } | GraphSpec::Bar { .. }, .. } => Some((run, None)),
+                    Command::Examine { boxplot: true, .. } => Some((run, Some(chart.title().to_string()))),
+                    _ => None,
+                };
+            }
+            _ => return None,
+        };
+        match command {
             Command::Descriptives { .. } | Command::Correlations { .. } if place == 0 => Some((run, None)),
             // The Statistics table comes first; then each variable's frequency table.
             Command::Frequencies { .. } if place == 0 => Some((run, None)),
@@ -750,7 +763,27 @@ impl Session {
             Command::TTest { test, ci } => explain::t_test(&ds, &t_test_of(test), *ci, full)?,
             Command::Crosstabs { rows, columns, .. } => explain::crosstabs(&ds, rows, columns, full)?,
             Command::NparTests(specs) => explain::npar_tests(&ds, &npar_of(specs), full)?,
+            Command::Examine { variables, by, .. } if title.is_some() => {
+                // The boxplot of the variable whose name or label titles it.
+                let own = variables.iter().find(|v| ds.variable(v).is_some_and(|(_, var)| Some(var.display_name()) == title.as_deref()));
+                let name = own.or(variables.first()).ok_or_else(|| EngineError::Invalid(tr!("err-no-explanation")))?;
+                explain::boxplot(&ds, name, by.as_deref(), full)?
+            }
             Command::Examine { variables, by, .. } => explain::examine(&ds, variables, by.as_deref(), full)?,
+            Command::Graph { chart, .. } => {
+                use mksigma_syntax::{BarStat, GraphSpec};
+                match chart {
+                    GraphSpec::Histogram { variable, normal } => explain::histogram(&ds, variable, *normal, full)?,
+                    GraphSpec::Bar { value, by } => {
+                        let value = match value {
+                            BarStat::Count => mksigma_stats::BarValue::Count,
+                            BarStat::Mean(y) => mksigma_stats::BarValue::Mean(y.clone()),
+                        };
+                        explain::bar_chart(&ds, &value, by, full)?
+                    }
+                    GraphSpec::Scatter { .. } => return Err(EngineError::Invalid(tr!("err-no-explanation"))),
+                }
+            }
             Command::Regression { dependent, predictors, ci } => {
                 let options = mksigma_stats::RegressionOptions { dependent: dependent.clone(), predictors: predictors.clone(), ci: *ci };
                 explain::regression(&ds, &options, full)?
@@ -1208,7 +1241,7 @@ mod tests {
         let tex = |s: &Session, item| s.explain(item, false).unwrap().to_latex();
         // Ages 23 35 41 29 52 47 31 26.
         assert!(tex(&s, 0).contains("\\frac{284}{8} = 35.5"));
-        // The Statistics table and the chart have none; each frequency table, its own variable.
+        // The Statistics table; each frequency table, its own variable; the histogram, its bins.
         let titles: Vec<String> = s
             .output
             .items
@@ -1221,7 +1254,7 @@ mod tests {
         let income = titles.iter().position(|t| t == "Monthly income").unwrap();
         let statistics = titles.iter().position(|t| t == "Statistics").unwrap();
         assert_eq!(s.explain(statistics, false).unwrap().title, "Statistics");
-        assert!(!s.can_explain(s.output.items.len() - 1));
+        assert_eq!(s.explain(s.output.items.len() - 1, false).unwrap().title, "Histogram");
         let e = s.explain(income, false).unwrap();
         assert_eq!(e.sections.len(), 1);
         assert_eq!(e.sections[0].0, "Monthly income");
@@ -1263,6 +1296,22 @@ mod tests {
         for i in tables {
             assert_eq!(s.explain(i, false).unwrap().title, "Regression");
         }
+    }
+
+    #[test]
+    fn explains_histograms_bar_charts_and_boxplots_but_not_scatterplots() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax(
+            "GRAPH /HISTOGRAM(NORMAL)=income.\nGRAPH /BAR(SIMPLE)=MEAN(score) BY age.\nGRAPH /SCATTERPLOT(BIVAR)=age WITH score.\n\
+             EXAMINE VARIABLES=score income /PLOT=BOXPLOT.",
+        )
+        .unwrap();
+        let charts: Vec<usize> = (0..s.output.items.len()).filter(|&i| matches!(s.output.items[i], Item::Chart(_))).collect();
+        let titles: Vec<String> = charts.iter().filter_map(|&i| s.explain(i, false).ok()).map(|e| e.title).collect();
+        assert_eq!(titles, ["Histogram", "Bar Chart", "Boxplot", "Boxplot"]);
+        // Each boxplot explains its own variable.
+        let boxes: Vec<String> = charts.iter().skip(3).map(|&i| s.explain(i, false).unwrap().sections[0].0.clone()).collect();
+        assert_ne!(boxes[0], boxes[1]);
     }
 
     #[test]

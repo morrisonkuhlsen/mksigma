@@ -899,9 +899,9 @@ fn sigma_shows_the_calculation_by_hand_and_exports_it() {
     let mut app = SigmaApp::new(services);
     app.session.run_syntax("DESCRIPTIVES age.\nGRAPH /HISTOGRAM=age.").unwrap();
     let mut h = harness(app);
-    // The table has its Σ; the chart doesn't.
-    assert_eq!(h.get_all_by_label("Σ").count(), 1);
-    h.get_by_label("Σ").click();
+    // The table and the chart each have their Σ.
+    assert_eq!(h.get_all_by_label("Σ").count(), 2);
+    h.get_all_by_label("Σ").next().unwrap().click();
     h.run_steps(3);
     assert!(shows(&h, "Σ  Descriptive Statistics, by hand"));
     // Each equation is drawn, and named by its LaTeX. Ages 23 35 41 29 52 47 31 26.

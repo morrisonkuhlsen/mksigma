@@ -2,7 +2,7 @@
 //! means by category, and scatterplots. Missing values are left out; weights count as
 //! frequencies (except in scatterplots, where each case is one point).
 
-use mksigma_core::{Dataset, Value};
+use mksigma_core::{Dataset, Value, Variable};
 use mksigma_i18n::tr;
 use mksigma_output::chart::ticks;
 use mksigma_output::{Cases, Category, Chart, Item};
@@ -75,8 +75,11 @@ fn compare(a: &Value, b: &Value) -> std::cmp::Ordering {
     }
 }
 
-/// A bar per category of `by` (labels shown), in ascending order of value.
-pub fn bar(ds: &Dataset, value: &BarValue, by: &str) -> Result<Item, StatsError> {
+/// The cases of each category of `by`, in ascending order of value: the measured variable's
+/// value (1 for a count) and the weight. With the measured variable, when there is one.
+pub(crate) type BarGroups<'a> = (&'a Variable, Option<&'a Variable>, Vec<(Value, Vec<(f64, f64)>)>);
+
+pub(crate) fn bar_groups<'a>(ds: &'a Dataset, value: &BarValue, by: &str) -> Result<BarGroups<'a>, StatsError> {
     let (bi, bvar) = ds.variable(by).ok_or_else(|| StatsError::UnknownVariable(by.to_string()))?;
     let measured = match value {
         BarValue::Count => None,
@@ -102,6 +105,12 @@ pub fn bar(ds: &Dataset, value: &BarValue, by: &str) -> Result<Item, StatsError>
         }
     }
     groups.sort_by(|a, b| compare(&a.0, &b.0));
+    Ok((bvar, measured.map(|(_, v)| v), groups))
+}
+
+/// A bar per category of `by` (labels shown), in ascending order of value.
+pub fn bar(ds: &Dataset, value: &BarValue, by: &str) -> Result<Item, StatsError> {
+    let (bvar, measured, groups) = bar_groups(ds, value, by)?;
     let bars = groups
         .iter()
         .map(|(v, list)| {
@@ -112,7 +121,7 @@ pub fn bar(ds: &Dataset, value: &BarValue, by: &str) -> Result<Item, StatsError>
     // Every category is a valid value, so each bar gets one; all or none keeps them in step.
     let categories = groups.iter().map(|(v, _)| category(bvar, v)).collect::<Option<Vec<_>>>().unwrap_or_default();
     let (y_label, title) = match measured {
-        Some((_, var)) => (tr!("o-mean-of", name = var.display_name()), tr!("o-mean-of-by", name = var.display_name(), by = bvar.display_name())),
+        Some(var) => (tr!("o-mean-of", name = var.display_name()), tr!("o-mean-of-by", name = var.display_name(), by = bvar.display_name())),
         None => (tr!("o-count").to_string(), bvar.display_name().to_string()),
     };
     Ok(Item::Chart(Chart::Bar { title, x_label: bvar.display_name().to_string(), y_label, bars, categories }))

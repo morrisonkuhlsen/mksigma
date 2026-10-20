@@ -52,7 +52,7 @@ impl Sorted {
     }
 
     /// The value at a depth that may end in .5 (the mean of the two neighbouring ranks).
-    fn at_depth(&self, d: f64) -> f64 {
+    pub(crate) fn at_depth(&self, d: f64) -> f64 {
         let (lo, hi) = (d.floor(), d.ceil());
         (self.at_rank(lo) + self.at_rank(hi)) / 2.0
     }
@@ -75,7 +75,7 @@ impl Sorted {
 
     /// Tukey's hinges: the medians of the lower and upper halves (the median joins both halves
     /// when the count is odd).
-    fn hinges(&self) -> (f64, f64) {
+    pub(crate) fn hinges(&self) -> (f64, f64) {
         let n = self.total().round();
         let depth = ((((n + 1.0) / 2.0).floor()) + 1.0) / 2.0;
         (self.at_depth(depth), self.at_depth(n + 1.0 - depth))
@@ -97,7 +97,7 @@ impl Sorted {
         sum / kept
     }
 
-    fn boxplot(&self, label: String) -> BoxStats {
+    pub(crate) fn boxplot(&self, label: String) -> BoxStats {
         let (q1, q3) = self.hinges();
         let median = self.at_depth((self.total().round() + 1.0) / 2.0);
         let iqr = q3 - q1;

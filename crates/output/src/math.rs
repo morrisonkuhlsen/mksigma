@@ -143,6 +143,7 @@ fn latex_text(s: &str) -> String {
             'β' => out.push_str("$\\beta$"),
             'ρ' => out.push_str("$\\rho$"),
             'Δ' => out.push_str("$\\Delta$"),
+            'π' => out.push_str("$\\pi$"),
             '≠' => out.push_str("$\\ne$"),
             '√' => out.push_str("$\\surd$"),
             '→' => out.push_str("$\\to$"),
@@ -182,6 +183,7 @@ impl Math {
                     "β" => Some("\\beta"),
                     "ρ" => Some("\\rho"),
                     "Δ" => Some("\\Delta"),
+                    "π" => Some("\\pi"),
                     _ => None,
                 };
                 if let Some(g) = greek {

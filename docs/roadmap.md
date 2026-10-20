@@ -226,7 +226,15 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   Snell's and Nagelkerke's R², the classification, and each coefficient's standard error from
   the inverted information (Gauss–Jordan), Wald, Exp(B) and its interval. The iterations are
   the engine's own run, shared with the table.
-- **Next:** the charts (a histogram's bins, a bar's mean, a box's hinges).
+- **The charts — done:** a Σ beside histograms, bar charts and EXAMINE's boxplots. A
+  histogram: the values in order, Sturges' 1 + log₂ N, the round bin width, each bin's count,
+  and with /NORMAL the mean, the standard deviation and the curve's peak N·h/(s√(2π)). A bar:
+  its count (or sum of weights) or its mean. A box: the depths of the median and of Tukey's
+  hinges, their values, the box length, the fences at 1.5 and 3 lengths, the whiskers,
+  outliers and extremes. The bins, bars and boxes are the charts' own. Scatterplots compute
+  nothing and have no Σ.
+- **Next:** the Σ for the remaining tables (Crosstabs' cell percentages, Explore's case
+  processing summary) and the Learn articles linking to them.
 
 ## Languages — done (English and Português (Brasil))
 - The interface, the Output (titles, labels, notes, warnings, exports), the Σ explanations and

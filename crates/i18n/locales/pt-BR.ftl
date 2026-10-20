@@ -796,6 +796,27 @@ ex-intervals-t = Para os intervalos de { $level }%, o t que deixa { $tail }% em 
 ex-constant-se = A constante, a = { $a }: o erro padrão dela, a partir do quadrado médio dos resíduos e das médias dos preditores:
 ex-coefficient-se = { $name }, b = { $b }: o erro padrão pela diagonal da inversa, t, significância e o beta em desvios padrão:
 ex-examine-interval = O intervalo de 95% da média, com o t que deixa 2,5% em cada cauda a { $df } graus de liberdade:
+ex-title-histogram = Histograma
+ex-title-bar-chart = Gráfico de barras
+ex-title-boxplot = Boxplot
+ex-chart-values = Os valores válidos em ordem ({ $n } ao todo; × um peso quando ele não é 1):
+ex-histogram-sturges = A regra de Sturges pede cerca de 1 + log₂ N classes:
+ex-histogram-width = Arredondado para cima e mantido entre 5 e 30, são { $k } classes. Os limites são números redondos (passos de 1, 2, 2,5 ou 5 vezes uma potência de dez), pedidos em uma vez e meia esse número, já que um passo redondo só pode ser mais largo; cada classe tem esta largura:
+ex-histogram-bins = Cada classe conta os valores do seu limite inferior até o superior, que pertence à classe seguinte (a última classe fica com ele):
+ex-histogram-normal = A curva normal usa a média e o desvio padrão dos valores:
+ex-histogram-curve = Na escala das barras, ela é N vezes a largura da classe vezes a densidade normal; na média, atinge o pico:
+ex-bar-count = { $category }: o número de casos:
+ex-bar-count-weighted = { $category }: a soma dos pesos dos casos:
+ex-bar-mean = { $category }: a média de { $name } nos casos:
+ex-boxplot-values = Os valores em ordem ({ $n } ao todo; × um peso quando ele não é 1), x(1) o menor:
+ex-boxplot-median = A mediana fica na profundidade (n + 1)/2 a partir de qualquer ponta; uma profundidade terminada em ,5 cai no meio de dois valores:
+ex-boxplot-hinges = As charneiras de Tukey, as medianas de cada metade, na profundidade (a parte inteira da profundidade da mediana + 1)/2 a partir de cada ponta:
+ex-boxplot-fences = O comprimento L da caixa entre as charneiras, e as cercas a 1,5 e 3 comprimentos além delas:
+ex-boxplot-whiskers = Os bigodes vão até os valores mais extremos dentro das cercas internas:
+ex-boxplot-outliers = Os valores atípicos, desenhados como círculos, ficam entre as cercas internas e externas:
+ex-boxplot-no-outliers = Nenhum valor fica entre as cercas internas e externas: não há valores atípicos.
+ex-boxplot-extremes = Os extremos, desenhados como estrelas, ficam além das cercas externas:
+ex-boxplot-no-extremes = Nenhum valor fica além das cercas externas: não há extremos.
 ex-title-logistic = Regressão logística
 ex-logistic-cases = Os casos válidos em y ({ $y }) e em todas as covariáveis ({ $covariates }):
 ex-logistic-cases-weighted = Os casos válidos em y ({ $y }) e em todas as covariáveis ({ $covariates }), ponderados:

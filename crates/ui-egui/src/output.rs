@@ -274,10 +274,16 @@ fn show_item(ui: &mut egui::Ui, session: &Session, state: &mut OutputState, i: u
             ui.colored_label(ui.visuals().warn_fg_color, s);
         }
         Item::Chart(c) => {
-            if let Some(pinned) = pin {
+            let explain = session.can_explain(i);
+            if pin.is_some() || explain {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                    if pin_button(ui, pinned) {
+                    if let Some(pinned) = pin
+                        && pin_button(ui, pinned)
+                    {
                         action = Some(OutputAction::Pin(i));
+                    }
+                    if explain && ui.small_button("Σ").on_hover_text(tr!("out-sigma-tip")).clicked() {
+                        action = Some(OutputAction::Explain(i));
                     }
                 });
             }

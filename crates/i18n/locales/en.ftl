@@ -796,6 +796,27 @@ ex-intervals-t = For the { $level }% intervals, the t that leaves { $tail }% in 
 ex-constant-se = The constant, a = { $a }: its standard error, from the residuals' mean square and the means of the predictors:
 ex-coefficient-se = { $name }, b = { $b }: its standard error from the inverse's diagonal, t, significance, and the beta in standard deviations:
 ex-examine-interval = The 95% interval of the mean, with the t that leaves 2.5% in each tail at { $df } degrees of freedom:
+ex-title-histogram = Histogram
+ex-title-bar-chart = Bar Chart
+ex-title-boxplot = Boxplot
+ex-chart-values = The valid values in order ({ $n } in all; × a weight when it isn't 1):
+ex-histogram-sturges = Sturges' rule asks for about 1 + log₂ N bins:
+ex-histogram-width = Rounded up and kept between 5 and 30, that is { $k } bins. The edges are round numbers (steps of 1, 2, 2.5 or 5 times a power of ten), asked for half again as many since a round step can only be wider; each bin is this wide:
+ex-histogram-bins = Each bin counts the values from its lower edge up to its upper one, which belongs to the next bin (the last bin keeps it):
+ex-histogram-normal = The normal curve takes the values' mean and standard deviation:
+ex-histogram-curve = Scaled to the bars, it is N times the bin width times the normal density; at the mean it peaks at:
+ex-bar-count = { $category }: the number of its cases:
+ex-bar-count-weighted = { $category }: the sum of its cases' weights:
+ex-bar-mean = { $category }: the mean of { $name } over its cases:
+ex-boxplot-values = The values in order ({ $n } in all; × a weight when it isn't 1), x(1) the smallest:
+ex-boxplot-median = The median lies at depth (n + 1)/2 from either end; a depth ending in .5 falls halfway between two values:
+ex-boxplot-hinges = Tukey's hinges, the medians of each half, at depth (the whole part of the median's depth + 1)/2 from each end:
+ex-boxplot-fences = The box's length L between the hinges, and the fences 1.5 and 3 lengths beyond them:
+ex-boxplot-whiskers = The whiskers reach the most extreme values inside the inner fences:
+ex-boxplot-outliers = Outliers, drawn as circles, lie between the inner and the outer fences:
+ex-boxplot-no-outliers = No value lies between the inner and the outer fences: no outliers.
+ex-boxplot-extremes = Extremes, drawn as stars, lie beyond the outer fences:
+ex-boxplot-no-extremes = No value lies beyond the outer fences: no extremes.
 ex-title-logistic = Logistic Regression
 ex-logistic-cases = The cases valid on y ({ $y }) and on every covariate ({ $covariates }):
 ex-logistic-cases-weighted = The cases valid on y ({ $y }) and on every covariate ({ $covariates }), weighted:

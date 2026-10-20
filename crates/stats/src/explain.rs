@@ -2844,6 +2844,211 @@ pub fn frequencies(ds: &Dataset, variables: &[String], order: Order, full: bool)
     Ok(Explanation { title: tr!("ex-title-frequencies"), sections })
 }
 
+/// Values in order, each `× w` when its weight isn't 1.
+fn value_list(values: &[(f64, f64)], full: bool) -> Math {
+    listed(values.iter().map(|(x, wi)| if *wi == 1.0 { val(*x) } else { row(vec![val(*x), text("×"), n(*wi)]) }).collect(), full)
+}
+
+/// `GRAPH /HISTOGRAM`: the values in order, Sturges' number of bins, the round bin width, each
+/// bin's count and, with `/NORMAL`, the mean, the standard deviation and the curve's peak.
+/// The bins are the chart's own (`charts::histogram`).
+pub fn histogram(ds: &Dataset, name: &str, normal: bool, full: bool) -> Result<Explanation, StatsError> {
+    use mksigma_output::{Chart, Item};
+    let (i, variable) = numeric(ds, name)?;
+    let title = tr!("ex-title-histogram");
+    let heading = variable.display_name().to_string();
+    let Item::Chart(Chart::Histogram { bins, normal, n: big_n, .. }) = crate::charts::histogram(ds, name, normal)? else {
+        let steps = vec![say(&tr!("o-nothing-to-chart", name = variable.name.as_str()))];
+        return Ok(Explanation { title, sections: vec![(heading, steps)] });
+    };
+    let mut values: Vec<(f64, f64)> =
+        (0..ds.n_cases()).filter_map(|c| Some((valid(ds, i, c)?, ds.case_weight(c)))).filter(|(_, w)| *w > 0.0).collect();
+    values.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut steps = vec![step(&tr!("ex-chart-values", n = number_text(big_n)), value_list(&values, full))];
+    let k = ((big_n.log2() + 1.0).ceil() as usize).clamp(5, 30);
+    let log2 = |m: Math| row(vec![sub(text("log"), text("2")), m]);
+    steps.push(step(
+        &tr!("ex-histogram-sturges"),
+        equals(vec![
+            var("k"),
+            row(vec![text("1"), text("+"), log2(var("N"))]),
+            row(vec![text("1"), text("+"), log2(n(big_n))]),
+            approx(1.0 + big_n.log2()),
+        ]),
+    ));
+    if let Some((a, b, _)) = bins.first() {
+        steps.push(step(&tr!("ex-histogram-width", k = k), equals(vec![var("h"), row(vec![val(*b), text("−"), val(*a)]), n(b - a)])));
+    }
+    let last = bins.len().saturating_sub(1);
+    let counted = bins
+        .iter()
+        .enumerate()
+        .map(|(j, (a, b, count))| row(vec![val(*a), text("≤"), var("x"), text(if j == last { "≤" } else { "<" }), val(*b), text("→"), n(*count)]))
+        .collect();
+    steps.push(step(&tr!("ex-histogram-bins"), listed(counted, true)));
+    if let (Some((_, sd)), Some((a, b, _))) = (normal, bins.first()) {
+        steps.push(say(&tr!("ex-histogram-normal")));
+        let _ = sample(&mut steps, &values, &Names::of("x", ""), weighted(ds), full);
+        let h = b - a;
+        let root = sqrt(row(vec![text("2"), var("π")]));
+        let peak = big_n * h / (sd * (2.0 * std::f64::consts::PI).sqrt());
+        steps.extend(several(
+            &tr!("ex-histogram-curve"),
+            vec![
+                equals(vec![
+                    row(vec![var("f"), paren(var("x"))]),
+                    row(vec![
+                        var("N"),
+                        var("h"),
+                        frac(text("1"), row(vec![var("s"), root.clone()])),
+                        sup(
+                            var("e"),
+                            row(vec![
+                                text("−"),
+                                frac(
+                                    sup(paren(row(vec![var("x"), text("−"), bar(var("x"))])), text("2")),
+                                    row(vec![text("2"), sup(var("s"), text("2"))]),
+                                ),
+                            ]),
+                        ),
+                    ]),
+                ]),
+                equals(vec![
+                    row(vec![var("f"), paren(bar(var("x")))]),
+                    frac(row(vec![var("N"), var("h")]), row(vec![var("s"), root])),
+                    frac(row(vec![n(big_n), text("·"), n(h)]), row(vec![n(sd), text("·"), sqrt(row(vec![text("2"), var("π")]))])),
+                    approx(peak),
+                ]),
+            ],
+        ));
+    }
+    Ok(Explanation { title, sections: vec![(heading, steps)] })
+}
+
+/// `GRAPH /BAR`: each bar's count (or sum of weights), or its mean, from the cases of its
+/// category, grouped as the chart groups them (`charts::bar_groups`).
+pub fn bar_chart(ds: &Dataset, value: &crate::BarValue, by: &str, full: bool) -> Result<Explanation, StatsError> {
+    let (bvar, measured, groups) = crate::charts::bar_groups(ds, value, by)?;
+    let w = weighted(ds);
+    let mut steps = Vec::new();
+    for (v, list) in &groups {
+        let category = value_text(bvar, v);
+        let total: f64 = list.iter().map(|(_, wi)| wi).sum();
+        match measured {
+            None if w => steps.push(step(
+                &tr!("ex-bar-count-weighted", category = category.as_str()),
+                equals(vec![var("n"), terms(list.iter().map(|(_, wi)| n(*wi)).collect(), full), n(total)]),
+            )),
+            None => steps.push(step(&tr!("ex-bar-count", category = category.as_str()), equals(vec![var("n"), n(total)]))),
+            Some(var_of) => {
+                let sum: f64 = list.iter().map(|(x, wi)| x * wi).sum();
+                let each: Vec<Math> = list.iter().map(|(x, wi)| weighted_term(w, *wi, val(*x))).collect();
+                steps.push(step(
+                    &tr!("ex-bar-mean", category = category.as_str(), name = var_of.display_name()),
+                    equals(vec![bar(var("x")), frac(terms(each, full), n(total)), frac(n(sum), n(total)), approx(sum / total)]),
+                ));
+            }
+        }
+    }
+    let heading = match measured {
+        Some(v) => tr!("o-mean-of-by", name = v.display_name(), by = bvar.display_name()),
+        None => bvar.display_name().to_string(),
+    };
+    Ok(Explanation { title: tr!("ex-title-bar-chart"), sections: vec![(heading, steps)] })
+}
+
+/// `EXAMINE`'s boxplot of `variable` (each group of `by`): the values in order, the median's
+/// and Tukey's hinges' depths and values, the box length, the fences, the whiskers, outliers
+/// and extremes. The box is the chart's own (`Sorted::boxplot`).
+pub fn boxplot(ds: &Dataset, variable: &str, by: Option<&str>, full: bool) -> Result<Explanation, StatsError> {
+    let by = by.map(|b| ds.variable(b).ok_or_else(|| StatsError::UnknownVariable(b.to_string()))).transpose()?;
+    let (vi, var_of) = numeric(ds, variable)?;
+    let (groups, _) = crate::examine::groups_of(ds, vi, by.map(|(bi, _)| bi));
+    let mut sections = Vec::new();
+    for (key, values) in groups {
+        let heading = match (&key, by) {
+            (Some(v), Some((_, bvar))) => {
+                tr!("ex-heading-group", variable = var_of.display_name(), group = bvar.display_name(), value = value_text(bvar, v))
+            }
+            _ => var_of.display_name().to_string(),
+        };
+        let sorted = crate::examine::Sorted::new(values);
+        let b = sorted.boxplot(heading.clone());
+        let size = sorted.total().round();
+        let mut steps = vec![step(&tr!("ex-boxplot-values", n = number_text(size)), value_list(&sorted.0, full))];
+        steps.push(step("", equals(vec![var("n"), n(size)])));
+        // The value at a depth: one value, or halfway between two.
+        let at = |d: f64| -> Math {
+            let (lo, hi) = (d.floor(), d.ceil());
+            let x = |r: f64| sub(var("x"), text(&format!("({})", number_text(r))));
+            if lo == hi {
+                equals(vec![x(d), n(sorted.at_depth(d))])
+            } else {
+                equals(vec![
+                    frac(row(vec![x(lo), text("+"), x(hi)]), text("2")),
+                    frac(row(vec![val(sorted.at_rank(lo)), text("+"), val(sorted.at_rank(hi))]), text("2")),
+                    approx(sorted.at_depth(d)),
+                ])
+            }
+        };
+        let median_depth = (size + 1.0) / 2.0;
+        steps.extend(several(
+            &tr!("ex-boxplot-median"),
+            vec![
+                equals(vec![sub(var("d"), text("M")), frac(row(vec![n(size), text("+"), text("1")]), text("2")), n(median_depth)]),
+                row(vec![text(&tr!("ex-word-median-cap")), text(":"), at(median_depth)]),
+            ],
+        ));
+        let hinge_depth = (median_depth.floor() + 1.0) / 2.0;
+        let upper_depth = size + 1.0 - hinge_depth;
+        steps.extend(several(
+            &tr!("ex-boxplot-hinges"),
+            vec![
+                equals(vec![sub(var("d"), text("H")), frac(row(vec![n(median_depth.floor()), text("+"), text("1")]), text("2")), n(hinge_depth)]),
+                row(vec![sub(var("Q"), text("1")), text(":"), at(hinge_depth)]),
+                equals(vec![
+                    row(vec![var("n"), text("+"), text("1"), text("−"), sub(var("d"), text("H"))]),
+                    row(vec![n(size), text("+"), text("1"), text("−"), n(hinge_depth)]),
+                    n(upper_depth),
+                ]),
+                row(vec![sub(var("Q"), text("3")), text(":"), at(upper_depth)]),
+            ],
+        ));
+        let iqr = b.q3 - b.q1;
+        let fence = |q: Math, qv: f64, sign: &str, k: f64| {
+            let value = if sign == "−" { qv - k * iqr } else { qv + k * iqr };
+            equals(vec![row(vec![q, text(sign), n(k), text("·"), var("L")]), row(vec![n(qv), text(sign), n(k), text("·"), n(iqr)]), approx(value)])
+        };
+        let (q1, q3) = (sub(var("Q"), text("1")), sub(var("Q"), text("3")));
+        steps.extend(several(
+            &tr!("ex-boxplot-fences"),
+            vec![
+                equals(vec![var("L"), row(vec![q3.clone(), text("−"), q1.clone()]), row(vec![n(b.q3), text("−"), n(b.q1)]), approx(iqr)]),
+                fence(q1.clone(), b.q1, "−", 1.5),
+                fence(q3.clone(), b.q3, "+", 1.5),
+                fence(q1, b.q1, "−", 3.0),
+                fence(q3, b.q3, "+", 3.0),
+            ],
+        ));
+        steps.push(step(
+            &tr!("ex-boxplot-whiskers"),
+            listed(vec![equals(vec![text(&tr!("ex-word-lower-cap")), n(b.low)]), equals(vec![text(&tr!("ex-word-upper-cap")), n(b.high)])], true),
+        ));
+        steps.push(if b.outliers.is_empty() {
+            say(&tr!("ex-boxplot-no-outliers"))
+        } else {
+            step(&tr!("ex-boxplot-outliers"), listed(b.outliers.iter().map(|x| n(*x)).collect(), full))
+        });
+        steps.push(if b.extremes.is_empty() {
+            say(&tr!("ex-boxplot-no-extremes"))
+        } else {
+            step(&tr!("ex-boxplot-extremes"), listed(b.extremes.iter().map(|x| n(*x)).collect(), full))
+        });
+        sections.push((heading, steps));
+    }
+    Ok(Explanation { title: tr!("ex-title-boxplot"), sections })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3307,6 +3512,64 @@ mod tests {
         // Iteration 1 from p = 0.5: g₁ = Σ (y − 0.5) x = 7 − 5 = 2, H₁₁ = 0.25 · 10 = 2.5.
         assert!(tex.contains("= 2\n") || tex.contains("= 2 "), "{tex}");
         assert!(tex.contains("0.25 \\cdot \\left("), "{tex}");
+    }
+
+    /// `x` in `tex` as a figure ends: after `=`, `≈` or `→`.
+    fn shows(tex: &str, x: f64) -> bool {
+        let shown = number(x, 3);
+        ["=", "\\approx", "\\to"].iter().any(|r| tex.contains(&format!("{r} {shown}")))
+    }
+
+    #[test]
+    fn charts_by_hand_agree_with_what_they_draw() {
+        use mksigma_output::Chart;
+        let ds = sample();
+        // A histogram: each bin's count, and the normal curve's mean and standard deviation.
+        let Item::Chart(Chart::Histogram { bins, normal: Some((mean, sd)), .. }) = crate::histogram(&ds, "income", true).unwrap() else { panic!() };
+        let tex = latex(&histogram(&ds, "income", true, false).unwrap());
+        for (a, b, count) in &bins {
+            let edges = format!("{} \\le x", number(*a, 4));
+            assert!(tex.contains(&edges) && tex.contains(&number(*b, 4)), "bin {a}–{b} in {tex}");
+            assert!(shows(&tex, *count), "count {count} in {tex}");
+        }
+        assert!(shows(&tex, mean) && shows(&tex, sd), "{tex}");
+        assert!(tex.contains("1 + {\\text{log}}_{2} 8"), "Sturges: {tex}");
+        // A bar chart of means: 3 cases each side of 30.
+        let mut by_age = Dataset::new();
+        for name in ["g", "score"] {
+            by_age.add_variable(Variable::numeric(name)).unwrap();
+        }
+        for case in 0..ds.n_cases() {
+            let at = |v: usize| ds.column(v).unwrap()[case].as_num().unwrap();
+            by_age.push_case(vec![Value::Num(if at(0) <= 30.0 { 1.0 } else { 2.0 }), Value::Num(at(2))]).unwrap();
+        }
+        for value in [crate::BarValue::Count, crate::BarValue::Mean("score".into())] {
+            let Item::Chart(Chart::Bar { bars, .. }) = crate::bar(&by_age, &value, "g").unwrap() else { panic!() };
+            let tex = latex(&bar_chart(&by_age, &value, "g", false).unwrap());
+            for (_, height) in &bars {
+                assert!(shows(&tex, *height), "{height} in {tex}");
+            }
+        }
+        // A boxplot: 1 … 8, 15, 40: depths 5.5 and 3, hinges 3 and 8, L = 5; the whisker reaches
+        // 15 (inside 8 + 7.5) and 40 is an extreme (beyond 8 + 15).
+        let mut skewed = Dataset::new();
+        skewed.add_variable(Variable::numeric("x")).unwrap();
+        for x in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 15.0, 40.0] {
+            skewed.push_case(vec![Value::Num(x)]).unwrap();
+        }
+        let options = crate::ExamineOptions { variables: vec!["x".into()], boxplot: true, ..crate::ExamineOptions::default() };
+        let items = crate::examine(&skewed, &options).unwrap();
+        let Some(Item::Chart(Chart::Boxplot { boxes, .. })) = items.last() else { panic!() };
+        let tex = latex(&boxplot(&skewed, "x", None, false).unwrap());
+        let b = &boxes[0];
+        for x in [b.low, b.q1, b.median, b.q3, b.high] {
+            assert!(shows(&tex, x), "{x} in {tex}");
+        }
+        assert!(tex.contains("\\frac{10 + 1}{2} = 5.5") && tex.contains("\\frac{5 + 1}{2} = 3"), "{tex}");
+        assert!(tex.contains("\\frac{5 + 6}{2} = 5.5"), "the median between x(5) and x(6): {tex}");
+        assert!(tex.contains("8 + 1.5 \\cdot 5 = 15.5") && tex.contains("8 + 3 \\cdot 5 = 23"), "{tex}");
+        assert_eq!((b.high, b.outliers.as_slice(), b.extremes.as_slice()), (15.0, &[][..], &[40.0][..]));
+        assert!(tex.contains("\\text{Upper} = 15") && tex.ends_with("40"), "{tex}");
     }
 
     #[test]
