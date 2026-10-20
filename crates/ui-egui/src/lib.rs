@@ -37,7 +37,6 @@ pub use views::ValueLabelsDialog;
 use icons::Icon;
 use theme::Tokens;
 
-const SHEET_TABS_HEIGHT: f32 = 30.0;
 const STATUS_HEIGHT: f32 = 24.0;
 /// The view rail at the left, and the Filters pane at the right, open and collapsed.
 const RAIL_WIDTH: f32 = 44.0;
@@ -150,14 +149,14 @@ pub(crate) const ROW_HEIGHT: f32 = 20.0;
 
 impl SigmaApp {
     pub fn new(services: Services) -> Self {
+        // The language of an earlier run, before anything is said in it.
+        if let Some(lang) = services.load_language.as_ref().and_then(|load| load()).and_then(|code| mksigma_i18n::Lang::from_code(&code)) {
+            mksigma_i18n::set(lang);
+        }
         let (session, status) = match Session::with_sample() {
             Ok(s) => (s, Some(Status::Info(tr!("status-sample-start")))),
             Err(e) => (Session::new(), Some(Status::Error(e.to_string()))),
         };
-        // The language of an earlier run.
-        if let Some(lang) = services.load_language.as_ref().and_then(|load| load()).and_then(|code| mksigma_i18n::Lang::from_code(&code)) {
-            mksigma_i18n::set(lang);
-        }
         Self {
             session,
             view: View::Data,
@@ -714,7 +713,7 @@ impl SigmaApp {
             self.act(ui.ctx(), action);
         }
 
-        let bottom = SHEET_TABS_HEIGHT + STATUS_HEIGHT;
+        let bottom = STATUS_HEIGHT;
         let body = (ui.available_height() - bottom - 8.0).max(100.0);
         ui.add_space(6.0);
         // Between the view rail and the Filters pane, Data and Variable View get 62% of the width
@@ -753,7 +752,6 @@ impl SigmaApp {
             });
         });
         ui.add_space(2.0);
-        self.sheet_tabs(ui);
         self.status_line(ui);
         self.dialogs(ui.ctx());
         self.search_box(ui.ctx());
@@ -939,9 +937,9 @@ impl SigmaApp {
         });
     }
 
-    /// The view rail down the window's left, as in report designers: the report (the dashboard on
-    /// the whole canvas), the table (Data View) and the model (Variable View), each beside the
-    /// Output.
+    /// The view rail down the window's left, as in report designers, and the one place that
+    /// switches views: Data View and Variable View, each beside the Output, and the dashboard on
+    /// the whole window.
     fn view_rail(&mut self, ui: &mut egui::Ui, height: f32) {
         let t = Tokens::get(ui.ctx());
         let (rect, _) = ui.allocate_exact_size(egui::vec2(RAIL_WIDTH, height), egui::Sense::hover());
@@ -949,9 +947,9 @@ impl SigmaApp {
         ui.painter().vline(rect.right(), rect.y_range(), egui::Stroke::new(1.0, t.border));
         let dashboard = self.output_state.dashboard;
         let views = [
-            (Icon::Bars, tr!("rail-report"), tr!("rail-report-tip"), dashboard, None),
-            (Icon::Grid, tr!("rail-table"), tr!("rail-table-tip"), !dashboard && self.view == View::Data, Some(View::Data)),
-            (Icon::List, tr!("rail-model"), tr!("rail-model-tip"), !dashboard && self.view == View::Variables, Some(View::Variables)),
+            (Icon::Grid, tr!("data-view"), tr!("data-view-tip"), !dashboard && self.view == View::Data, Some(View::Data)),
+            (Icon::List, tr!("variable-view"), tr!("variable-view-tip"), !dashboard && self.view == View::Variables, Some(View::Variables)),
+            (Icon::Dashboard, tr!("out-dashboard"), tr!("rail-dashboard-tip"), dashboard, None),
         ];
         for (k, (icon, name, tip, on, view)) in views.into_iter().enumerate() {
             let slot = egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 4.0 + 42.0 * k as f32), egui::vec2(RAIL_WIDTH - 1.0, 40.0));
@@ -970,39 +968,6 @@ impl SigmaApp {
                 if let Some(view) = view {
                     self.view = view;
                 }
-            }
-        }
-    }
-
-    /// Data View and Variable View as tabs under the grid, like a workbook's sheets.
-    fn sheet_tabs(&mut self, ui: &mut egui::Ui) {
-        let t = Tokens::get(ui.ctx());
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), SHEET_TABS_HEIGHT), egui::Sense::hover());
-        ui.painter().hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, t.border));
-        let mut row =
-            ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(8.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Min)));
-        row.spacing_mut().item_spacing.x = 2.0;
-        for (view, icon, name) in [(View::Data, Icon::Grid, tr!("data-view")), (View::Variables, Icon::List, tr!("variable-view"))] {
-            let on = self.view == view;
-            let galley = row.painter().layout_no_wrap(name.to_string(), egui::FontId::proportional(13.0), if on { t.accent } else { t.text_dim });
-            let size = egui::vec2(galley.size().x + 40.0, SHEET_TABS_HEIGHT - 4.0);
-            let (tab, response) = row.allocate_exact_size(size, egui::Sense::click());
-            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &name));
-            let painter = row.painter();
-            if on {
-                painter.rect_filled(tab, 0.0, t.ribbon);
-                painter.rect_filled(
-                    egui::Rect::from_min_max(tab.left_bottom() - egui::vec2(-10.0, 3.0), tab.right_bottom() - egui::vec2(10.0, 0.0)),
-                    0.0,
-                    t.accent,
-                );
-            } else if response.hovered() {
-                painter.rect_filled(tab, 0.0, t.hover);
-            }
-            icons::paint(painter, egui::Rect::from_center_size(egui::pos2(tab.left() + 16.0, tab.center().y), egui::vec2(14.0, 14.0)), icon, &t);
-            painter.galley(egui::pos2(tab.left() + 28.0, tab.center().y - galley.size().y / 2.0), galley, t.text);
-            if response.clicked() {
-                self.view = view;
             }
         }
     }

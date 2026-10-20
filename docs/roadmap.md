@@ -51,12 +51,12 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   Variable View — **done**.
 - Window layout — **done**: an office-suite layout (title row with quick-access Save, Undo and
   Redo; File menu and tabs Home, Data, Transform, Analyze, Graphs, View over a ribbon of large
-  buttons with icons drawn in code; Data View as a grid with headers and gridlines; Data View and
-  Variable View as tabs at the bottom; a status bar with the data's size, weight and filter),
+  buttons with icons drawn in code; Data View as a grid with headers and gridlines; a status bar with the data's size, weight and filter),
   light and dark, indigo accented, square-cornered throughout (panels, buttons, tabs, dialogs).
-  As in report designers, a view rail down the left (Report view: the dashboard on the whole
-  window; Table view: Data View; Model view: Variable View) and a Filters pane down the right
-  that starts collapsed to a strip with its name and how many filters are on. Analyze and Graphs buttons paste the procedure's syntax for
+  As in report designers, a view rail down the left is the one place that switches views
+  (Data View and Variable View beside the Output, the Dashboard on the whole window), each with
+  an icon of its own, and a Filters pane down the right that starts collapsed to a strip with
+  its name and how many filters are on. Analyze and Graphs buttons paste the procedure's syntax for
   suggested variables into the editor and run it; when no variable fits they paste a template.
 - File backstage — **done**: File opens a page over the window: a column in Morrison
   Kühlsen's ink with its logo, MK Sigma's name and motto, and the places grouped (Start: Home,

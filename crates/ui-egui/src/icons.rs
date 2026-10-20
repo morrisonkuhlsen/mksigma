@@ -18,6 +18,8 @@ pub enum Icon {
     Pdf,
     Eraser,
     Table,
+    /// Tiles of a dashboard: one with bars, two beside it.
+    Dashboard,
     Frequencies,
     Crosstabs,
     TTest,
@@ -139,6 +141,15 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, t: &Tokens) {
             fill(&[(2.0, 10.0), (8.0, 4.0), (11.0, 7.0), (5.0, 13.0)], t.red.gamma_multiply(0.75));
             poly(&[(8.0, 4.0), (10.0, 2.0), (14.0, 6.0), (11.0, 9.0)], Stroke::new(w, t.text_dim));
             line((5.0, 13.0), (14.0, 13.0), ink);
+        }
+        Icon::Dashboard => {
+            frame(r(1.5, 1.5, 7.5, 14.5), t.text_dim);
+            for (x, h) in [(3.0, 4.5), (5.0, 8.0)] {
+                painter.rect_filled(r(x, 13.0 - h, x + 1.5, 13.0), 0.0, t.accent);
+            }
+            painter.rect_filled(r(9.0, 1.5, 14.5, 7.0), 0.0, t.header_line);
+            frame(r(9.0, 1.5, 14.5, 7.0), t.text_dim);
+            frame(r(9.0, 9.0, 14.5, 14.5), t.text_dim);
         }
         Icon::Table | Icon::Grid => {
             frame(r(1.5, 2.5, 14.5, 13.5), t.text_dim);
@@ -388,7 +399,8 @@ pub fn show(ui: &mut egui::Ui, icon: Icon, size: f32) -> egui::Response {
 
 /// For tests: every icon stays inside its square.
 #[cfg(test)]
-pub(crate) const ALL: [Icon; 49] = [
+pub(crate) const ALL: [Icon; 50] = [
+    Icon::Dashboard,
     Icon::Sigma,
     Icon::Open,
     Icon::Save,

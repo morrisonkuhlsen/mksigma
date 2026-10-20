@@ -66,26 +66,14 @@ fn copy_as_latex(response: &egui::Response, item: &Item, style: &Style) {
     });
 }
 
-/// A header tab: the Output or the dashboard.
-fn pane_tab(ui: &mut egui::Ui, on: bool, icon: crate::icons::Icon, name: &str, tip: &str) -> bool {
-    let t = crate::theme::Tokens::get(ui.ctx());
-    let text = egui::RichText::new(name).color(if on { t.text } else { t.text_dim });
-    let response = ui
-        .horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            crate::icons::show(ui, icon, 14.0);
-            ui.add(egui::Button::new(if on { text.strong() } else { text }).frame(false))
-        })
-        .inner;
-    if on {
-        let r = response.rect;
-        ui.painter().rect_filled(
-            egui::Rect::from_min_max(egui::pos2(r.left(), r.bottom() + 1.0), egui::pos2(r.right(), r.bottom() + 3.0)),
-            0.0,
-            t.accent,
-        );
-    }
-    response.on_hover_text(tip).clicked()
+/// The pane's heading: what it shows, the Output or the dashboard. The view rail switches
+/// between them; the heading only names it.
+fn heading(ui: &mut egui::Ui, icon: crate::icons::Icon, name: &str, tip: &str) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        crate::icons::show(ui, icon, 14.0);
+        ui.label(egui::RichText::new(name).strong()).on_hover_text(tip);
+    });
 }
 
 pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut OutputState) -> OutputAction {
@@ -95,12 +83,10 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
     let tiles = session.dashboard();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 14.0;
-        if pane_tab(ui, !state.dashboard, crate::icons::Icon::Table, &tr!("out-output"), &tr!("out-output-tip")) {
-            state.dashboard = false;
-        }
-        let tip = tr!("out-dashboard-tip", n = tiles.len());
-        if pane_tab(ui, state.dashboard, crate::icons::Icon::Grid, &tr!("out-dashboard"), &tip) {
-            state.dashboard = true;
+        if state.dashboard {
+            heading(ui, crate::icons::Icon::Dashboard, &tr!("out-dashboard"), &tr!("out-dashboard-tip", n = tiles.len()));
+        } else {
+            heading(ui, crate::icons::Icon::Table, &tr!("out-output"), &tr!("out-output-tip"));
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if state.dashboard {

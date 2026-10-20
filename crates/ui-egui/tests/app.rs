@@ -949,15 +949,15 @@ fn learn_shows_articles_runs_their_examples_and_opens_from_a_table() {
 }
 
 #[test]
-fn the_view_rail_switches_between_the_report_the_table_and_the_model() {
+fn the_view_rail_is_the_one_place_that_switches_views() {
     let mut h = harness(SigmaApp::default());
-    h.get_by_label("Report view").click();
+    h.get_by_label("Dashboard").click();
     h.run_steps(3);
     assert!(h.state().output_state.dashboard, "the dashboard on the whole window");
-    h.get_by_label("Model view").click();
+    h.get_by_label("Variable View").click();
     h.run_steps(3);
     assert!(!h.state().output_state.dashboard && h.state().view == View::Variables);
-    h.get_by_label("Table view").click();
+    h.get_by_label("Data View").click();
     h.run_steps(3);
     assert!(!h.state().output_state.dashboard && h.state().view == View::Data);
 }

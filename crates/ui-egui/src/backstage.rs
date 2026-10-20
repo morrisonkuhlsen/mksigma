@@ -327,7 +327,7 @@ fn pages(ui: &mut egui::Ui, view: &View) -> Option<Action> {
                 card(ui, Icon::Web, &tr!("bs-web-page"), &tr!("bs-web-page-sub"), output, Action::Export(ExportFormat::Html));
                 card(ui, Icon::Pdf, "PDF", &tr!("bs-pdf-sub"), output, Action::Export(ExportFormat::Pdf));
                 card(ui, Icon::Latex, "LaTeX", &tr!("bs-latex-sub"), output, Action::Export(ExportFormat::Latex));
-                card(ui, Icon::Grid, &tr!("bs-interactive"), &tr!("bs-interactive-sub"), board, Action::ExportDashboard);
+                card(ui, Icon::Dashboard, &tr!("bs-interactive"), &tr!("bs-interactive-sub"), board, Action::ExportDashboard);
                 card(ui, Icon::List, &tr!("bs-dashboard-syntax"), &tr!("bs-dashboard-syntax-sub"), board, Action::SaveDashboard);
             });
         }
@@ -402,7 +402,7 @@ fn recent(ui: &mut egui::Ui, files: &[PathBuf]) -> Option<Action> {
             ui.painter().rect_filled(rect, 0.0, t.hover);
         }
         let kind = match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
-            Some("sps") => (Icon::Grid, &tr!("bs-kind-dashboard")),
+            Some("sps") => (Icon::Dashboard, &tr!("bs-kind-dashboard")),
             Some("csv" | "tsv" | "txt" | "dat") => (Icon::List, &tr!("bs-kind-text")),
             _ => (Icon::Table, &tr!("bs-kind-spss")),
         };
