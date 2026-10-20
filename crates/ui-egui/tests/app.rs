@@ -494,6 +494,9 @@ fn clicking_a_category_cross_filters_the_other_items() {
     assert_eq!(h.state().session.cross_filter().map(|c| c.label.as_str()), Some("grupo = Jovem"));
     assert!(shows(&h, "Filtered by grupo = Jovem"));
     assert!(shows(&h, "72.67") && !shows(&h, "72.38"), "DESCRIPTIVES ran again on the three");
+    // The cross-filter's card, in the Filters pane.
+    h.get_by_label("Show filters").click();
+    h.run_steps(3);
     h.get_by_label("Clear filter").click();
     h.run_steps(3);
     assert!(h.state().session.cross_filter().is_none() && shows(&h, "72.38"));
@@ -663,6 +666,8 @@ fn a_slicer_picked_in_the_output_filters_every_item() {
         .run_syntax("RECODE age (LO THRU 30 = 1) (ELSE = 2) INTO grupo.\nVALUE LABELS grupo 1 'Jovem' 2 'Adulto'.\nDESCRIPTIVES score.")
         .unwrap();
     let mut h = harness(app);
+    h.get_by_label("Show filters").click();
+    h.run_steps(3);
     h.get_by_label("+ Slicer").click();
     h.run_steps(3);
     // The menu's grupo, not Data View's column header.
@@ -689,8 +694,7 @@ fn pinned_items_make_the_dashboard_and_it_exports() {
     let services = Services { pick_export: Some(Box::new(move |_: &str| Some(picked.clone()))), ..Services::default() };
     let mut app = SigmaApp::new(services);
     app.session.run_syntax("DESCRIPTIVES age income.\nGRAPH /HISTOGRAM=income /TITLE='Renda'.").unwrap();
-    // The chart's pin, at its right, needs the Output wider than beside an open Filters pane.
-    let mut h = sized(app, 1600.0);
+    let mut h = harness(app);
     // The table's pin, then the chart's.
     h.get_all_by_label("Pin to the dashboard").next().unwrap().click();
     h.run_steps(3);
@@ -959,18 +963,17 @@ fn the_view_rail_switches_between_the_report_the_table_and_the_model() {
 }
 
 #[test]
-fn the_filters_pane_collapses_to_a_strip_and_opens_again() {
+fn the_filters_pane_starts_as_a_strip_opens_and_collapses_again() {
     let mut app = SigmaApp::new(Services::default());
     app.session.run_syntax("SLICE age (20 THRU 40).\nDESCRIPTIVES age.").unwrap();
     let mut h = harness(app);
     let chip = h.state().session.slicers().first().unwrap().describe(&h.state().session.dataset);
-    assert!(shows(&h, "Filters") && shows(&h, &chip), "the slicer's card: {chip}");
-    h.get_by_label("Hide filters").click();
-    h.run_steps(3);
-    assert!(!h.state().filters_open);
-    assert!(h.query_by_label("+ Slicer").is_none(), "only the strip shows");
+    assert!(!h.state().filters_open && h.query_by_label("+ Slicer").is_none(), "only the strip shows at first");
     h.get_by_label("Show filters").click();
     h.run_steps(3);
-    assert!(h.state().filters_open && h.query_by_label("+ Slicer").is_some());
+    assert!(h.state().filters_open && shows(&h, &chip), "the slicer's card: {chip}");
+    h.get_by_label("Hide filters").click();
+    h.run_steps(3);
+    assert!(!h.state().filters_open && h.query_by_label("+ Slicer").is_none());
     assert_eq!(h.state().session.slicers().len(), 1, "collapsing changes no filter");
 }

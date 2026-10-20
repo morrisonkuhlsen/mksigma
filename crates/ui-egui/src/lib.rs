@@ -129,7 +129,7 @@ pub struct SigmaApp {
     pub search: Option<String>,
     /// The window's zoom, in percent.
     pub zoom: u32,
-    /// The Filters pane is open (not only its strip).
+    /// The Filters pane is open (not only its strip); it starts collapsed.
     pub filters_open: bool,
     services: Services,
     title: String,
@@ -178,7 +178,7 @@ impl SigmaApp {
             autosave: false,
             search: None,
             zoom: 100,
-            filters_open: true,
+            filters_open: false,
             services,
             title: String::new(),
             themed: false,

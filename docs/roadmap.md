@@ -54,7 +54,7 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   light and dark, indigo accented, square-cornered throughout (panels, buttons, tabs, dialogs).
   As in report designers, a view rail down the left (Report view: the dashboard on the whole
   window; Table view: Data View; Model view: Variable View) and a Filters pane down the right
-  that collapses to a strip with its name and how many filters are on. Analyze and Graphs buttons paste the procedure's syntax for
+  that starts collapsed to a strip with its name and how many filters are on. Analyze and Graphs buttons paste the procedure's syntax for
   suggested variables into the editor and run it; when no variable fits they paste a template.
 - File backstage — **done**: File opens a page over the window: a column in Morrison
   Kühlsen's ink with its logo, MK Sigma's name and motto, and the places grouped (Start: Home,
