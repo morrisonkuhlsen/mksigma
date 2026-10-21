@@ -301,8 +301,14 @@ gretl). One vertical slice at a time; **the order of the modules is the user's t
     a warning. File › Open and Save As, dropped files, `mksigma-cli --in/--out` and MCP's
     `open_data`/`export` take `.dta`. Dates show as dates and are typed in Data View as their
     format writes them. **Next:** `SET EPOCH` for two-digit years (#13).
-  - *SAS transport files:* `.xpt` (XPORT, whose layout SAS publishes), the format regulators
-    accept. `.sas7bdat` stays out: it is known only through third parties' reverse engineering.
+  - *SAS transport files — reading done:* `GET SAS DATA='x.xpt'` (`crates/xpt`, from SAS's
+    published record layout, TS-140) reads version 5 transport files, the format regulators
+    accept: the first member's variables, labels, numbers (IBM floating point, decoded from its
+    definition), text (UTF-8 or Windows-1252), `.` and `.A`–`.Z` as system-missing, SAS dates,
+    datetimes and times as MK Sigma's. File › Open, dropped files, `mksigma-cli --in` and MCP's
+    `open_data` take `.xpt`. **Next:** version 8/9 transport files (`LIBV8`) and `/DSET` for a
+    member other than the first. `.sas7bdat` stays out: it is known only through third parties'
+    reverse engineering.
   - *A parity matrix:* a table in code of every procedure against SPSS, SAS, Stata, JMP,
     Minitab, JASP and jamovi (has it, part of it, not yet), printed by an xtask and in the
     docs, so the unification is visible and measured.

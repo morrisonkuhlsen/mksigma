@@ -82,9 +82,13 @@ fn main() -> eframe::Result {
     let services = Services {
         pick_open: Some(Box::new(|| {
             rfd::FileDialog::new()
-                .add_filter("Data and dashboards (.sav, .dta, .csv, .tsv, .txt, .sps)", &["sav", "zsav", "dta", "csv", "tsv", "txt", "dat", "sps"])
+                .add_filter(
+                    "Data and dashboards (.sav, .dta, .xpt, .csv, .tsv, .txt, .sps)",
+                    &["sav", "zsav", "dta", "xpt", "csv", "tsv", "txt", "dat", "sps"],
+                )
                 .add_filter("SPSS Statistics data (.sav, .zsav)", &["sav", "zsav"])
                 .add_filter("Stata data (.dta)", &["dta"])
+                .add_filter("SAS transport (.xpt)", &["xpt"])
                 .add_filter("Delimited text (.csv, .tsv, .txt)", &["csv", "tsv", "txt", "dat"])
                 .add_filter("All files", &["*"])
                 .pick_file()

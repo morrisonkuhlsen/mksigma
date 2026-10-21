@@ -172,6 +172,17 @@ pub(crate) fn get_stata(rest: &[Token]) -> Result<Command, SyntaxError> {
     Ok(Command::GetStata(path.clone()))
 }
 
+/// `GET SAS DATA='data.xpt'`: a SAS transport file as the new active dataset. `/DSET`, which
+/// names a member, isn't taken yet: the first member is read.
+pub(crate) fn get_sas(rest: &[Token]) -> Result<Command, SyntaxError> {
+    match rest {
+        [Token::Word(data), Token::Equals, Token::Str(path)] | [Token::Word(data), Token::Str(path)] if is_keyword(data, "DATA") => {
+            Ok(Command::GetSas(path.clone()))
+        }
+        _ => Err(SyntaxError::Expected { command: "GET SAS", expected: "DATA='path'" }),
+    }
+}
+
 /// `SAVE TRANSLATE OUTFILE='data.dta' /TYPE=STATA [/VERSION=n] [/EDITION=...] [/REPLACE]`:
 /// the active dataset written as a Stata file. Stata is the one type so far; the version and
 /// edition are accepted and the file is always format 118 (Stata 14 and later).
@@ -260,6 +271,8 @@ mod tests {
     fn get_file_and_dashboard() {
         assert_eq!(parse("GET FILE='/dados/turma.sav'.").unwrap(), [Command::GetFile("/dados/turma.sav".into())]);
         assert_eq!(parse("GET STATA FILE='/dados/pnad.dta'.").unwrap(), [Command::GetStata("/dados/pnad.dta".into())]);
+        assert_eq!(parse("GET SAS DATA='/dados/adsl.xpt'.").unwrap(), [Command::GetSas("/dados/adsl.xpt".into())]);
+        assert!(parse("GET SAS FILE='x.xpt'.").is_err());
         assert_eq!(parse("get stata file 'a.dta' /encoding='UTF8'.").unwrap(), [Command::GetStata("a.dta".into())]);
         assert!(parse("GET STATA 'a.dta'.").is_err() && parse("GET STATA FILE='a.dta' /KEEP=x.").is_err());
         assert_eq!(

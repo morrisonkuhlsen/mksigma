@@ -15,6 +15,7 @@ mksigma-output = { workspace = true }
 mksigma-sav = { workspace = true }
 mksigma-csv = { workspace = true }
 mksigma-dta = { workspace = true }
+mksigma-xpt = { workspace = true }
 mksigma-syntax = { workspace = true }
 mksigma-stats = { workspace = true }
 thiserror = { workspace = true }

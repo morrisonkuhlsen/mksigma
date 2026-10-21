@@ -1804,6 +1804,7 @@ dependencies = [
  "mksigma-sav",
  "mksigma-stats",
  "mksigma-syntax",
+ "mksigma-xpt",
  "thiserror 2.0.21",
 ]
 
@@ -1884,6 +1885,16 @@ name = "mksigma-web"
 version = "0.1.0"
 dependencies = [
  "mksigma-engine",
+]
+
+[[package]]
+name = "mksigma-xpt"
+version = "0.1.0"
+dependencies = [
+ "encoding_rs",
+ "mksigma-core",
+ "mksigma-i18n",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

@@ -43,6 +43,8 @@ pub enum EngineError {
     Csv(#[from] mksigma_csv::CsvError),
     #[error(transparent)]
     Dta(#[from] mksigma_dta::DtaError),
+    #[error(transparent)]
+    Xpt(#[from] mksigma_xpt::XptError),
     #[error("{0}")]
     File(String),
     #[error("{}", mksigma_i18n::tr!("err-unknown-variable", name = .0.as_str()))]
@@ -112,6 +114,7 @@ fn changes_data(command: &Command) -> bool {
             | Command::OutputStyle(_)
             | Command::GetFile(_)
             | Command::GetStata(_)
+            | Command::GetSas(_)
             | Command::GetData(_)
     )
 }
@@ -254,6 +257,25 @@ impl Session {
         Ok(mksigma_dta::write(&self.dataset, "")?.bytes)
     }
 
+    /// Replaces the active dataset with a SAS transport file's first member (`.xpt`, version 5),
+    /// as `open_sav` does. Returns the reader's warnings.
+    pub fn open_xpt(&mut self, bytes: &[u8]) -> Result<Vec<String>, EngineError> {
+        let file = mksigma_xpt::read(bytes)?;
+        self.load(file.dataset);
+        Ok(file.warnings)
+    }
+
+    /// `GET SAS DATA`: a SAS transport file as the active dataset.
+    fn get_sas(&mut self, path: &str) -> Result<(), EngineError> {
+        let bytes = std::fs::read(path).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        let warnings = self.open_xpt(&bytes)?;
+        let ds = &self.dataset;
+        self.notes.push(tr!("note-file-read", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
+        self.notes.extend(warnings.iter().map(|w| format!("{path}: {w}")));
+        self.loaded_file = Some(path.to_string());
+        Ok(())
+    }
+
     /// `GET STATA FILE`: a Stata file as the active dataset.
     fn get_stata(&mut self, path: &str) -> Result<(), EngineError> {
         let bytes = std::fs::read(path).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
@@ -386,13 +408,14 @@ impl Session {
                 Command::GetData(spec) => Some(self.get_data(spec)),
                 Command::GetFile(path) => Some(self.get_file(path)),
                 Command::GetStata(path) => Some(self.get_stata(path)),
+                Command::GetSas(path) => Some(self.get_sas(path)),
                 Command::SaveStata { file, replace } => Some(self.save_translate(file, *replace)),
                 Command::Dashboard(tiles) => Some(self.set_tiles(tiles)),
                 _ => None,
             };
             if let Some(result) = special {
                 result?;
-                if matches!(command, Command::GetData(_) | Command::GetFile(_) | Command::GetStata(_)) {
+                if matches!(command, Command::GetData(_) | Command::GetFile(_) | Command::GetStata(_) | Command::GetSas(_)) {
                     self.data_source = Some(source.clone());
                 }
                 self.journal.push(source);
@@ -2138,6 +2161,51 @@ mod tests {
         s.saved_to("/dados/turma.dta");
         s.run_syntax("DESCRIPTIVES age.").unwrap();
         assert!(s.dashboard_syntax().is_some_and(|d| d.contains("GET STATA FILE='/dados/turma.dta'.")));
+    }
+
+    #[test]
+    fn get_sas_reads_a_transport_file() {
+        // TS-140's layout: library and member headers, one NAMESTR (a numeric "nota"), the
+        // observations 7.5 and 9 as IBM doubles, each part padded to 80-byte records.
+        let record = |text: &[u8]| {
+            let mut r = text.to_vec();
+            r.resize(80, b' ');
+            r
+        };
+        let mut f = Vec::new();
+        f.extend(record(b"HEADER RECORD*******LIBRARY HEADER RECORD!!!!!!!000000000000000000000000000000"));
+        f.extend(record(b"SAS     SAS     SASLIB  9.4     X64_10HO                        20OCT26:14:05:00"));
+        f.extend(record(b"20OCT26:14:05:00"));
+        f.extend(record(b"HEADER RECORD*******MEMBER  HEADER RECORD!!!!!!!000000000000000001600000000140"));
+        f.extend(record(b"HEADER RECORD*******DSCRPTR HEADER RECORD!!!!!!!000000000000000000000000000000"));
+        f.extend(record(b"SAS     TURMA   SASDATA 9.4     X64_10HO                        20OCT26:14:05:00"));
+        f.extend(record(b"20OCT26:14:05:00"));
+        f.extend(record(b"HEADER RECORD*******NAMESTR HEADER RECORD!!!!!!!000000000100000000000000000000"));
+        let mut namestr = vec![0, 1, 0, 0, 0, 8, 0, 1];
+        namestr.extend(b"nota    ");
+        namestr.extend([b' '; 40]);
+        namestr.extend([b' '; 8]);
+        namestr.extend([0u8; 8]);
+        namestr.extend([b' '; 8]);
+        namestr.extend([0u8; 8]);
+        namestr.resize(140, 0);
+        namestr.resize(160, b' ');
+        f.extend(namestr);
+        f.extend(record(b"HEADER RECORD*******OBS     HEADER RECORD!!!!!!!000000000000000000000000000000"));
+        // 7.5 = 16 · 0.46875 (0x78 / 256), 9 = 16 · 0.5625 (0x90 / 256).
+        let mut data = vec![0x41, 0x78, 0, 0, 0, 0, 0, 0, 0x41, 0x90, 0, 0, 0, 0, 0, 0];
+        data.resize(80, b' ');
+        f.extend(data);
+        let path = std::env::temp_dir().join(format!("mksigma-get-sas-{}.xpt", std::process::id()));
+        std::fs::write(&path, f).unwrap();
+        let mut s = Session::new();
+        s.run_syntax(&format!("GET SAS DATA={}.\nDESCRIPTIVES nota.", quote(&path.display().to_string()))).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(s.dataset.column(0).unwrap(), [Value::Num(7.5), Value::Num(9.0)]);
+        assert!(s.take_notes()[0].ends_with("2 cases, 1 variables"));
+        assert!(s.output.to_text().contains("8.25"), "the mean of 7.5 and 9");
+        assert!(s.dashboard_syntax().is_some_and(|d| d.contains("GET SAS DATA=")));
+        assert!(matches!(s.open_xpt(b"not sas"), Err(EngineError::Xpt(_))));
     }
 
     #[test]

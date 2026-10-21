@@ -195,7 +195,8 @@ impl SigmaApp {
         }
     }
 
-    /// Opens a data file from disk: a system file, a Stata file, delimited text or syntax.
+    /// Opens a data file from disk: a system file, a Stata or SAS transport file, delimited text
+    /// or syntax.
     pub fn open_path(&mut self, path: &Path) {
         if is_text(path) {
             // Read through syntax, so the History says how the text was read.
@@ -216,8 +217,14 @@ impl SigmaApp {
             return;
         }
         let file = mksigma_engine::quote(&path.display().to_string());
-        let stata = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("dta"));
-        let syntax = if stata { format!("GET STATA FILE={file}.") } else { format!("GET FILE={file}.") };
+        let extension = |x: &str| path.extension().is_some_and(|e| e.eq_ignore_ascii_case(x));
+        let syntax = if extension("dta") {
+            format!("GET STATA FILE={file}.")
+        } else if extension("xpt") {
+            format!("GET SAS DATA={file}.")
+        } else {
+            format!("GET FILE={file}.")
+        };
         let result = self.session.run_syntax(&syntax);
         if result.is_ok() {
             self.remember(path);
@@ -516,8 +523,14 @@ impl SigmaApp {
     /// Opens a system file's bytes (a path read, or a file dropped where there is no path).
     /// Returns whether it opened; on failure the open dataset stays.
     pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) -> bool {
-        let stata = Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("dta"));
-        let opened = if stata { self.session.open_dta(bytes) } else { self.session.open_sav(bytes) };
+        let extension = |x: &str| Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case(x));
+        let opened = if extension("dta") {
+            self.session.open_dta(bytes)
+        } else if extension("xpt") {
+            self.session.open_xpt(bytes)
+        } else {
+            self.session.open_sav(bytes)
+        };
         match opened {
             Ok(warnings) => {
                 let ds = &self.session.dataset;

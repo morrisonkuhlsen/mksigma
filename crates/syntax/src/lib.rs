@@ -32,6 +32,8 @@ pub enum Command {
     GetFile(String),
     /// `GET STATA FILE='...'`: a new active dataset from a Stata file (`.dta`).
     GetStata(String),
+    /// `GET SAS DATA='...'`: a new active dataset from a SAS transport file (`.xpt`).
+    GetSas(String),
     /// `SAVE TRANSLATE OUTFILE='...' /TYPE=STATA [/REPLACE]`: the active dataset as a Stata
     /// file; an existing file is overwritten only with `/REPLACE`.
     SaveStata { file: String, replace: bool },
@@ -280,6 +282,9 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
     }
     if is_keyword(name, "SAVE") && second("TRANSLATE") {
         return data::save_translate(rest.get(1..).unwrap_or_default());
+    }
+    if is_keyword(name, "GET") && second("SAS") {
+        return data::get_sas(rest.get(1..).unwrap_or_default());
     }
     if is_keyword(name, "GET") && second("STATA") {
         return data::get_stata(rest.get(1..).unwrap_or_default());
