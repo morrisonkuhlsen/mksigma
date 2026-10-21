@@ -1,7 +1,7 @@
 <h1 align="center">MK Sigma</h1>
 
 <p align="center">
-  <b>Statistics and dashboards: an open-source, clean-room take on the SPSS Statistics workflow, with the best of Power BI on top, in pure Rust.</b>
+  <b>Statistics and dashboards: an open-source, clean-room take on the IBM® SPSS® Statistics workflow, with interactive dashboards (slicers, cross-filtering) on top, in pure Rust.</b>
 </p>
 
 <p align="center">
@@ -123,5 +123,7 @@ The Morrison Kühlsen brand assets (the σ mark, the wordmark and the splash art
 their owner's permission and are not covered by the code's licences; see
 [`ATTRIBUTION.md`](ATTRIBUTION.md).
 
-SPSS is a trademark of IBM and Power BI a trademark of Microsoft; MK Sigma is not affiliated with
-or endorsed by either. A Morrison Kühlsen project.
+IBM and SPSS are trademarks of International Business Machines Corporation, registered in many
+jurisdictions worldwide. Power BI is a trademark of the Microsoft group of companies. SAS and JMP
+are trademarks of SAS Institute Inc., Stata of StataCorp LLC, and Minitab of Minitab, LLC. MK Sigma
+is not affiliated with or endorsed by any of them. A Morrison Kühlsen project.
