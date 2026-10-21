@@ -274,9 +274,12 @@ SPSS parity comes first (its remaining procedures are under Later); then each pa
 strength joins as a module of the same engine: commands in the one syntax (SPSS's names where
 SPSS has the procedure, MK Sigma's own otherwise), dialogs that only write syntax, a Σ for every
 figure, Learn articles in both languages, parity tests against independently computed values,
-and nothing that breaks wasm. Clean-room: the packages are observed black-box on synthetic
-data and their public manuals read; no code from the GPL ones (jamovi, JASP, R and CRAN, PSPP,
-gretl). One vertical slice at a time; **the order of the modules is the user's to decide.**
+and nothing that breaks wasm. Clean-room (see `AGENTS.md`): proprietary packages are not run to
+shape MK Sigma; behaviour comes from public documentation (ideas only), the literature and open
+tools run as oracles, with no code from the GPL ones (jamovi, JASP, R and CRAN, PSPP, gretl). One
+vertical slice at a time; **the order of the modules is the user's to decide.** The order chosen:
+the noncentral distributions, quality, power and sample size, then design of experiments (classical
+first, the optimal designs after); the other modules follow.
 
 - **Foundations, before any module:**
   - *NIST StRD audit — first part done* (`crates/stats/tests/nist.rs`): 9 univariate, 11
@@ -312,18 +315,49 @@ gretl). One vertical slice at a time; **the order of the modules is the user's t
   - *A parity matrix:* a table in code of every procedure against SPSS, SAS, Stata, JMP,
     Minitab, JASP and jamovi (has it, part of it, not yet), printed by an xtask and in the
     docs, so the unification is visible and measured.
-- **Minitab — quality and Six Sigma:** control charts (X̄-R, X̄-S, I-MR, p, np, c, u) with the
-  tests for special causes (the published run rules), process capability (Cp, Cpk, Pp, Ppk,
-  with the normal probability plot), gage R&R by the ANOVA method, Pareto and run charts. The
-  Σ shows the limits from the published control-chart constants (d₂, A₂, D₃, D₄); control
-  charts cross-filter and go on dashboards like every chart. Few free tools cover this, and
-  industry pays for it.
-- **JMP — exploration and design of experiments:** generated designs as datasets (full and
-  fractional factorials with their resolution, Plackett–Burman, central composite,
-  Box–Behnken; randomized run order), their analysis (effects, a Pareto of effects, the
-  response surface and its stationary point), and a one-click distribution view of a variable
-  (histogram, boxplot, quantiles and moments together). Linked views extend cross-filtering:
-  selecting in one chart highlights the same cases in the others.
+  - *Noncentral distributions (#52):* t, F, χ² and beta, with CDF, quantile and a solver for the
+    noncentrality, from the published series (Lenth 1989, Ding 1992, Frick 1990). One piece
+    behind power and sample size, the run length of control charts, the power of a design and
+    confidence intervals for effect sizes.
+- **Quality: control charts, capability, measurement systems (Minitab's niche) — next:**
+  industry uses it every day, and automotive suppliers are required to (IATF 16949). In the UI
+  it is "Quality", not "Six Sigma", a Motorola trademark.
+  - *First part:* `SPCHART` (SPSS's name) with X̄-R, X̄-S and I-MR (#53) and p, np, c and u (#54):
+    subgroups of varying size, σ by R̄/d₂, S̄/c₄, pooled SD or MR̄/d₂, Phase I and II, stages.
+    Nelson's tests for special causes (#55). Capability for normal data (#56): Cp, Cpk, Pp,
+    Ppk and Cpm, expected and observed ppm, confidence intervals, the normality check. Pareto and
+    run charts (#57). The Σ shows every limit, with d₂, d₃ and c₄ computed, not tabled; control
+    charts cross-filter and go on dashboards like every chart.
+  - *Second part:* gage R&R by ANOVA and by X̄-R, attribute agreement (kappa), capability for
+    non-normal data (Box-Cox, Johnson, Weibull), EWMA and CUSUM, Laney's p′ and u′.
+  - *Out:* DMAIC project templates, value stream maps, a real-time SPC server.
+  - Free tools exist (R's `qcc`, JASP's quality module), so what sets MK Sigma apart is the Σ,
+    Portuguese, dashboards and a native app without R.
+- **Power and sample size (what researchers use G*Power for):** `POWER`, as SPSS names it, for the
+  t tests (#58), the F tests of ANOVA and regression (#59), proportions, χ², correlation and
+  McNemar (#60). Each test has five analyses: a priori, post hoc, sensitivity, criterion and
+  compromise. Observed power is offered only with a warning (Hoenig and Heisey 2001). Power
+  curves, and "Plan a study" beside a result, pasting `POWER` with its effect size (#61). The
+  Σ shows the noncentrality, the critical value and the power. The noncentrality convention for
+  F (Cohen's f²(u + v + 1) or f²·N) is stated in the Σ. Sources: Cohen (1988), Faul et al. (2007);
+  G*Power is free but not open source and is treated as proprietary until its licence is checked.
+- **JMP — exploration and design of experiments:**
+  - *Classical designs, after power:* generated designs as datasets (full and fractional
+    factorials with their generators, resolution and alias structure, Plackett–Burman, central
+    composite, Box–Behnken; blocks, centre points, randomized run order), their analysis
+    (effects, a Pareto of effects, Daniel's half-normal plot and Lenth's PSE for unreplicated
+    designs, curvature and lack of fit, the response surface and its stationary point), and a
+    profiler with Derringer–Suich desirability whose factors are slicers on a dashboard. The Σ
+    shows the alias structure.
+  - *Optimal designs, after that:* D- and I-optimal designs by coordinate exchange, with
+    constraints and the random seed recorded in the syntax; definitive screening designs (Jones
+    and Nachtsheim 2011); mixtures; split-plot designs once `MIXED` (REML) exists; the power of a
+    design.
+  - A one-click distribution view of a variable (histogram, boxplot, quantiles and moments
+    together). Linked views extend cross-filtering: selecting in one chart highlights the same
+    cases in the others.
+  - Sources: Montgomery, *Design and Analysis of Experiments*; Box, Hunter and Hunter; the NIST
+    e-Handbook, ch. 5. Oracles: R's `FrF2`, `rsm` and `AlgDesign`.
 - **Stata — econometrics and epidemiology:** robust (HC) and cluster-robust standard errors;
   panel data (fixed, random and between effects, the Hausman test); instrumental variables by
   two-stage least squares with the first-stage F; probit, ordered and multinomial logit,
@@ -348,9 +382,10 @@ dashboards published as one offline page with the engine inside; one engine for 
 the command line and agents (MCP); Brazilian Portuguese throughout; open source, natively on
 Linux, Windows and macOS.
 
-Candidates for the first module, for the user to choose: quality and SPC (Minitab's niche:
-little free competition, short formulas that suit the Σ), the foundations (the NIST audit and
-`.dta`), or the Bayesian t test and correlation (JASP's best-known feature).
+The first modules, in order: the noncentral distributions (#52), quality (#53–#57), power and
+sample size (#58–#61), classical design of experiments, optimal designs. Quality comes first for
+the industry that pays for it and for its short formulas, which suit the Σ; power reaches most
+users for little work and could be swapped ahead of it.
 
 ## Later
 - Multiple related tables (star-schema data model) and measures
