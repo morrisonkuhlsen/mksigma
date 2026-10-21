@@ -5,6 +5,7 @@
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup, wgpu};
 use mksigma_ui_egui::{Services, SigmaApp};
 
 struct App(SigmaApp);
@@ -17,8 +18,28 @@ impl eframe::App for Splash {
     }
 }
 
+/// The graphics backends to try, best first; `None` is wgpu's own choice. On Windows that choice
+/// is Vulkan, and some Intel Vulkan drivers crash the app at start (igvk64.dll, #72), so it is
+/// DirectX 12, then OpenGL. `WGPU_BACKEND` overrides it everywhere.
+fn backends() -> Vec<Option<wgpu::Backends>> {
+    if cfg!(target_os = "windows") && wgpu::Backends::from_env().is_none() {
+        vec![Some(wgpu::Backends::DX12), Some(wgpu::Backends::GL)]
+    } else {
+        vec![None]
+    }
+}
+
+/// A centred window on the given graphics backends.
+fn options(viewport: egui::ViewportBuilder, backends: Option<wgpu::Backends>) -> eframe::NativeOptions {
+    let mut wgpu_options = WgpuConfiguration::default();
+    if let (Some(backends), WgpuSetup::CreateNew(setup)) = (backends, &mut wgpu_options.wgpu_setup) {
+        setup.instance_descriptor.backends = backends;
+    }
+    eframe::NativeOptions { viewport, centered: true, wgpu_options, ..Default::default() }
+}
+
 /// The splash screen in a small window of its own, centred and undecorated, until it closes.
-fn splash() -> eframe::Result {
+fn splash(backends: Option<wgpu::Backends>) -> eframe::Result {
     let viewport = egui::ViewportBuilder::default()
         .with_title("MK Sigma")
         .with_app_id("mksigma")
@@ -30,8 +51,7 @@ fn splash() -> eframe::Result {
         Some(icon) => viewport.with_icon(icon),
         None => viewport,
     };
-    let options = eframe::NativeOptions { viewport, centered: true, ..Default::default() };
-    eframe::run_native("MK Sigma splash", options, Box::new(|_cc| Ok(Box::new(Splash(Default::default())))))
+    eframe::run_native("MK Sigma splash", options(viewport, backends), Box::new(|_cc| Ok(Box::new(Splash(Default::default())))))
 }
 
 impl eframe::App for App {
@@ -79,8 +99,14 @@ fn language() -> mksigma_ui_egui::i18n::Lang {
 
 fn main() -> eframe::Result {
     mksigma_ui_egui::i18n::set(language());
-    // Without its splash the program still starts.
-    let _ = splash();
+    // The splash also finds a graphics backend that starts, for the main window to use; without
+    // its splash (any other error) the program still starts.
+    let candidates = backends();
+    let backends = candidates
+        .iter()
+        .copied()
+        .find(|b| !matches!(splash(*b), Err(eframe::Error::Wgpu(_))))
+        .unwrap_or_else(|| candidates.first().copied().flatten());
     let services = Services {
         pick_open: Some(Box::new(|| {
             rfd::FileDialog::new()
@@ -151,6 +177,5 @@ fn main() -> eframe::Result {
         Some(icon) => viewport.with_icon(icon),
         None => viewport,
     };
-    let options = eframe::NativeOptions { viewport, centered: true, ..Default::default() };
-    eframe::run_native("MK Sigma", options, Box::new(|_cc| Ok(Box::new(App(app)))))
+    eframe::run_native("MK Sigma", options(viewport, backends), Box::new(|_cc| Ok(Box::new(App(app)))))
 }
