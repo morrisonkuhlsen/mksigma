@@ -2,8 +2,7 @@
 
 Pushing a version tag runs [`.github/workflows/release.yml`](../.github/workflows/release.yml).
 It builds the desktop app, the CLI and the MCP server for Linux, Windows and macOS and publishes
-them as a GitHub release, with a checksum for every file. The repository is private: a release
-is visible only to people with access to it.
+them as a GitHub release, with a checksum for every file.
 
 ## Cutting a release
 
