@@ -1,6 +1,8 @@
 //! MK Sigma desktop app.
 //!
 //! `mksigma [data.sav]` opens the file, or the sample dataset without one.
+// A GUI program on Windows: no console window beside the app. Debug builds keep theirs.
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use mksigma_ui_egui::{Services, SigmaApp};
