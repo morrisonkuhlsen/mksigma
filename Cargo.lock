@@ -1747,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "mksigma"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "eframe",
  "egui",
@@ -1757,7 +1757,7 @@ dependencies = [
 
 [[package]]
 name = "mksigma-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mksigma-engine",
  "mksigma-output",
@@ -1766,7 +1766,7 @@ dependencies = [
 
 [[package]]
 name = "mksigma-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mksigma-i18n",
  "thiserror 2.0.21",
@@ -1774,7 +1774,7 @@ dependencies = [
 
 [[package]]
 name = "mksigma-csv"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "encoding_rs",
  "mksigma-core",
@@ -1784,7 +1784,7 @@ dependencies = [
 
 [[package]]
 name = "mksigma-dta"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "encoding_rs",
  "mksigma-core",
@@ -1794,7 +1794,7 @@ dependencies = [
 
 [[package]]
 name = "mksigma-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mksigma-core",
  "mksigma-csv",
@@ -1810,11 +1810,11 @@ dependencies = [
 
 [[package]]
 name = "mksigma-i18n"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "mksigma-learn"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mksigma-engine",
  "mksigma-i18n",
@@ -1823,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "mksigma-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mksigma-engine",
  "mksigma-web",
@@ -1832,14 +1832,14 @@ dependencies = [
 
 [[package]]
 name = "mksigma-output"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mksigma-i18n",
 ]
 
 [[package]]
 name = "mksigma-sav"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "encoding_rs",
  "mksigma-core",
@@ -1849,7 +1849,7 @@ dependencies = [
 
 [[package]]
 name = "mksigma-stats"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mksigma-core",
  "mksigma-i18n",
@@ -1860,7 +1860,7 @@ dependencies = [
 
 [[package]]
 name = "mksigma-syntax"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mksigma-i18n",
  "thiserror 2.0.21",
@@ -1868,7 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "mksigma-ui-egui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "egui",
  "egui_kittest",
@@ -1882,14 +1882,14 @@ dependencies = [
 
 [[package]]
 name = "mksigma-web"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "mksigma-engine",
 ]
 
 [[package]]
 name = "mksigma-xpt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "encoding_rs",
  "mksigma-core",
@@ -4191,7 +4191,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "zbus"
