@@ -244,6 +244,8 @@ impl SigmaApp {
         };
         let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
         self.syntax = text.clone();
+        // Paths in it start from its folder, as data files kept beside it are named.
+        self.session.base_dir = path.parent().map(Path::to_path_buf);
         let is_dashboard = mksigma_engine::check_syntax(&text).is_ok() && text.to_ascii_uppercase().contains("DASHBOARD");
         if !is_dashboard {
             self.status = Some(Status::Info(tr!("status-in-syntax-editor", name = name.as_str())));

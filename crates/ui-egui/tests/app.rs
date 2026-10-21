@@ -1000,3 +1000,24 @@ fn the_filters_pane_starts_as_a_strip_opens_and_collapses_again() {
     assert!(!h.state().filters_open && h.query_by_label("+ Slicer").is_none());
     assert_eq!(h.state().session.slicers().len(), 1, "collapsing changes no filter");
 }
+
+#[test]
+fn a_syntax_file_reads_the_data_beside_it() {
+    // A folder with the data and the syntax that names it by its bare name.
+    let dir = std::env::temp_dir().join(format!("mksigma-beside-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("turma.csv"), "nota\n7\n8\n9\n").unwrap();
+    let sps = dir.join("analises.sps");
+    std::fs::write(&sps, "GET DATA /TYPE=TXT /FILE='turma.csv'.\nDESCRIPTIVES nota.\n").unwrap();
+    let mut h = harness(SigmaApp::default());
+    h.state_mut().open_path(&sps);
+    h.run_steps(2);
+    // Opened, it waits in the editor; Run runs it on the file beside it.
+    assert!(h.state().syntax.contains("GET DATA"));
+    h.get_by_label("Run").click();
+    h.run_steps(3);
+    std::fs::remove_dir_all(&dir).unwrap();
+    let app = h.state();
+    assert_eq!(app.session.dataset.n_cases(), 3, "{:?}", app.status);
+    assert!(shows(&h, "8.00"), "the mean of 7, 8 and 9");
+}

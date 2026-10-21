@@ -66,6 +66,9 @@ pub struct Session {
     pub journal: Vec<String>,
     /// Whether the data or dictionary changed since the file was opened or saved.
     pub modified: bool,
+    /// The folder relative paths in syntax start from: a syntax file's own, once it is
+    /// opened, as `GET DATA /FILE='data.csv'` beside it means. `None`: the working directory.
+    pub base_dir: Option<std::path::PathBuf>,
     /// The dataset as opened; with the applied steps replayed on it, it gives `dataset`.
     base: Dataset,
     steps: Vec<AppliedStep>,
@@ -189,8 +192,16 @@ impl Session {
     }
 
     /// `GET DATA /TYPE=TXT`: reads the file into a new active dataset.
+    /// `path` as syntax wrote it, from the base folder when it is relative.
+    fn resolve(&self, path: &str) -> std::path::PathBuf {
+        match &self.base_dir {
+            Some(base) if std::path::Path::new(path).is_relative() => base.join(path),
+            _ => std::path::PathBuf::from(path),
+        }
+    }
+
     fn get_data(&mut self, spec: &mksigma_syntax::GetData) -> Result<(), EngineError> {
-        let bytes = std::fs::read(&spec.file).map_err(|e| EngineError::File(format!("{}: {e}", spec.file)))?;
+        let bytes = std::fs::read(self.resolve(&spec.file)).map_err(|e| EngineError::File(format!("{}: {e}", spec.file)))?;
         let mut variables = Vec::with_capacity(spec.variables.len());
         for (name, format) in &spec.variables {
             variables.push((name.clone(), format.parse().map_err(EngineError::Invalid)?));
@@ -221,7 +232,7 @@ impl Session {
 
     /// `GET FILE`: reads a system file into a new active dataset.
     fn get_file(&mut self, path: &str) -> Result<(), EngineError> {
-        let bytes = std::fs::read(path).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        let bytes = std::fs::read(self.resolve(path)).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
         let warnings = self.open_sav(&bytes)?;
         let ds = &self.dataset;
         self.notes.push(tr!("note-file-read", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
@@ -233,11 +244,12 @@ impl Session {
     /// `SAVE TRANSLATE /TYPE=STATA`: the active dataset as a Stata file, overwriting one only
     /// when asked. The data itself doesn't change.
     fn save_translate(&mut self, path: &str, replace: bool) -> Result<(), EngineError> {
-        if !replace && std::path::Path::new(path).exists() {
+        let target = self.resolve(path);
+        if !replace && target.exists() {
             return Err(EngineError::File(tr!("err-file-exists", path = path)));
         }
         let written = mksigma_dta::write(&self.dataset, "")?;
-        std::fs::write(path, &written.bytes).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        std::fs::write(&target, &written.bytes).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
         let ds = &self.dataset;
         self.notes.push(tr!("note-file-written", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
         self.notes.extend(written.warnings.iter().map(|w| format!("{path}: {w}")));
@@ -267,7 +279,7 @@ impl Session {
 
     /// `GET SAS DATA`: a SAS transport file as the active dataset.
     fn get_sas(&mut self, path: &str) -> Result<(), EngineError> {
-        let bytes = std::fs::read(path).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        let bytes = std::fs::read(self.resolve(path)).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
         let warnings = self.open_xpt(&bytes)?;
         let ds = &self.dataset;
         self.notes.push(tr!("note-file-read", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
@@ -278,7 +290,7 @@ impl Session {
 
     /// `GET STATA FILE`: a Stata file as the active dataset.
     fn get_stata(&mut self, path: &str) -> Result<(), EngineError> {
-        let bytes = std::fs::read(path).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        let bytes = std::fs::read(self.resolve(path)).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
         let warnings = self.open_dta(&bytes)?;
         let ds = &self.dataset;
         self.notes.push(tr!("note-file-read", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
