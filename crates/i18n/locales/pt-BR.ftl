@@ -133,6 +133,7 @@ search-nothing = Nada encontrado
 status-template-added = Comando acrescentado ao editor de sintaxe: troque os nomes provisórios e clique em Executar.
 dropped-file = arquivo solto
 syntax = Sintaxe
+syntax-hint = Escreva comandos aqui, ou escolha um procedimento em Analisar ou Gráficos: ele os escreve para você.
 run = Executar
 run-tip = Executar todos os comandos do editor
 steps-paste = Colar passos na sintaxe

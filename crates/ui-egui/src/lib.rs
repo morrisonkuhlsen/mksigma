@@ -78,6 +78,9 @@ pub struct Services {
     pub save_language: Option<SaveLanguage>,
 }
 
+/// The syntax the editor starts with, for the sample dataset's variables.
+const SAMPLE_SYNTAX: &str = "FREQUENCIES VARIABLES=age /FORMAT=NOTABLE /STATISTICS.\nDESCRIPTIVES VARIABLES=age income score.";
+
 /// How many recent files the backstage lists.
 const RECENT: usize = 10;
 
@@ -161,7 +164,7 @@ impl SigmaApp {
             session,
             view: View::Data,
             value_labels: false,
-            syntax: "FREQUENCIES VARIABLES=age /FORMAT=NOTABLE /STATISTICS.\nDESCRIPTIVES VARIABLES=age income score.".to_string(),
+            syntax: SAMPLE_SYNTAX.to_string(),
             status,
             file_name: None,
             file_path: None,
@@ -540,6 +543,7 @@ impl SigmaApp {
                 self.status =
                     Some(if warnings.is_empty() { Status::Info(summary) } else { Status::Warning(format!("{summary}. {}", warnings.join("; "))) });
                 self.file_name = Some(name.to_string());
+                self.forget_sample_syntax();
                 self.file_path = None;
                 self.editing = None;
                 self.value_labels_dialog = None;
@@ -568,6 +572,7 @@ impl SigmaApp {
     fn after_run(&mut self, result: Result<(), String>, done: Option<Status>) {
         let notes = self.session.take_notes();
         if let Some(file) = self.session.take_loaded_file() {
+            self.forget_sample_syntax();
             let path = Path::new(&file);
             self.file_name = Some(path.file_name().map_or_else(|| file.clone(), |n| n.to_string_lossy().into_owned()));
             // Save writes a system file back, never over text.
@@ -581,6 +586,14 @@ impl SigmaApp {
             Ok(()) if !notes.is_empty() => Some(Status::Info(notes.join(". "))),
             Ok(()) => done,
         };
+    }
+
+    /// Other data than the sample's: the editor's untouched sample syntax names variables it
+    /// doesn't have, so Run would only fail; it goes. Anything typed stays.
+    fn forget_sample_syntax(&mut self) {
+        if self.syntax == SAMPLE_SYNTAX {
+            self.syntax.clear();
+        }
     }
 
     /// Shows an engine error in the status line.
@@ -628,6 +641,7 @@ impl SigmaApp {
                 self.status =
                     Some(if warnings.is_empty() { Status::Info(summary) } else { Status::Warning(format!("{summary}. {}", warnings.join("; "))) });
                 self.file_name = Some(name.to_string());
+                self.forget_sample_syntax();
                 self.file_path = None;
                 self.editing = None;
                 self.value_labels_dialog = None;
@@ -1083,7 +1097,8 @@ impl SigmaApp {
             if run {
                 self.run_syntax();
             }
-            ui.add(egui::TextEdit::multiline(&mut self.syntax).code_editor().desired_rows(5).desired_width(f32::INFINITY));
+            let hint = egui::RichText::new(tr!("syntax-hint")).color(t.text_dim);
+            ui.add(egui::TextEdit::multiline(&mut self.syntax).code_editor().hint_text(hint).desired_rows(5).desired_width(f32::INFINITY));
             self.steps_panel(ui);
         });
     }

@@ -133,6 +133,7 @@ search-nothing = Nothing found
 status-template-added = Added a command to the syntax editor: replace the placeholder names, then Run.
 dropped-file = dropped file
 syntax = Syntax
+syntax-hint = Type commands here, or pick a procedure in Analyze or Graphs: it writes them for you.
 run = Run
 run-tip = Run every command in the editor
 steps-paste = Paste steps into syntax

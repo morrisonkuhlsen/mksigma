@@ -1021,3 +1021,20 @@ fn a_syntax_file_reads_the_data_beside_it() {
     assert_eq!(app.session.dataset.n_cases(), 3, "{:?}", app.status);
     assert!(shows(&h, "8.00"), "the mean of 7, 8 and 9");
 }
+
+#[test]
+fn opening_other_data_drops_the_sample_syntax_but_keeps_what_was_typed() {
+    let path = temp_path("estudo.csv");
+    std::fs::write(&path, "nota,horas\n7,2\n8,3\n").unwrap();
+    let mut h = harness(SigmaApp::default());
+    assert!(h.state().syntax.contains("age income score"), "the sample's own syntax at first");
+    h.state_mut().open_path(&path);
+    h.run_steps(2);
+    assert_eq!(h.state().syntax, "", "the sample's syntax names variables these data don't have");
+    // What the user typed stays when other data come in.
+    h.state_mut().syntax = "DESCRIPTIVES nota.".into();
+    h.state_mut().open_path(&path);
+    h.run_steps(2);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(h.state().syntax, "DESCRIPTIVES nota.");
+}
