@@ -89,8 +89,7 @@ command line `mksigma-cli` and the MCP server `mksigma-mcp`.
 The builds aren't code-signed yet, so the first launch asks for confirmation:
 
 - **Windows:** unzip and run `mksigma.exe`. If SmartScreen says *Windows protected your PC*, choose
-  **More info › Run anyway**. A console window opens beside the app for now
-  ([#67](https://github.com/morrisonkuhlsen/mksigma/issues/67)); closing it closes the app.
+  **More info › Run anyway**.
 - **macOS:** unpack, lift the download quarantine, and run:
 
   ```sh

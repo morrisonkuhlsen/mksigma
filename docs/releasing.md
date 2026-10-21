@@ -75,5 +75,3 @@ under *Artifacts*.
 - **Installers:** `.msi`, `.dmg`, `.deb`/`.rpm`, AppImage, Flatpak.
 - **More platforms:** Linux aarch64, Windows arm64.
 - **The web app** ([#63](https://github.com/morrisonkuhlsen/mksigma/issues/63)).
-- **A console window opens beside the app on Windows**
-  ([#67](https://github.com/morrisonkuhlsen/mksigma/issues/67)).
