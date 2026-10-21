@@ -64,9 +64,14 @@ pub(crate) fn commands(src: &str) -> Result<Vec<Lexed>, SyntaxError> {
             continue;
         }
         let ends_command = |chars: &std::iter::Peekable<std::str::CharIndices>| chars.clone().peek().is_none_or(|(_, n)| n.is_whitespace());
+        // Bytes, not a `str` slice: the text ahead may be any UTF-8 ("Comentário"), and byte 7
+        // can fall inside a character.
         let comment = start.is_none()
             && (c == '*'
-                || src.get(i..i + 8).is_some_and(|w| w.len() == 8 && w[..7].eq_ignore_ascii_case("COMMENT") && w.ends_with(char::is_whitespace)));
+                || src.get(i..).is_some_and(|rest| {
+                    rest.as_bytes().get(..7).is_some_and(|w| w.eq_ignore_ascii_case(b"COMMENT"))
+                        && rest.get(7..).and_then(|r| r.chars().next()).is_some_and(char::is_whitespace)
+                }));
         if comment {
             while let Some((_, n)) = chars.next() {
                 if n == '.' && ends_command(&chars) {
@@ -254,6 +259,30 @@ mod tests {
             tokens("COMPUTE y = a * b."),
             [Token::Word("COMPUTE".into()), Token::Word("y".into()), Token::Equals, Token::Word("a".into()), Token::Star, Token::Word("b".into())]
         );
+    }
+
+    #[test]
+    fn non_ascii_where_comment_is_checked() {
+        // Issue #19: these panicked slicing inside "á" and "😀".
+        let c = commands("Comentário sobre a análise.\nDESC age.").unwrap();
+        let sources: Vec<&str> = c.iter().map(|c| c.source.as_str()).collect();
+        assert_eq!(sources, ["Comentário sobre a análise.", "DESC age."]);
+        assert!(matches!(commands("abcd😀 x."), Err(SyntaxError::UnexpectedChar('😀'))));
+        assert_eq!(tokens("COMMENTÁRIO x."), [Token::Word("COMMENTÁRIO".into()), Token::Word("x".into())]);
+        // COMMENT before a non-ASCII space is still a comment.
+        assert!(commands("COMMENT\u{a0}x.\n").unwrap().is_empty());
+    }
+
+    #[test]
+    fn any_utf8_lexes_without_panicking() {
+        // Every suffix of a mixed text, so each multibyte character lands at every offset the
+        // lexer looks ahead from; the result may be an error, never a panic.
+        let text = "COMMENTá Comentário * 'olá' é ≥ − α 😀 x.\nCOMMENT😀 y.\nCOMMEN\u{301}T z. ñ";
+        for (i, _) in text.char_indices() {
+            for prefix in ["", " ", "a", "ab", "abc", "abcd", "abcde", "abcdef", "COMMENT", "COMMENT "] {
+                let _ = commands(&format!("{prefix}{}", text.get(i..).unwrap_or_default()));
+            }
+        }
     }
 
     #[test]
