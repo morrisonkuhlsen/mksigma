@@ -71,6 +71,39 @@
 > `LOGISTIC REGRESSION`, `NPAR TESTS` and `DISPLAY DICTIONARY`, with results checked against
 > scipy and statsmodels; see [`docs/roadmap.md`](docs/roadmap.md).
 
+## Downloads
+
+Builds for Linux, Windows and macOS are on the
+[Releases](https://github.com/morrisonkuhlsen/mksigma/releases) page
+([latest](https://github.com/morrisonkuhlsen/mksigma/releases/latest)), visible to people with
+access to this repository while it's private. `<ver>` in the file names is the version, and
+`SHA256SUMS.txt` has a checksum for every file. Each archive holds the desktop app `mksigma`, the
+command line `mksigma-cli` and the MCP server `mksigma-mcp`.
+
+| System                                 | File                                   | Needs               |
+|----------------------------------------|----------------------------------------|---------------------|
+| Windows 10 or 11, x64                  | `mksigma-<ver>-windows-x64.zip`        | nothing else        |
+| macOS 11 or later, Apple silicon/Intel | `mksigma-<ver>-macos-universal.tar.gz` | nothing else        |
+| Linux x86_64                           | `mksigma-<ver>-linux-x86_64.tar.gz`    | glibc 2.39 or later |
+
+The builds aren't code-signed yet, so the first launch asks for confirmation:
+
+- **Windows:** unzip and run `mksigma.exe`. If SmartScreen says *Windows protected your PC*, choose
+  **More info › Run anyway**. A console window opens beside the app for now
+  ([#67](https://github.com/morrisonkuhlsen/mksigma/issues/67)); closing it closes the app.
+- **macOS:** unpack, lift the download quarantine, and run:
+
+  ```sh
+  tar -xzf mksigma-<ver>-macos-universal.tar.gz
+  xattr -dr com.apple.quarantine mksigma-<ver>-macos-universal
+  ./mksigma-<ver>-macos-universal/mksigma
+  ```
+
+- **Linux:** `tar -xzf mksigma-<ver>-linux-x86_64.tar.gz` and run `./mksigma-<ver>-linux-x86_64/mksigma`.
+  The app needs X11 or Wayland and a Vulkan or OpenGL driver.
+
+How releases are made: [`docs/releasing.md`](docs/releasing.md).
+
 ## Quick start
 
 ```sh
