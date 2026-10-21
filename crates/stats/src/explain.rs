@@ -1659,11 +1659,15 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
         .collect();
     // The tolerance test, then the model on the predictors that entered.
     let names_of: Vec<String> = xs.iter().map(|(_, v)| v.display_name().to_string()).collect();
-    let enough = (all_cases.iter().map(|c| c.2).sum::<f64>()) - p as f64 - 1.0 > 0.0 && p > 0;
-    let (entered, left_out) = if enough { crate::regression::entry(&all_cases, p, options.tolerance) } else { ((0..p).collect(), Vec::new()) };
+    // Through the origin there is no constant: sums about 0, one coefficient fewer.
+    let origin = options.origin;
+    let first = usize::from(!origin);
+    let enough = (all_cases.iter().map(|c| c.2).sum::<f64>()) - (p + first) as f64 > 0.0 && p > 0;
+    let (entered, left_out) =
+        if enough { crate::regression::entry(&all_cases, p, options.tolerance, !origin) } else { ((0..p).collect(), Vec::new()) };
     let entry_section =
-        (enough && (p > 1 || !left_out.is_empty())).then(|| entry_steps(&all_cases, &names_of, options.tolerance, weighted(ds), full));
-    let excluded_section = (!left_out.is_empty()).then(|| excluded_steps(&all_cases, &names_of, &entered, &left_out, weighted(ds), full));
+        (enough && (p > 1 || !left_out.is_empty())).then(|| entry_steps(&all_cases, &names_of, options.tolerance, !origin, weighted(ds), full));
+    let excluded_section = (!left_out.is_empty()).then(|| excluded_steps(&all_cases, &names_of, &entered, &left_out, !origin, weighted(ds), full));
     let cases: Vec<(f64, Vec<f64>, f64)> =
         all_cases.iter().map(|(y, x, w)| (*y, entered.iter().map(|&j| x.get(j).copied().unwrap_or(0.0)).collect(), *w)).collect();
     let xs: Vec<_> = entered.iter().filter_map(|&j| xs.get(j).copied()).collect();
@@ -1682,7 +1686,7 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
         },
         equals(vec![var("N"), n(big_n)]),
     ));
-    let df_residual = big_n - p as f64 - 1.0;
+    let df_residual = big_n - (p + first) as f64;
     if p == 0 || df_residual <= 0.0 {
         steps.push(say(&tr!("ex-it-needs-more-cases-than-predictors-plus-one")));
         return Ok(Explanation { title: tr!("ex-title-regression"), sections: vec![(tr!("ex-the-model"), steps)] });
@@ -1697,15 +1701,21 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
         let each: Vec<Math> = values.iter().map(|(x, wi)| weighted_term(w, *wi, val(*x))).collect();
         (equals(vec![bar(name), frac(terms(each, full), n(big_n)), frac(n(total), n(big_n)), n(mean)]), mean)
     };
-    let (y_math, my) = mean_of(&ys, var("y"));
-    let mut means = vec![y_math];
-    let mut mx = Vec::new();
-    for j in 0..p {
-        let (math, m) = mean_of(&column(j), x_name(j));
-        means.push(math);
-        mx.push(m);
-    }
-    steps.extend(several(&tr!("ex-the-means"), means));
+    let (my, mx) = if origin {
+        steps.push(say(&tr!("ex-regression-origin")));
+        (0.0, vec![0.0; p])
+    } else {
+        let (y_math, my) = mean_of(&ys, var("y"));
+        let mut means = vec![y_math];
+        let mut mx = Vec::new();
+        for j in 0..p {
+            let (math, m) = mean_of(&column(j), x_name(j));
+            means.push(math);
+            mx.push(m);
+        }
+        steps.extend(several(&tr!("ex-the-means"), means));
+        (my, mx)
+    };
     let mut sections = vec![(tr!("ex-the-data"), steps)];
     sections.extend(entry_section);
 
@@ -1717,7 +1727,13 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
             .iter()
             .zip(b)
             .map(|((x, wi), (y, _))| {
-                weighted_term(w, *wi, row(vec![paren(row(vec![val(*x), text("−"), n(ma)])), paren(row(vec![val(*y), text("−"), n(mb)]))]))
+                // About the means, or about 0 through the origin: then the plain products.
+                let term = if origin {
+                    row(vec![val(*x), text("·"), val(*y)])
+                } else {
+                    row(vec![paren(row(vec![val(*x), text("−"), n(ma)])), paren(row(vec![val(*y), text("−"), n(mb)]))])
+                };
+                weighted_term(w, *wi, term)
             })
             .collect();
         (equals(vec![name, terms(each, full), n(total)]), total)
@@ -1747,7 +1763,8 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
     }
     let (syy_math, syy) = product(&ys, my, &ys, my, sname("y", "y"));
     maths.push(syy_math);
-    steps.extend(several(&tr!("ex-the-sums-of-the-products-of-the-deviations-from-the-means-fo"), maths));
+    let products = if origin { tr!("ex-regression-origin-products") } else { tr!("ex-the-sums-of-the-products-of-the-deviations-from-the-means-fo") };
+    steps.extend(several(&products, maths));
     sections.push((tr!("ex-sums-of-products"), steps));
 
     // The slopes.
@@ -1792,15 +1809,17 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
     let b: Vec<f64> = (0..p).map(|j| (0..p).map(|k| at(&inverse, j, k) * item(&sxy, k)).sum()).collect();
     let b_name = |j: usize| if p == 1 { var("b") } else { sub(var("b"), text(&(j + 1).to_string())) };
     let constant = my - b.iter().zip(&mx).map(|(b, m)| b * m).sum::<f64>();
-    steps.push(step(
-        &tr!("ex-the-constant-puts-the-line-through-the-means"),
-        equals(vec![
-            var("a"),
-            row(vec![bar(var("y")), text("−"), plus((0..p).map(|j| row(vec![b_name(j), bar(x_name(j))])).collect())]),
-            row(vec![n(my), text("−"), paren(plus((0..p).map(|j| row(vec![val(item(&b, j)), text("·"), val(item(&mx, j))])).collect()))]),
-            approx(constant),
-        ]),
-    ));
+    if !origin {
+        steps.push(step(
+            &tr!("ex-the-constant-puts-the-line-through-the-means"),
+            equals(vec![
+                var("a"),
+                row(vec![bar(var("y")), text("−"), plus((0..p).map(|j| row(vec![b_name(j), bar(x_name(j))])).collect())]),
+                row(vec![n(my), text("−"), paren(plus((0..p).map(|j| row(vec![val(item(&b, j)), text("·"), val(item(&mx, j))])).collect()))]),
+                approx(constant),
+            ]),
+        ));
+    }
     sections.push((tr!("ex-the-coefficients"), steps));
 
     // The analysis of variance and the model summary.
@@ -1825,7 +1844,7 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
             equals(vec![sub(var("SS"), text(&tr!("ex-word-total"))), sname("y", "y"), approx(syy)]),
         ],
     ));
-    let (df_regression, df_total) = (p as f64, big_n - 1.0);
+    let (df_regression, df_total) = (p as f64, big_n - first as f64);
     let (ms_regression, ms_residual) = (ss_regression / df_regression, ss_residual / df_residual);
     steps.extend(several(
         &tr!("ex-their-degrees-of-freedom-predictors-cases-minus-predictors-m"),
@@ -1833,7 +1852,11 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
             equals(vec![sub(var("df"), text(&tr!("ex-word-regression"))), n(df_regression)]),
             equals(vec![
                 sub(var("df"), text(&tr!("ex-word-residual"))),
-                row(vec![n(big_n), text("−"), n(df_regression), text("−"), text("1")]),
+                if origin {
+                    row(vec![n(big_n), text("−"), n(df_regression)])
+                } else {
+                    row(vec![n(big_n), text("−"), n(df_regression), text("−"), text("1")])
+                },
                 n(df_residual),
             ]),
             equals(vec![sub(var("MS"), text(&tr!("ex-word-regression"))), frac(n(ss_regression), n(df_regression)), approx(ms_regression)]),
@@ -1913,19 +1936,24 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
     } else {
         row(vec![sup(bar(var("x")), text("T")), sup(sub(var("S"), text("xx")), text("−1")), bar(var("x"))])
     };
-    steps.extend(several(
-        &tr!("ex-constant-se", a = number_text(constant)),
-        coefficient(
-            var("a"),
-            constant,
-            vec![
-                sqrt(row(vec![sub(var("MS"), text(&tr!("ex-word-residual"))), paren(row(vec![frac(text("1"), var("N")), text("+"), quad_math]))])),
-                sqrt(row(vec![n(ms_residual), text("·"), paren(row(vec![frac(text("1"), n(big_n)), text("+"), n(quad)]))])),
-            ],
-            se_constant,
-            Vec::new(),
-        ),
-    ));
+    if !origin {
+        steps.extend(several(
+            &tr!("ex-constant-se", a = number_text(constant)),
+            coefficient(
+                var("a"),
+                constant,
+                vec![
+                    sqrt(row(vec![
+                        sub(var("MS"), text(&tr!("ex-word-residual"))),
+                        paren(row(vec![frac(text("1"), var("N")), text("+"), quad_math])),
+                    ])),
+                    sqrt(row(vec![n(ms_residual), text("·"), paren(row(vec![frac(text("1"), n(big_n)), text("+"), n(quad)]))])),
+                ],
+                se_constant,
+                Vec::new(),
+            ),
+        ));
+    }
     let sd_y = (syy / df_total).sqrt();
     for j in 0..p {
         let se = (ms_residual * at(&inverse, j, j)).sqrt();
@@ -1943,6 +1971,8 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
             approx(beta),
         ]);
         let name = xs.get(j).map_or(String::new(), |(_, v)| v.display_name().to_string());
+        // Through the origin there is no Beta, as in the table.
+        let beta_math = if origin { Vec::new() } else { vec![beta_math] };
         steps.extend(several(
             &tr!("ex-coefficient-se", name = name.as_str(), b = number_text(item(&b, j))),
             coefficient(
@@ -1953,7 +1983,7 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
                     sqrt(row(vec![n(ms_residual), text("·"), n(at(&inverse, j, j))])),
                 ],
                 se,
-                vec![beta_math],
+                beta_math,
             ),
         ));
     }
@@ -1971,18 +2001,19 @@ fn residual_squares(values: &[(f64, f64)], w: bool, full: bool) -> (Math, f64) {
 
 /// Predictor `j`'s tolerance next to `set`, step by step: the squares its deviations from the
 /// mean leave, and those its residuals on the others leave.
-fn tolerance_math(cases: &[crate::regression::Case], set: &[usize], j: usize, name: &str, w: bool, full: bool) -> (Math, f64) {
+fn tolerance_math(cases: &[crate::regression::Case], set: &[usize], j: usize, name: &str, constant: bool, w: bool, full: bool) -> (Math, f64) {
     let x = |c: &crate::regression::Case| c.1.get(j).copied().unwrap_or(0.0);
     let big_n: f64 = cases.iter().map(|c| c.2).sum();
-    let mean = cases.iter().map(|c| x(c) * c.2).sum::<f64>() / big_n;
+    // About the mean, or about 0 through the origin.
+    let mean = if constant { cases.iter().map(|c| x(c) * c.2).sum::<f64>() / big_n } else { 0.0 };
     let deviations: Vec<(f64, f64)> = cases.iter().map(|c| (x(c) - mean, c.2)).collect();
     let (_, total) = residual_squares(&deviations, w, full);
-    let tol = crate::regression::tolerance(cases, set, j);
+    let tol = crate::regression::tolerance(cases, set, j, constant);
     let name = sub(text("Tol"), text(name));
     if set.is_empty() || total <= 0.0 {
         return (equals(vec![name, n(tol)]), tol);
     }
-    let residuals = crate::regression::residuals(cases, set, x).unwrap_or_default();
+    let residuals = crate::regression::residuals(cases, set, constant, x).unwrap_or_default();
     let (left_math, left) = residual_squares(&residuals, w, full);
     (
         equals(vec![
@@ -1998,11 +2029,11 @@ fn tolerance_math(cases: &[crate::regression::Case], set: &[usize], j: usize, na
 
 /// `/METHOD=ENTER` with the tolerance test: each predictor in turn, its tolerance next to those
 /// already in, and whether it enters.
-fn entry_steps(cases: &[crate::regression::Case], names: &[String], criterion: f64, w: bool, full: bool) -> (String, Vec<Step>) {
+fn entry_steps(cases: &[crate::regression::Case], names: &[String], criterion: f64, constant: bool, w: bool, full: bool) -> (String, Vec<Step>) {
     let mut steps = vec![say(&tr!("ex-regression-entry", tolerance = number_text(criterion)))];
     let mut entered = Vec::new();
     for (j, name) in names.iter().enumerate() {
-        let (math, tol) = tolerance_math(cases, &entered, j, name, w, full);
+        let (math, tol) = tolerance_math(cases, &entered, j, name, constant, w, full);
         let verdict =
             if tol >= criterion { tr!("ex-regression-enters", name = name.as_str()) } else { tr!("ex-regression-left-out", name = name.as_str()) };
         steps.push(step(&verdict, math));
@@ -2020,19 +2051,20 @@ fn excluded_steps(
     names: &[String],
     entered: &[usize],
     left_out: &[usize],
+    constant: bool,
     w: bool,
     full: bool,
 ) -> (String, Vec<Step>) {
     let mut steps = Vec::new();
     for &j in left_out {
         let name = names.get(j).cloned().unwrap_or_default();
-        let e = crate::regression::excluded(cases, entered, j);
-        let (tol_math, _) = tolerance_math(cases, entered, j, &name, w, full);
+        let e = crate::regression::excluded(cases, entered, j, constant);
+        let (tol_math, _) = tolerance_math(cases, entered, j, &name, constant, w, full);
         let mut maths = vec![tol_math];
-        let ey = crate::regression::residuals(cases, entered, |c| c.0);
-        let ex = crate::regression::residuals(cases, entered, |c| c.1.get(j).copied().unwrap_or(0.0));
-        match (e.partial, e.beta_in, e.t, ey, ex) {
-            (Some(r), Some(beta), Some(t), Some(ey), Some(ex)) => {
+        let ey = crate::regression::residuals(cases, entered, constant, |c| c.0);
+        let ex = crate::regression::residuals(cases, entered, constant, |c| c.1.get(j).copied().unwrap_or(0.0));
+        match (e.partial, e.t, ey, ex) {
+            (Some(r), Some(t), Some(ey), Some(ex)) => {
                 let (syy, sxx, sxy) =
                     ey.iter().zip(&ex).fold((0.0, 0.0, 0.0), |(a, b, c), ((y, wi), (x, _))| (a + wi * y * y, b + wi * x * x, c + wi * x * y));
                 let products: Vec<Math> =
@@ -2048,11 +2080,14 @@ fn excluded_steps(
                     frac(n(sxy), sqrt(row(vec![n(syy), text("·"), n(sxx)]))),
                     approx(r),
                 ]));
-                maths.push(equals(vec![
-                    text(&tr!("o-beta-in")),
-                    row(vec![frac(n(sxy), n(sxx)), text("·"), frac(sub(var("s"), text(&name)), sub(var("s"), var("y")))]),
-                    approx(beta),
-                ]));
+                // Through the origin there is no Beta In.
+                if let Some(beta) = e.beta_in {
+                    maths.push(equals(vec![
+                        text(&tr!("o-beta-in")),
+                        row(vec![frac(n(sxy), n(sxx)), text("·"), frac(sub(var("s"), text(&name)), sub(var("s"), var("y")))]),
+                        approx(beta),
+                    ]));
+                }
                 maths.push(equals(vec![
                     var("t"),
                     row(vec![n(r), text("·"), sqrt(frac(n(e.df), row(vec![text("1"), text("−"), sup(paren(n(r)), text("2"))])))]),
@@ -3546,6 +3581,7 @@ mod tests {
                 predictors: predictors.iter().map(|p| p.to_string()).collect(),
                 ci: Some(0.95),
                 tolerance: crate::regression::TOLERANCE,
+                origin: false,
             };
             let tex = latex(&regression(&ds, &options, false).unwrap());
             let items = crate::regression(&ds, &options).unwrap();
@@ -3574,10 +3610,46 @@ mod tests {
         for (y, x) in [(2.0, 1.0), (4.0, 2.0), (5.0, 3.0), (4.0, 4.0), (5.0, 5.0)] {
             ds.push_case(vec![Value::Num(y), Value::Num(x)]).unwrap();
         }
-        let options =
-            crate::RegressionOptions { dependent: "y".into(), predictors: vec!["x".into()], ci: None, tolerance: crate::regression::TOLERANCE };
+        let options = crate::RegressionOptions {
+            dependent: "y".into(),
+            predictors: vec!["x".into()],
+            ci: None,
+            tolerance: crate::regression::TOLERANCE,
+            origin: false,
+        };
         let tex = latex(&regression(&ds, &options, false).unwrap());
         assert!(tex.contains("\\frac{6}{10} = 0.6") && tex.contains("= 2.2"), "{tex}");
+    }
+
+    #[test]
+    fn a_regression_through_the_origin_by_hand_agrees_with_the_tables() {
+        let ds = sample();
+        let options = crate::RegressionOptions {
+            dependent: "score".into(),
+            predictors: vec!["age".into(), "income".into()],
+            ci: Some(0.95),
+            origin: true,
+            ..crate::RegressionOptions::default()
+        };
+        let tex = latex(&regression(&ds, &options, false).unwrap());
+        let items = crate::regression(&ds, &options).unwrap();
+        let coefficients = tables(&items).into_iter().find(|t| t.title == "Coefficients").unwrap();
+        assert_eq!(coefficients.rows.len(), 2, "no constant");
+        for t in tables(&items) {
+            for (_, cells) in &t.rows {
+                for cell in cells {
+                    let x = match cell {
+                        Cell::Num { value, .. } => *value,
+                        Cell::Int(k) => *k as f64,
+                        _ => continue,
+                    };
+                    let shown = number(x, 3);
+                    assert!(tex.contains(&format!("\\approx {shown}")) || tex.contains(&format!("= {shown}")), "{x} of {} in {tex}", t.title);
+                }
+            }
+        }
+        // About 0: the products of the values themselves, 23 · 61 first.
+        assert!(tex.contains("23 \\cdot 61"), "{tex}");
     }
 
     #[test]
@@ -3590,7 +3662,13 @@ mod tests {
         for (y, a, b) in [(3.0, 1.0, 1.2), (5.0, 2.0, 1.9), (4.0, 3.0, 3.3), (8.0, 4.0, 3.8), (9.0, 5.0, 5.1), (12.0, 6.0, 6.4)] {
             ds.push_case(vec![Value::Num(y), Value::Num(a), Value::Num(b)]).unwrap();
         }
-        let options = crate::RegressionOptions { dependent: "y".into(), predictors: vec!["x1".into(), "x2".into()], ci: Some(0.95), tolerance: 0.5 };
+        let options = crate::RegressionOptions {
+            dependent: "y".into(),
+            predictors: vec!["x1".into(), "x2".into()],
+            ci: Some(0.95),
+            tolerance: 0.5,
+            origin: false,
+        };
         let e = regression(&ds, &options, false).unwrap();
         let tex = latex(&e);
         let items = crate::regression(&ds, &options).unwrap();

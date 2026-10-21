@@ -570,6 +570,7 @@ pub(crate) fn regression(rest: &[Token]) -> Result<Command, SyntaxError> {
     let bad = |expected| SyntaxError::Expected { command: CMD, expected };
     let (mut dependent, mut predictors, mut ci) = (None, None, None);
     let mut tolerance = 0.0001;
+    let mut origin = false;
     for (name, tokens) in subcommands(rest) {
         let name = name.ok_or(bad("/DEPENDENT= and /METHOD=ENTER"))?;
         if is_keyword(name, "DEPENDENT") {
@@ -629,13 +630,17 @@ pub(crate) fn regression(rest: &[Token]) -> Result<Command, SyntaxError> {
             }
         } else if is_keyword(name, "NOORIGIN") {
             // The default: a constant in the model.
+            origin = false;
+        } else if is_keyword(name, "ORIGIN") {
+            // Through the origin: no constant.
+            origin = true;
         } else {
             return Err(unsupported(CMD, &format!("/{name}")));
         }
     }
     let dependent = dependent.ok_or(bad("/DEPENDENT=variable"))?;
     let predictors = predictors.ok_or(bad("/METHOD=ENTER predictors"))?;
-    Ok(Command::Regression { dependent, predictors, ci, tolerance })
+    Ok(Command::Regression { dependent, predictors, ci, tolerance, origin })
 }
 
 #[cfg(test)]
@@ -715,8 +720,19 @@ mod tests {
             one(
                 "REGRESSION /MISSING LISTWISE /STATISTICS COEFF OUTS CI(99) R ANOVA /CRITERIA=PIN(.05) POUT(.10) TOLERANCE(.05) /NOORIGIN /DEPENDENT renda /METHOD=ENTER idade escolaridade."
             ),
-            Command::Regression { dependent: "renda".into(), predictors: names(&["idade", "escolaridade"]), ci: Some(0.99), tolerance: 0.05 }
+            Command::Regression {
+                dependent: "renda".into(),
+                predictors: names(&["idade", "escolaridade"]),
+                ci: Some(0.99),
+                tolerance: 0.05,
+                origin: false
+            }
         );
+        assert!(matches!(
+            one("REGRESSION /ORIGIN /DEPENDENT y /METHOD=ENTER x."),
+            Command::Regression { origin: true, tolerance, .. } if tolerance == 0.0001
+        ));
+        assert!(parse("REGRESSION /CRITERIA=TOLERANCE(1.5) /DEPENDENT y /METHOD=ENTER x.").is_err());
         assert!(parse("REGRESSION /DEPENDENT y /METHOD=STEPWISE x.").is_err());
         assert!(parse("REGRESSION /DEPENDENT y /METHOD=ENTER a /METHOD=ENTER b.").is_err());
         assert!(parse("REGRESSION /METHOD=ENTER a.").is_err());

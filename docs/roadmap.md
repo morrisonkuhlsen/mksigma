@@ -223,7 +223,8 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   interval. As in SPSS, `/METHOD=ENTER` applies the tolerance test (`/CRITERIA=TOLERANCE`,
   .0001 by default): a predictor that is (almost) a combination of those before it is left
   out and listed in Excluded Variables (Beta In, t, partial correlation, tolerance), each
-  figure with its Σ.
+  figure with its Σ. `/ORIGIN` fits without a constant: sums of squares about 0, R² of the
+  variability about 0, one more residual degree of freedom; its Σ shows the products about 0.
 - **LOGISTIC REGRESSION — done:** the coding of the dependent, the constant-only model (its
   probability, log odds and −2LL), every Newton–Raphson iteration (the first with the gradient
   and the information written out case by case; then g, H, H⁻¹, the step and the new
@@ -285,10 +286,9 @@ gretl). One vertical slice at a time; **the order of the modules is the user's t
     data themselves in a double (10¹² plus tenths). REGRESSION now solves by a Householder QR
     decomposition instead of the normal equations: Norris, Pontius and Longley 11.9–12.8, the
     Wampler polynomials 9.0–12.9 (5.7 and 7.7 on the noisy Wampler5 and 4, from 4.5), and
-    Filip's tenth-degree polynomial, refused before, to 7.6. Its Σ still shows the normal
-    equations, and says the table takes the QR route. **Next:** the regressions through the
-    origin (NoInt1, NoInt2) with `/ORIGIN`; the nonlinear datasets once there is a nonlinear
-    regression.
+    Filip's tenth-degree polynomial, refused before, to 7.6; through the origin (`/ORIGIN`),
+    NoInt1 and NoInt2 to 14.5–15. Its Σ still shows the normal equations, and says the table
+    takes the QR route. **Next:** the nonlinear datasets once there is a nonlinear regression.
   - *Stata files — done:* `GET STATA FILE='x.dta'` (`crates/dta`, from StataCorp's published
     description) reads formats 113–115 and 117–119 (Stata 8 and later) in either byte order:
     numeric types, `str#` and `strL` (crosslinked too), value labels, variable and dataset

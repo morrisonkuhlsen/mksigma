@@ -557,6 +557,7 @@ o-2-tailed = bilateral
 o-regression-needs-cases = REGRESSION precisa de mais casos válidos ({ $n }) do que preditores mais um ({ $needed })
 o-regression-collinear = REGRESSION: nenhum preditor passa no teste de tolerância (cada um é constante, ou combinação dos anteriores); sem modelo
 o-regression-note = Preditores: (Constante), { $predictors }. Variável dependente: { $dependent }
+o-regression-note-origin = Preditores: { $predictors }, pela origem (sem constante). Variável dependente: { $dependent }. O R quadrado é a parte da variabilidade em torno de 0, não da média, que a regressão explica.
 o-excluded-variables = Variáveis excluídas
 o-beta-in = Beta de entrada
 o-partial-correlation = Correlação parcial
@@ -797,6 +798,8 @@ ex-constant-se = A constante, a = { $a }: o erro padrão dela, a partir do quadr
 ex-coefficient-se = { $name }, b = { $b }: o erro padrão pela diagonal da inversa, t, significância e o beta em desvios padrão:
 ex-examine-interval = O intervalo de 95% da média, com o t que deixa 2,5% em cada cauda a { $df } graus de liberdade:
 ex-regression-by-qr = À mão, as inclinações resolvem as equações normais, o caminho dos livros. A tabela resolve os mesmos mínimos quadrados por uma decomposição QR, que guarda mais dígitos quando os preditores são quase colineares; nas casas decimais mostradas aqui, os dois concordam.
+ex-regression-origin = Pela origem (/ORIGIN): sem constante, então as somas de quadrados e de produtos são em torno de 0, não das médias.
+ex-regression-origin-products = As somas dos produtos dos próprios valores (em torno de 0) para cada par de variáveis:
 ex-regression-which-enter = Quais preditores entram
 ex-regression-entry = Com /METHOD=ENTER cada preditor entra por sua vez, se sua tolerância (a parte da sua variância que os preditores já presentes não explicam) for { $tolerance } ou mais:
 ex-regression-enters = { $name } entra:

@@ -843,9 +843,14 @@ impl Session {
                     GraphSpec::Scatter { .. } => return Err(EngineError::Invalid(tr!("err-no-explanation"))),
                 }
             }
-            Command::Regression { dependent, predictors, ci, tolerance } => {
-                let options =
-                    mksigma_stats::RegressionOptions { dependent: dependent.clone(), predictors: predictors.clone(), ci: *ci, tolerance: *tolerance };
+            Command::Regression { dependent, predictors, ci, tolerance, origin } => {
+                let options = mksigma_stats::RegressionOptions {
+                    dependent: dependent.clone(),
+                    predictors: predictors.clone(),
+                    ci: *ci,
+                    tolerance: *tolerance,
+                    origin: *origin,
+                };
                 explain::regression(&ds, &options, full)?
             }
             Command::Logistic { dependent, covariates, ci, iterations, cut } => {
@@ -1267,9 +1272,14 @@ fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
             };
             items.extend(mksigma_stats::logistic(ds, &options)?);
         }
-        Command::Regression { dependent, predictors, ci, tolerance } => {
-            let options =
-                mksigma_stats::RegressionOptions { dependent: dependent.clone(), predictors: predictors.clone(), ci: *ci, tolerance: *tolerance };
+        Command::Regression { dependent, predictors, ci, tolerance, origin } => {
+            let options = mksigma_stats::RegressionOptions {
+                dependent: dependent.clone(),
+                predictors: predictors.clone(),
+                ci: *ci,
+                tolerance: *tolerance,
+                origin: *origin,
+            };
             items.extend(mksigma_stats::regression(ds, &options)?);
         }
         Command::Oneway { .. } => {

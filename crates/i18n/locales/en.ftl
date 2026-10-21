@@ -557,6 +557,7 @@ o-2-tailed = 2-tailed
 o-regression-needs-cases = REGRESSION needs more valid cases ({ $n }) than predictors plus one ({ $needed })
 o-regression-collinear = REGRESSION: no predictor passes the tolerance test (each is constant, or a combination of those before it); no model
 o-regression-note = Predictors: (Constant), { $predictors }. Dependent Variable: { $dependent }
+o-regression-note-origin = Predictors: { $predictors }, through the origin (no constant). Dependent Variable: { $dependent }. R Square is the share of the variability about 0, not about the mean, that the regression explains.
 o-excluded-variables = Excluded Variables
 o-beta-in = Beta In
 o-partial-correlation = Partial Correlation
@@ -797,6 +798,8 @@ ex-constant-se = The constant, a = { $a }: its standard error, from the residual
 ex-coefficient-se = { $name }, b = { $b }: its standard error from the inverse's diagonal, t, significance, and the beta in standard deviations:
 ex-examine-interval = The 95% interval of the mean, with the t that leaves 2.5% in each tail at { $df } degrees of freedom:
 ex-regression-by-qr = By hand, the slopes solve the normal equations, the textbook route. The table solves the same least squares by a QR decomposition, which keeps more digits when predictors are nearly collinear; to the decimals shown here, the two agree.
+ex-regression-origin = Through the origin (/ORIGIN): no constant, so the sums of squares and products are about 0, not about the means.
+ex-regression-origin-products = The sums of the products of the values themselves (about 0) for each pair of variables:
 ex-regression-which-enter = Which predictors enter
 ex-regression-entry = With /METHOD=ENTER each predictor enters in turn, if its tolerance (the share of its variance the predictors already in leave unexplained) is { $tolerance } or more:
 ex-regression-enters = { $name } enters:

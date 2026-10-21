@@ -5,9 +5,9 @@
 //! number of correct significant digits, its LRE (log relative error, −log₁₀ |x − c| / |c|).
 //!
 //! Univariate summary statistics go through DESCRIPTIVES, the analyses of variance through
-//! ONEWAY, the linear regressions through REGRESSION. Not covered yet: the autocorrelation
-//! (not a statistic MK Sigma reports), the regressions through the origin (NoInt1, NoInt2:
-//! REGRESSION has no /ORIGIN) and the nonlinear regressions.
+//! ONEWAY, the linear regressions through REGRESSION (NoInt1 and NoInt2 with /ORIGIN). Not
+//! covered yet: the autocorrelation (not a statistic MK Sigma reports) and the nonlinear
+//! regressions.
 // The certified values as NIST publishes them, even where they carry more digits than a double.
 #![allow(clippy::excessive_precision)]
 
@@ -49,6 +49,8 @@ const DIGITS_WAMPLER2: f64 = 12.0;
 const DIGITS_WAMPLER3: f64 = 8.0;
 const DIGITS_WAMPLER4: f64 = 7.0;
 const DIGITS_WAMPLER5: f64 = 5.0;
+const DIGITS_NOINT1: f64 = 14.0;
+const DIGITS_NOINT2: f64 = 14.0;
 
 /// Correct significant digits of `x` against `certified` (absolute digits when it is 0), at
 /// most 15.
@@ -133,13 +135,13 @@ struct Certified<'a> {
 }
 
 /// `y` on the predictors `xs`, through REGRESSION.
-fn linear(name: &str, y: &[f64], xs: &[Vec<f64>], c: &Certified, digits: f64) {
+fn linear(name: &str, y: &[f64], xs: &[Vec<f64>], c: &Certified, origin: bool, digits: f64) {
     let names: Vec<String> = (1..=xs.len()).map(|k| format!("x{k}")).collect();
     let mut columns: Vec<(&str, &[f64])> = vec![("y", y)];
     columns.extend(names.iter().map(String::as_str).zip(xs.iter().map(Vec::as_slice)));
     let ds = dataset(&columns);
     // Every predictor enters, as NIST certifies the full model: the lowest tolerance there is.
-    let options = RegressionOptions { dependent: "y".into(), predictors: names.clone(), ci: None, tolerance: f64::MIN_POSITIVE };
+    let options = RegressionOptions { dependent: "y".into(), predictors: names.clone(), ci: None, tolerance: f64::MIN_POSITIVE, origin };
     let items = mksigma_stats::regression(&ds, &options).unwrap();
     let t = tables(&items);
     if t.is_empty() {
@@ -150,8 +152,10 @@ fn linear(name: &str, y: &[f64], xs: &[Vec<f64>], c: &Certified, digits: f64) {
     let (summary, anova, coefficients) = (&t[0].rows[0].1, &t[1].rows, &t[2].rows);
     for (k, (b, se)) in c.b.iter().enumerate() {
         let cells = &coefficients[k].1;
-        assert_digits(&format!("{name}: B{k}"), value(&cells[1]), *b, digits);
-        assert_digits(&format!("{name}: SE of B{k}"), value(&cells[2]), *se, digits);
+        // NIST counts from B0, the constant; through the origin the first is B1.
+        let number = k + usize::from(origin);
+        assert_digits(&format!("{name}: B{number}"), value(&cells[1]), *b, digits);
+        assert_digits(&format!("{name}: SE of B{number}"), value(&cells[2]), *se, digits);
     }
     assert_digits(&format!("{name}: R²"), value(&summary[1]), c.r2, digits);
     assert_digits(&format!("{name}: residual SD"), value(&summary[3]), c.sd, digits);
@@ -627,6 +631,21 @@ const WAMPLER5: [(f64, f64); 21] = [
     (10958421.0, 20.0),
 ];
 
+const NOINT1: [(f64, f64); 11] = [
+    (130.0, 60.0),
+    (131.0, 61.0),
+    (132.0, 62.0),
+    (133.0, 63.0),
+    (134.0, 64.0),
+    (135.0, 65.0),
+    (136.0, 66.0),
+    (137.0, 67.0),
+    (138.0, 68.0),
+    (139.0, 69.0),
+    (140.0, 70.0),
+];
+const NOINT2: [(f64, f64); 3] = [(3.0, 4.0), (4.0, 5.0), (4.0, 6.0)];
+
 #[test]
 fn univariate_summary_statistics() {
     univariate("PiDigits", &pi_digits(), 4.53480000000000, 2.86733906028871, DIGITS_PIDIGITS);
@@ -744,6 +763,28 @@ fn analyses_of_variance() {
 }
 
 #[test]
+fn regressions_through_the_origin() {
+    let (y, x): (Vec<f64>, Vec<f64>) = NOINT1.iter().copied().unzip();
+    let c = Certified {
+        b: &[(2.07438016528926, 0.165289256198347e-01)],
+        sd: 3.56753034006338,
+        r2: 0.999365492298663,
+        regression: [200457.727272727, 200457.727272727, 15750.2500000000],
+        residual: [127.272727272727, 12.7272727272727],
+    };
+    linear("NoInt1", &y, &[x], &c, true, DIGITS_NOINT1);
+    let (y, x): (Vec<f64>, Vec<f64>) = NOINT2.iter().copied().unzip();
+    let c = Certified {
+        b: &[(0.727272727272727, 0.420827318078432e-01)],
+        sd: 0.369274472937998,
+        r2: 0.993348115299335,
+        regression: [40.7272727272727, 40.7272727272727, 298.6666666666667],
+        residual: [0.272727272727273, 0.136363636363636],
+    };
+    linear("NoInt2", &y, &[x], &c, true, DIGITS_NOINT2);
+}
+
+#[test]
 fn linear_regressions() {
     let (y, x): (Vec<f64>, Vec<f64>) = NORRIS.iter().copied().unzip();
     let xs = powers(&x, 1);
@@ -754,7 +795,7 @@ fn linear_regressions() {
         regression: [4255954.13232369, 4255954.13232369, 5436385.54079785],
         residual: [26.6173985294224, 0.782864662630069],
     };
-    linear("Norris", &y, &xs, &c, DIGITS_NORRIS);
+    linear("Norris", &y, &xs, &c, false, DIGITS_NORRIS);
     let (y, x): (Vec<f64>, Vec<f64>) = PONTIUS.iter().copied().unzip();
     let xs = powers(&x, 2);
     let c = Certified {
@@ -768,7 +809,7 @@ fn linear_regressions() {
         regression: [15.6040343244198, 7.80201716220991, 185330865.995752],
         residual: [0.155761768796992e-05, 0.420977753505385e-07],
     };
-    linear("Pontius", &y, &xs, &c, DIGITS_PONTIUS);
+    linear("Pontius", &y, &xs, &c, false, DIGITS_PONTIUS);
     let (y, x): (Vec<f64>, Vec<f64>) = FILIP.iter().copied().unzip();
     let xs = powers(&x, 10);
     let c = Certified {
@@ -790,7 +831,7 @@ fn linear_regressions() {
         regression: [0.242391619837339, 0.242391619837339e-01, 2162.43954511489],
         residual: [0.795851382172941e-03, 0.112091743968020e-04],
     };
-    linear("Filip", &y, &xs, &c, DIGITS_FILIP);
+    linear("Filip", &y, &xs, &c, false, DIGITS_FILIP);
     let y: Vec<f64> = LONGLEY.iter().map(|r| r[0]).collect();
     let xs: Vec<Vec<f64>> = (1..7).map(|k| LONGLEY.iter().map(|r| r[k]).collect()).collect();
     let c = Certified {
@@ -808,7 +849,7 @@ fn linear_regressions() {
         regression: [184172401.944494, 30695400.3240823, 330.285339234588],
         residual: [836424.055505915, 92936.0061673238],
     };
-    linear("Longley", &y, &xs, &c, DIGITS_LONGLEY);
+    linear("Longley", &y, &xs, &c, false, DIGITS_LONGLEY);
     let (y, x): (Vec<f64>, Vec<f64>) = WAMPLER1.iter().copied().unzip();
     let xs = powers(&x, 5);
     let c = Certified {
@@ -825,7 +866,7 @@ fn linear_regressions() {
         regression: [18814317208116.7, 3762863441623.33, f64::INFINITY],
         residual: [0.000000000000000, 0.000000000000000],
     };
-    linear("Wampler1", &y, &xs, &c, DIGITS_WAMPLER1);
+    linear("Wampler1", &y, &xs, &c, false, DIGITS_WAMPLER1);
     let (y, x): (Vec<f64>, Vec<f64>) = WAMPLER2.iter().copied().unzip();
     let xs = powers(&x, 5);
     let c = Certified {
@@ -842,7 +883,7 @@ fn linear_regressions() {
         regression: [6602.91858365167, 1320.58371673033, f64::INFINITY],
         residual: [0.000000000000000, 0.000000000000000],
     };
-    linear("Wampler2", &y, &xs, &c, DIGITS_WAMPLER2);
+    linear("Wampler2", &y, &xs, &c, false, DIGITS_WAMPLER2);
     let (y, x): (Vec<f64>, Vec<f64>) = WAMPLER3.iter().copied().unzip();
     let xs = powers(&x, 5);
     let c = Certified {
@@ -859,7 +900,7 @@ fn linear_regressions() {
         regression: [18814317208116.7, 3762863441623.33, 675524.458240122],
         residual: [83554268.0000000, 5570284.53333333],
     };
-    linear("Wampler3", &y, &xs, &c, DIGITS_WAMPLER3);
+    linear("Wampler3", &y, &xs, &c, false, DIGITS_WAMPLER3);
     let (y, x): (Vec<f64>, Vec<f64>) = WAMPLER4.iter().copied().unzip();
     let xs = powers(&x, 5);
     let c = Certified {
@@ -876,7 +917,7 @@ fn linear_regressions() {
         regression: [18814317208116.7, 3762863441623.33, 67.5524458240122],
         residual: [835542680000.000, 55702845333.3333],
     };
-    linear("Wampler4", &y, &xs, &c, DIGITS_WAMPLER4);
+    linear("Wampler4", &y, &xs, &c, false, DIGITS_WAMPLER4);
     let (y, x): (Vec<f64>, Vec<f64>) = WAMPLER5.iter().copied().unzip();
     let xs = powers(&x, 5);
     let c = Certified {
@@ -893,7 +934,7 @@ fn linear_regressions() {
         regression: [18814317208116.7, 3762863441623.33, 6.7552445824012241e-03],
         residual: [0.835542680000000e+16, 557028453333333.],
     };
-    linear("Wampler5", &y, &xs, &c, DIGITS_WAMPLER5);
+    linear("Wampler5", &y, &xs, &c, false, DIGITS_WAMPLER5);
 }
 
 /// PiDigits, 100 digits a line.
