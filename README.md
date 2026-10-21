@@ -75,10 +75,9 @@
 
 Builds for Linux, Windows and macOS are on the
 [Releases](https://github.com/morrisonkuhlsen/mksigma/releases) page
-([latest](https://github.com/morrisonkuhlsen/mksigma/releases/latest)), visible to people with
-access to this repository while it's private. `<ver>` in the file names is the version, and
-`SHA256SUMS.txt` has a checksum for every file. Each archive holds the desktop app `mksigma`, the
-command line `mksigma-cli` and the MCP server `mksigma-mcp`.
+([latest](https://github.com/morrisonkuhlsen/mksigma/releases/latest)). `<ver>` in the file names
+is the version, and `SHA256SUMS.txt` has a checksum for every file. Each archive holds the desktop
+app `mksigma`, the command line `mksigma-cli` and the MCP server `mksigma-mcp`.
 
 | System                                 | File                                   | Needs               |
 |----------------------------------------|----------------------------------------|---------------------|
