@@ -117,7 +117,9 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
         }
         match anova(&groups) {
             Some((parts, df1, df2)) => {
-                let sig = dist::f_sig(parts.f, df1, df2);
+                // No variance within the groups: F can't be computed, and has no significance.
+                let f = Some(parts.f).filter(|f| f.is_finite());
+                let sig = f.and_then(|f| dist::f_sig(f, df1, df2));
                 anova_rows.push((
                     label.clone(),
                     vec![
@@ -125,7 +127,7 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
                         num(Some(parts.between), 3),
                         n_cell(df1),
                         num(Some(parts.between / df1), 3),
-                        num(Some(parts.f), 3),
+                        num(f, 3),
                         num(sig, 3),
                     ],
                 ));
@@ -232,6 +234,21 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
 mod tests {
     use super::*;
     use mksigma_core::Variable;
+
+    #[test]
+    fn no_variance_within_groups_gives_no_f_and_no_sig() {
+        // Every group constant (#28): F would be infinite, and Sig shown beside a blank F.
+        let mut ds = Dataset::new();
+        ds.add_variable(Variable::numeric("y")).unwrap();
+        ds.add_variable(Variable::numeric("g")).unwrap();
+        for (g, y) in [(1.0, 2.0), (1.0, 2.0), (2.0, 5.0), (2.0, 5.0)] {
+            ds.push_case(vec![Value::Num(y), Value::Num(g)]).unwrap();
+        }
+        let items = oneway(&ds, &Options { dependents: vec!["y".into()], factor: "g".into(), ..Options::default() }).unwrap();
+        let anova = items.iter().find_map(|i| if let Item::Table(t) = i { Some(t) } else { None }).unwrap();
+        assert_eq!(anova.rows[0].1[1], Cell::Num { value: 9.0, decimals: 3 }, "between groups still shown");
+        assert_eq!((&anova.rows[0].1[4], &anova.rows[0].1[5]), (&Cell::Empty, &Cell::Empty));
+    }
 
     #[test]
     fn anova_by_hand() {

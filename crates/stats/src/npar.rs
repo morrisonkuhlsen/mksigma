@@ -91,11 +91,12 @@ fn mann_whitney(ds: &Dataset, variables: &[String], group: &str, first: f64, sec
         // the rank sum of the group it belongs to.
         let u1 = r1 - n1 * (n1 + 1.0) / 2.0;
         let u2 = n1 * n2 - u1;
-        let (u, w) = if u1 <= u2 { (u1, r1) } else { (u2, r2) };
+        // An empty group has no U to report.
+        let (u, w) = if n1 > 0.0 && n2 > 0.0 { if u1 <= u2 { (Some(u1), Some(r1)) } else { (Some(u2), Some(r2)) } } else { (None, None) };
         let variance = n1 * n2 / (n * (n - 1.0)) * ((n.powi(3) - n) / 12.0 - ties / 12.0);
-        let z = Some((u - n1 * n2 / 2.0) / variance.sqrt()).filter(|z| z.is_finite());
+        let z = u.map(|u| (u - n1 * n2 / 2.0) / variance.sqrt()).filter(|z| z.is_finite());
         columns.push(var.display_name().to_string());
-        for (row, cell) in stats.iter_mut().zip([num(Some(u), 3), num(Some(w), 3), num(z, 3), num(z.and_then(two_sided), 3)]) {
+        for (row, cell) in stats.iter_mut().zip([num(u, 3), num(w, 3), num(z, 3), num(z.and_then(two_sided), 3)]) {
             row.push(cell);
         }
     }
@@ -230,6 +231,19 @@ mod tests {
             Some(Cell::Int(n)) => *n as f64,
             other => panic!("{row}: {other:?}"),
         }
+    }
+
+    #[test]
+    fn mann_whitney_with_an_empty_group_reports_no_u() {
+        let mut ds = Dataset::new();
+        ds.add_variable(Variable::numeric("x")).unwrap();
+        ds.add_variable(Variable::numeric("g")).unwrap();
+        for x in [1.0, 2.0, 3.0] {
+            ds.push_case(vec![Value::Num(x), Value::Num(1.0)]).unwrap();
+        }
+        let items = npar_tests(&ds, &[NparTest::MannWhitney { variables: vec!["x".into()], group: "g".into(), first: 1.0, second: 2.0 }]).unwrap();
+        let Some(Item::Table(t)) = items.get(1) else { panic!() };
+        assert!(t.rows.iter().all(|(_, cells)| cells[0] == Cell::Empty), "U, W, Z and Sig blank, not 0 (#28): {:?}", t.rows);
     }
 
     #[test]
