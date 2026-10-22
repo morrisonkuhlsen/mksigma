@@ -86,34 +86,51 @@ fn run(args: &Args) -> Result<(), String> {
     print!("{}", session.output.to_text());
     let name = args.input.as_deref().map(|i| std::path::Path::new(i).file_name().map_or_else(|| i.to_string(), |n| n.to_string_lossy().into_owned()));
     let title = name.map_or_else(|| "MK Sigma Output".to_string(), |n| format!("{n} — Output"));
-    if let Some(path) = &args.html {
-        std::fs::write(path, session.output.to_html(&title)).map_err(|e| format!("{path}: {e}"))?;
-    }
-    if let Some(path) = &args.pdf {
-        std::fs::write(path, session.output.to_pdf(&title)).map_err(|e| format!("{path}: {e}"))?;
-    }
-    if let Some(path) = &args.dashboard {
-        // The tiles come from DASHBOARD /TILES in the syntax.
-        if mksigma_web::ENGINE.is_empty() {
-            return Err("this build has no WebAssembly engine (rustup target add wasm32-unknown-unknown, then build again)".into());
+    // Every file asked for is written, each all or nothing; one that fails doesn't keep the
+    // others from being written, and the data comes first.
+    let mut failures = Vec::new();
+    let mut write = |path: &str, bytes: Result<Vec<u8>, String>| {
+        if let Err(e) = bytes.and_then(|b| mksigma_engine::write_atomic(std::path::Path::new(path), &b).map_err(|e| e.to_string())) {
+            failures.push(format!("{path}: {e}"));
         }
-        let board_title = if title.ends_with("— Output") { title.replace("— Output", "— Dashboard") } else { "MK Sigma Dashboard".to_string() };
-        let page = mksigma_web::page(&session, &board_title, mksigma_web::ENGINE)?;
-        std::fs::write(path, page).map_err(|e| format!("{path}: {e}"))?;
-    }
-    if let Some(path) = &args.tex {
-        std::fs::write(path, session.output.to_latex(&title)).map_err(|e| format!("{path}: {e}"))?;
-    }
-    result.map_err(|e| e.to_string())?;
-    if let Some(path) = &args.output {
+    };
+    if let (Some(path), Ok(())) = (&args.output, &result) {
         // A .dta path saves a Stata file; anything else, a system file.
         let stata = path.to_ascii_lowercase().ends_with(".dta");
         let saved = if stata { session.save_dta(now()) } else { session.save_sav(mksigma_engine::timestamp(now())) };
-        let (bytes, warnings) = saved.map_err(|e| e.to_string())?;
-        for w in warnings {
-            eprintln!("warning: {path}: {w}");
-        }
-        std::fs::write(path, bytes).map_err(|e| format!("{path}: {e}"))?;
+        write(
+            path,
+            saved.map_err(|e| e.to_string()).map(|(bytes, warnings)| {
+                for w in warnings {
+                    eprintln!("warning: {path}: {w}");
+                }
+                bytes
+            }),
+        );
+    }
+    if let Some(path) = &args.html {
+        write(path, Ok(session.output.to_html(&title).into_bytes()));
+    }
+    if let Some(path) = &args.pdf {
+        write(path, Ok(session.output.to_pdf(&title)));
+    }
+    if let Some(path) = &args.dashboard {
+        // The tiles come from DASHBOARD /TILES in the syntax.
+        let page = if mksigma_web::ENGINE.is_empty() {
+            Err("this build has no WebAssembly engine (rustup target add wasm32-unknown-unknown, then build again)".to_string())
+        } else {
+            let board_title =
+                if title.ends_with("— Output") { title.replace("— Output", "— Dashboard") } else { "MK Sigma Dashboard".to_string() };
+            mksigma_web::page(&session, &board_title, mksigma_web::ENGINE).map(String::into_bytes)
+        };
+        write(path, page);
+    }
+    if let Some(path) = &args.tex {
+        write(path, Ok(session.output.to_latex(&title).into_bytes()));
+    }
+    result.map_err(|e| e.to_string())?;
+    if !failures.is_empty() {
+        return Err(failures.join("\n"));
     }
     Ok(())
 }

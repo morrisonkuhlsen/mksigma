@@ -152,14 +152,14 @@ fn main() -> eframe::Result {
         save_language: Some(Box::new(|code: &str| {
             if let Some(file) = settings_file("language.txt") {
                 let _ = file.parent().map(std::fs::create_dir_all);
-                let _ = std::fs::write(file, code);
+                let _ = mksigma_engine::write_atomic(&file, code.as_bytes());
             }
         })),
         save_recent: Some(Box::new(|files: &[std::path::PathBuf]| {
             if let Some(file) = recent_file() {
                 let text: Vec<String> = files.iter().map(|p| p.display().to_string()).collect();
                 let _ = file.parent().map(std::fs::create_dir_all);
-                let _ = std::fs::write(file, text.join("\n"));
+                let _ = mksigma_engine::write_atomic(&file, text.join("\n").as_bytes());
             }
         })),
     };

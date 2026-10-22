@@ -16,12 +16,14 @@ mod history;
 mod lists;
 mod steps;
 mod transform;
+mod write;
 
 use filter::{CrossFilter, Run};
 pub use filter::{Selection, Slicer};
 use history::{Edit, Entry, History};
 use mksigma_output::Category;
 pub use steps::{AppliedStep, StepKind};
+pub use write::write_atomic;
 
 pub use mksigma_core as core;
 pub use mksigma_csv as csv;
@@ -249,7 +251,7 @@ impl Session {
             return Err(EngineError::File(tr!("err-file-exists", path = path)));
         }
         let written = mksigma_dta::write(&self.dataset, "")?;
-        std::fs::write(&target, &written.bytes).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        write_atomic(&target, &written.bytes).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
         let ds = &self.dataset;
         self.notes.push(tr!("note-file-written", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
         self.notes.extend(written.warnings.iter().map(|w| format!("{path}: {w}")));

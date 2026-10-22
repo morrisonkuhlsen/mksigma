@@ -1751,6 +1751,7 @@ version = "0.1.1"
 dependencies = [
  "eframe",
  "egui",
+ "mksigma-engine",
  "mksigma-ui-egui",
  "rfd",
 ]

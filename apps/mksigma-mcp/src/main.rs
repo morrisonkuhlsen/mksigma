@@ -219,7 +219,7 @@ impl Server {
             "dashboard" => mksigma_web::page(&self.session, "MK Sigma Dashboard", mksigma_web::ENGINE).map(String::into_bytes),
             other => Err(format!("{other} is not an export format")),
         };
-        match bytes.and_then(|b| std::fs::write(path, b).map_err(|e| format!("{path}: {e}"))) {
+        match bytes.and_then(|b| mksigma_engine::write_atomic(std::path::Path::new(path), &b).map_err(|e| format!("{path}: {e}"))) {
             Ok(()) => (format!("Wrote {path}"), false),
             Err(e) => (e, true),
         }

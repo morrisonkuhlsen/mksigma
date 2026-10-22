@@ -417,7 +417,7 @@ impl SigmaApp {
             self.status = Some(Status::Error(tr!("status-dashboard-needs-file")));
             return;
         };
-        match std::fs::write(path, syntax) {
+        match mksigma_engine::write_atomic(path, syntax.as_bytes()) {
             Ok(()) => self.status = Some(Status::Info(tr!("status-saved-dashboard", path = path.display().to_string()))),
             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
         }
@@ -443,7 +443,7 @@ impl SigmaApp {
             ExportFormat::Pdf => self.session.output.to_pdf(&title),
             ExportFormat::Latex => self.session.output.to_latex(&title).into_bytes(),
         };
-        match std::fs::write(path, bytes) {
+        match mksigma_engine::write_atomic(path, &bytes) {
             Ok(()) => self.status = Some(Status::Info(tr!("status-exported-output", path = path.display().to_string()))),
             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
         }
@@ -468,7 +468,7 @@ impl SigmaApp {
             board.to_dashboard_html(&title, self.session.filter_description().as_deref(), &wide)
         };
         let what = if interactive { tr!("status-exported-interactive") } else { tr!("status-exported-static") };
-        match std::fs::write(path, html) {
+        match mksigma_engine::write_atomic(path, html.as_bytes()) {
             Ok(()) => self.status = Some(Status::Info(tr!("status-exported-dashboard", what = what, path = path.display().to_string()))),
             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
         }
@@ -522,8 +522,7 @@ impl SigmaApp {
                 return;
             }
         };
-        let temporary = path.with_extension(if stata { "dta.saving" } else { "sav.saving" });
-        let written = std::fs::write(&temporary, &bytes).and_then(|()| std::fs::rename(&temporary, path));
+        let written = mksigma_engine::write_atomic(path, &bytes);
         let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
         match written {
             Ok(()) => {
@@ -536,7 +535,6 @@ impl SigmaApp {
                 self.remember(path);
             }
             Err(e) => {
-                let _ = std::fs::remove_file(&temporary);
                 // The data wasn't written, so it still has unsaved changes.
                 self.session.modified = true;
                 self.status = Some(Status::Error(format!("{name}: {e}")));
@@ -1236,7 +1234,7 @@ impl SigmaApp {
                 explain::Outcome::Close => self.explain = None,
                 explain::Outcome::Export(tex, name) => {
                     if let Some(path) = self.services.pick_export.as_ref().and_then(|pick| pick(&name)) {
-                        match std::fs::write(&path, tex) {
+                        match mksigma_engine::write_atomic(&path, tex.as_bytes()) {
                             Ok(()) => self.status = Some(Status::Info(tr!("status-exported-calculation", path = path.display().to_string()))),
                             Err(e) => self.status = Some(Status::Error(format!("{}: {e}", path.display()))),
                         }
