@@ -884,6 +884,137 @@ fn the_file_backstage() {
     assert_eq!(h.state().backstage, None, "Esc goes back");
 }
 
+/// An app on the sample whose data has a change not yet saved.
+fn changed(services: Services) -> Harness<'static, SigmaApp> {
+    let mut h = harness(SigmaApp::new(services));
+    h.state_mut().run_edit("VARIABLE LABELS age 'Idade'.");
+    h.run_steps(3);
+    h
+}
+
+/// The question's Save (the column has one too, drawn first).
+fn save_in_the_question(h: &mut Harness<'static, SigmaApp>) {
+    h.query_all_by_label("Save").last().unwrap().click();
+    h.run_steps(3);
+}
+
+fn asks(h: &Harness<'static, SigmaApp>) -> bool {
+    shows(h, "The data has changes that aren't saved.")
+}
+
+#[test]
+fn ctrl_o_and_recent_files_ask_before_replacing_changed_data() {
+    let path = temp_path("guarded.sav");
+    std::fs::write(&path, tiny_sav()).unwrap();
+    let picked = path.clone();
+    let services = Services { pick_open: Some(Box::new(move || Some(picked.clone()))), ..Services::default() };
+    let mut h = changed(services);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::O);
+    h.run_steps(3);
+    assert!(asks(&h), "Ctrl+O asks first");
+    assert_eq!(h.state().session.dataset.n_cases(), 8, "and opens nothing yet");
+    h.get_by_label("Close without saving").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.dataset.n_cases(), 3, "then opens the file picked");
+
+    // A recent file, with changes again.
+    h.state_mut().run_edit("VARIABLE LABELS SCORE 'Nota'.");
+    h.state_mut().recent = vec![path.clone()];
+    h.get_by_label("File").click();
+    h.run_steps(3);
+    h.get_by_label(path.file_name().unwrap().to_str().unwrap()).click();
+    h.run_steps(3);
+    assert!(asks(&h), "a recent file asks first");
+    assert_eq!(h.state().session.dataset.variables()[0].label.as_deref(), Some("Nota"));
+    h.get_by_label("Close without saving").click();
+    h.run_steps(3);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(h.state().session.dataset.variables()[0].label.as_deref(), Some("Test score"), "the file read again");
+    assert!(!h.state().session.modified);
+}
+
+#[test]
+fn save_in_the_question_saves_then_does_what_was_asked() {
+    let path = temp_path("then-blank.sav");
+    let target = path.clone();
+    let services = Services { pick_save: Some(Box::new(move |_: &str| Some(target.clone()))), ..Services::default() };
+    let mut h = changed(services);
+    h.get_by_label("File").click();
+    h.run_steps(3);
+    h.get_by_label("Blank dataset").click();
+    h.run_steps(3);
+    assert!(asks(&h));
+    save_in_the_question(&mut h);
+    let written = std::fs::metadata(&path).is_ok();
+    std::fs::remove_file(&path).ok();
+    assert!(written, "the data was saved");
+    assert!(h.state().session.dataset.variables().is_empty(), "and the blank dataset made");
+    assert_eq!(h.state().backstage, None);
+}
+
+#[test]
+fn a_cancelled_save_in_the_question_does_nothing_else() {
+    let services = Services { pick_save: Some(Box::new(|_: &str| None)), ..Services::default() };
+    let mut h = changed(services);
+    h.get_by_label("File").click();
+    h.run_steps(3);
+    h.get_by_label("Blank dataset").click();
+    h.run_steps(3);
+    save_in_the_question(&mut h);
+    assert!(asks(&h), "still asking");
+    assert_eq!(h.state().session.dataset.n_cases(), 8);
+}
+
+#[derive(Debug)]
+struct DroppedSav(std::path::PathBuf);
+
+impl egui::DroppedFile for DroppedSav {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        Ok(tiny_sav())
+    }
+}
+
+#[test]
+fn dropping_a_file_asks_before_replacing_changed_data() {
+    let mut h = changed(Services::default());
+    h.input_mut().dropped_files.push(std::sync::Arc::new(DroppedSav("/somewhere/dropped.sav".into())));
+    h.run_steps(3);
+    assert!(asks(&h), "a drop asks first");
+    assert_eq!(h.state().session.dataset.n_cases(), 8);
+    h.get_by_label("Close without saving").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.dataset.n_cases(), 3, "then opens what was dropped");
+    assert_eq!(h.state().file_name.as_deref(), Some("dropped.sav"));
+}
+
+#[test]
+fn closing_the_window_asks_about_unsaved_changes() {
+    let close = |h: &mut Harness<'static, SigmaApp>| {
+        h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+        h.step();
+    };
+    // Nothing to lose: the window closes as asked.
+    let mut h = harness(SigmaApp::default());
+    close(&mut h);
+    let cancelled =
+        |h: &Harness<'static, SigmaApp>| h.output().viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::CancelClose));
+    assert!(!cancelled(&h));
+
+    let mut h = changed(Services::default());
+    close(&mut h);
+    assert!(cancelled(&h), "the close is held back");
+    h.run_steps(3);
+    assert!(asks(&h));
+    assert!(!h.state().closing);
+    h.get_by_label("Close without saving").click();
+    h.run_steps(2);
+    assert!(h.state().closing, "then the window closes");
+    assert!(h.output().viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::Close)));
+}
+
 #[test]
 fn the_splash_closes_by_itself_or_on_a_click() {
     use mksigma_ui_egui::splash::{SIZE, SplashScreen};

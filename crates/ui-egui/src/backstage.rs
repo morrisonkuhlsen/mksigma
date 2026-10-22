@@ -38,8 +38,12 @@ pub(crate) enum Action {
     SaveAs,
     /// Close the data (asks first when there are unsaved changes).
     Close,
-    /// Close it although it has unsaved changes.
+    /// Close it although it has unsaved changes, and do what was asked.
     Discard,
+    /// Close the window (asks first when there are unsaved changes).
+    Quit,
+    /// Files dropped on the window.
+    Drop(Vec<crate::Dropped>),
     Export(ExportFormat),
     ExportDashboard,
     SaveDashboard,

@@ -119,6 +119,8 @@ pub struct SigmaApp {
     pub recent: Vec<PathBuf>,
     /// What waits for an answer about unsaved changes.
     pending: Option<backstage::Action>,
+    /// Closing the window was asked for and allowed: the next frame closes it.
+    pub closing: bool,
     /// The procedure dialog open, if any.
     pub procedure_dialog: Option<procedure::Dialog>,
     /// The ribbon tab shown.
@@ -176,6 +178,7 @@ impl SigmaApp {
             backstage: None,
             recent: services.load_recent.as_ref().map(|load| load()).unwrap_or_default(),
             pending: None,
+            closing: false,
             ribbon_collapsed: false,
             autosave: false,
             search: None,
@@ -297,16 +300,22 @@ impl SigmaApp {
         self.status = Some(Status::Info(what.to_string()));
     }
 
-    /// Does what the backstage asked for. Replacing data with unsaved changes asks first, on
-    /// the Info page.
+    /// Does what the backstage, the ribbon, a shortcut, a drop or the window asked for.
+    /// Whatever replaces or closes data with unsaved changes asks first, on the Info page.
     fn backstage_act(&mut self, action: backstage::Action) {
         use backstage::Action as A;
-        let replaces = matches!(action, A::Blank | A::Sample | A::Close);
-        if replaces && self.session.modified && self.pending.is_none() {
+        let replaces = matches!(action, A::Blank | A::Sample | A::Close | A::Open(_) | A::Browse | A::Quit | A::Drop(_));
+        if replaces && self.session.modified {
             self.pending = Some(action);
             self.backstage = Some(backstage::Page::Info);
             return;
         }
+        self.perform(action);
+    }
+
+    /// Does an action, past the question about unsaved changes.
+    fn perform(&mut self, action: backstage::Action) {
+        use backstage::Action as A;
         match action {
             A::Back => {
                 self.backstage = None;
@@ -323,8 +332,15 @@ impl SigmaApp {
             },
             A::Discard => {
                 let then = self.pending.take().unwrap_or(A::Close);
-                self.session.modified = false;
-                self.backstage_act(then);
+                self.perform(then);
+            }
+            A::Quit => {
+                self.backstage = None;
+                self.closing = true;
+            }
+            A::Drop(files) => {
+                self.backstage = None;
+                self.open_dropped(files);
             }
             A::Open(path) => {
                 self.backstage = None;
@@ -336,9 +352,12 @@ impl SigmaApp {
             }
             A::Save => {
                 self.save();
+                // Saved: go on with what was asked for (a cancelled or failed save stays here).
                 if !self.session.modified {
-                    self.pending = None;
                     self.backstage = None;
+                    if let Some(then) = self.pending.take() {
+                        self.perform(then);
+                    }
                 }
             }
             A::SaveAs => {
@@ -689,6 +708,9 @@ impl SigmaApp {
             self.themed = true;
         }
         self.handle_input(ui.ctx());
+        if self.closing {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         let untitled = tr!("untitled");
         let title = format!("{}{} — MK Sigma", if self.session.modified { "• " } else { "" }, self.file_name.as_deref().unwrap_or(&untitled));
         if title != self.title {
@@ -919,7 +941,7 @@ impl SigmaApp {
     fn act(&mut self, ctx: &egui::Context, action: ribbon::Action) {
         use ribbon::Action;
         match action {
-            Action::Open => self.open_dialog(),
+            Action::Open => self.backstage_act(backstage::Action::Browse),
             Action::Save => self.save(),
             Action::SaveAs => self.save_as(),
             Action::Undo => self.undo(),
@@ -1027,7 +1049,7 @@ impl SigmaApp {
             self.save();
         }
         if shortcut(egui::Modifiers::COMMAND, egui::Key::O) {
-            self.open_dialog();
+            self.backstage_act(backstage::Action::Browse);
         }
         if shortcut(egui::Modifiers::COMMAND, egui::Key::F1) {
             self.ribbon_collapsed = !self.ribbon_collapsed;
@@ -1043,22 +1065,32 @@ impl SigmaApp {
                 self.undo();
             }
         }
-        let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
-        for file in dropped {
-            let path = file.path();
-            let name = path.file_name().map_or_else(|| tr!("dropped-file"), |n| n.to_string_lossy().into_owned());
-            if is_text(path) && path.exists() {
-                self.open_path(path);
+        let dropped: Vec<Dropped> = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files)).iter().map(|f| Dropped::read(f.as_ref())).collect();
+        if !dropped.is_empty() {
+            self.backstage_act(backstage::Action::Drop(dropped));
+        }
+        // The window's close button: with unsaved changes, stay open and ask.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.closing && self.session.modified {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.backstage_act(backstage::Action::Quit);
+        }
+    }
+
+    /// Opens dropped files: delimited text from its path when it has one, the rest from its bytes.
+    fn open_dropped(&mut self, files: Vec<Dropped>) {
+        for file in files {
+            if is_text(&file.path) && file.path.exists() {
+                self.open_path(&file.path);
                 continue;
             }
-            match file.bytes() {
-                Ok(bytes) if is_text(Path::new(&name)) => {
-                    self.open_text_bytes(&name, &bytes);
+            match file.bytes {
+                Ok(bytes) if is_text(Path::new(&file.name)) => {
+                    self.open_text_bytes(&file.name, &bytes);
                 }
                 Ok(bytes) => {
-                    self.open_bytes(&name, &bytes);
+                    self.open_bytes(&file.name, &bytes);
                 }
-                Err(e) => self.status = Some(Status::Error(format!("{name}: {e}"))),
+                Err(e) => self.status = Some(Status::Error(format!("{}: {e}", file.name))),
             }
         }
     }
@@ -1312,6 +1344,25 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, name: &str) -> bool {
 }
 
 /// Whether a file is delimited text by its extension (`.csv`, `.tsv`, `.txt`, `.dat`).
+/// A file dropped on the window, read when it arrives so it can wait for an answer about
+/// unsaved changes.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Dropped {
+    name: String,
+    path: PathBuf,
+    bytes: Result<Vec<u8>, String>,
+}
+
+impl Dropped {
+    fn read(file: &(dyn egui::DroppedFile + Send + Sync)) -> Self {
+        let path = file.path().to_path_buf();
+        let name = path.file_name().map_or_else(|| tr!("dropped-file"), |n| n.to_string_lossy().into_owned());
+        // Text with a path is read from it, through syntax.
+        let bytes = if is_text(&path) && path.exists() { Ok(Vec::new()) } else { file.bytes() };
+        Dropped { name, path, bytes }
+    }
+}
+
 fn is_text(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["csv", "tsv", "txt", "dat"].iter().any(|t| t.eq_ignore_ascii_case(e)))
 }
