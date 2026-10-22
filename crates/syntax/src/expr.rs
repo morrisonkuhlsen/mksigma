@@ -38,13 +38,34 @@ pub enum Expr {
 
 const ERR: SyntaxError = SyntaxError::Expected { command: "expression", expected: "a value, variable, function or (" };
 
+/// The deepest expression tree: every operator and function call is a level, so `a + b + c`
+/// is three deep. Evaluating and dropping a tree recurses once per level.
+const MAX_DEPTH: usize = 500;
+/// The deepest the parser itself goes: parentheses, function arguments, `NOT`, `-` and `**`
+/// each take a level or more.
+const MAX_NESTING: usize = 150;
+
+/// An expression and the depth of its tree.
+type Parsed = Result<(Expr, usize), SyntaxError>;
+
 struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
+    nesting: usize,
 }
 
 fn is_name(word: &str) -> bool {
     word.chars().next().is_some_and(|c| !(c.is_ascii_digit() || c == '-' || c == '.'))
+}
+
+/// A node over children `depth` deep, refused past `MAX_DEPTH`.
+fn node(e: Expr, depth: usize) -> Parsed {
+    let depth = depth.saturating_add(1);
+    if depth > MAX_DEPTH { Err(SyntaxError::TooDeep) } else { Ok((e, depth)) }
+}
+
+fn binary(op: BinOp, (left, l): (Expr, usize), (right, r): (Expr, usize)) -> Parsed {
+    node(Expr::Binary(op, Box::new(left), Box::new(right)), l.max(r))
 }
 
 impl Parser<'_> {
@@ -62,28 +83,42 @@ impl Parser<'_> {
         matches!(self.peek(), Some(Token::Word(w)) if w.eq_ignore_ascii_case(keyword))
     }
 
-    fn or(&mut self) -> Result<Expr, SyntaxError> {
-        let mut left = self.and()?;
-        while matches!(self.peek(), Some(Token::Or)) || self.word_is("OR") {
-            self.pos += 1;
-            left = Expr::Binary(BinOp::Or, Box::new(left), Box::new(self.and()?));
+    /// Runs `f` one level deeper, refused past `MAX_NESTING`.
+    fn nested(&mut self, f: impl FnOnce(&mut Self) -> Parsed) -> Parsed {
+        if self.nesting >= MAX_NESTING {
+            return Err(SyntaxError::TooDeep);
         }
-        Ok(left)
+        self.nesting += 1;
+        let result = f(self);
+        self.nesting -= 1;
+        result
     }
 
-    fn and(&mut self) -> Result<Expr, SyntaxError> {
+    fn or(&mut self) -> Parsed {
+        self.nested(|p| {
+            let mut left = p.and()?;
+            while matches!(p.peek(), Some(Token::Or)) || p.word_is("OR") {
+                p.pos += 1;
+                left = binary(BinOp::Or, left, p.and()?)?;
+            }
+            Ok(left)
+        })
+    }
+
+    fn and(&mut self) -> Parsed {
         let mut left = self.not()?;
         while matches!(self.peek(), Some(Token::And)) || self.word_is("AND") {
             self.pos += 1;
-            left = Expr::Binary(BinOp::And, Box::new(left), Box::new(self.not()?));
+            left = binary(BinOp::And, left, self.not()?)?;
         }
         Ok(left)
     }
 
-    fn not(&mut self) -> Result<Expr, SyntaxError> {
+    fn not(&mut self) -> Parsed {
         if matches!(self.peek(), Some(Token::Not)) || self.word_is("NOT") {
             self.pos += 1;
-            return Ok(Expr::Not(Box::new(self.not()?)));
+            let (inner, depth) = self.nested(Self::not)?;
+            return node(Expr::Not(Box::new(inner)), depth);
         }
         self.comparison()
     }
@@ -109,14 +144,14 @@ impl Parser<'_> {
         })
     }
 
-    fn comparison(&mut self) -> Result<Expr, SyntaxError> {
+    fn comparison(&mut self) -> Parsed {
         let left = self.additive()?;
         let Some(op) = self.comparison_op() else { return Ok(left) };
         self.pos += 1;
-        Ok(Expr::Binary(op, Box::new(left), Box::new(self.additive()?)))
+        binary(op, left, self.additive()?)
     }
 
-    fn additive(&mut self) -> Result<Expr, SyntaxError> {
+    fn additive(&mut self) -> Parsed {
         let mut left = self.multiplicative()?;
         loop {
             let op = match self.peek() {
@@ -125,11 +160,11 @@ impl Parser<'_> {
                 _ => return Ok(left),
             };
             self.pos += 1;
-            left = Expr::Binary(op, Box::new(left), Box::new(self.multiplicative()?));
+            left = binary(op, left, self.multiplicative()?)?;
         }
     }
 
-    fn multiplicative(&mut self) -> Result<Expr, SyntaxError> {
+    fn multiplicative(&mut self) -> Parsed {
         let mut left = self.unary()?;
         loop {
             let op = match self.peek() {
@@ -138,30 +173,33 @@ impl Parser<'_> {
                 _ => return Ok(left),
             };
             self.pos += 1;
-            left = Expr::Binary(op, Box::new(left), Box::new(self.unary()?));
+            left = binary(op, left, self.unary()?)?;
         }
     }
 
-    fn unary(&mut self) -> Result<Expr, SyntaxError> {
-        if matches!(self.peek(), Some(Token::Minus)) {
-            self.pos += 1;
-            return Ok(Expr::Neg(Box::new(self.unary()?)));
-        }
-        self.power()
+    fn unary(&mut self) -> Parsed {
+        self.nested(|p| {
+            if matches!(p.peek(), Some(Token::Minus)) {
+                p.pos += 1;
+                let (inner, depth) = p.unary()?;
+                return node(Expr::Neg(Box::new(inner)), depth);
+            }
+            p.power()
+        })
     }
 
-    fn power(&mut self) -> Result<Expr, SyntaxError> {
+    fn power(&mut self) -> Parsed {
         let base = self.primary()?;
         if matches!(self.peek(), Some(Token::Power)) {
             self.pos += 1;
-            return Ok(Expr::Binary(BinOp::Pow, Box::new(base), Box::new(self.unary()?)));
+            return binary(BinOp::Pow, base, self.unary()?);
         }
         Ok(base)
     }
 
-    fn primary(&mut self) -> Result<Expr, SyntaxError> {
+    fn primary(&mut self) -> Parsed {
         match self.next().cloned() {
-            Some(Token::Str(s)) => Ok(Expr::Str(s)),
+            Some(Token::Str(s)) => Ok((Expr::Str(s), 1)),
             Some(Token::LParen) => {
                 let inner = self.or()?;
                 match self.next() {
@@ -174,17 +212,20 @@ impl Parser<'_> {
                 let x: f64 = w.parse().map_err(|_| SyntaxError::Expected { command: "expression", expected: "a number" })?;
                 if x < 0.0 && matches!(self.peek(), Some(Token::Power)) {
                     self.pos += 1;
-                    let exponent = self.unary()?;
-                    return Ok(Expr::Neg(Box::new(Expr::Binary(BinOp::Pow, Box::new(Expr::Num(-x)), Box::new(exponent)))));
+                    let power = binary(BinOp::Pow, (Expr::Num(-x), 1), self.unary()?)?;
+                    return node(Expr::Neg(Box::new(power.0)), power.1);
                 }
-                Ok(Expr::Num(x))
+                Ok((Expr::Num(x), 1))
             }
             Some(Token::Word(w)) if matches!(self.peek(), Some(Token::LParen)) => {
                 self.pos += 1;
                 let mut args = Vec::new();
+                let mut depth = 0;
                 if !matches!(self.peek(), Some(Token::RParen)) {
                     loop {
-                        args.push(self.or()?);
+                        let (arg, d) = self.or()?;
+                        args.push(arg);
+                        depth = depth.max(d);
                         match self.next() {
                             Some(Token::Comma) => {}
                             Some(Token::RParen) => break,
@@ -200,9 +241,9 @@ impl Parser<'_> {
                     Some((name, n)) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => (name.to_string(), n.parse().ok()),
                     _ => (upper, None),
                 };
-                Ok(Expr::Call(name, min, args))
+                node(Expr::Call(name, min, args), depth)
             }
-            Some(Token::Word(w)) => Ok(Expr::Var(w)),
+            Some(Token::Word(w)) => Ok((Expr::Var(w), 1)),
             _ => Err(ERR),
         }
     }
@@ -210,8 +251,8 @@ impl Parser<'_> {
 
 /// Parses a whole token slice as one expression.
 pub(crate) fn parse(tokens: &[Token]) -> Result<Expr, SyntaxError> {
-    let mut p = Parser { tokens, pos: 0 };
-    let e = p.or()?;
+    let mut p = Parser { tokens, pos: 0, nesting: 0 };
+    let (e, _) = p.or()?;
     if p.pos < tokens.len() {
         return Err(SyntaxError::Expected { command: "expression", expected: "an operator or the end of the expression" });
     }
@@ -279,5 +320,27 @@ mod tests {
         assert!(bad("f(1 2)"));
         assert!(bad("1 2"));
         assert!(bad("a = = b"));
+    }
+
+    /// Each shape that used to overflow the stack (#20) is an error, and a long but reasonable
+    /// expression still parses.
+    #[test]
+    fn deep_expressions_are_refused_not_a_crash() {
+        let too_deep = |src: String| {
+            let lexed = commands(&src).unwrap();
+            assert_eq!(parse(&lexed[0].tokens), Err(SyntaxError::TooDeep), "{}", &src[..40.min(src.len())]);
+        };
+        let n = 20_000;
+        too_deep(format!("{}1{}", "(".repeat(n), ")".repeat(n)));
+        too_deep(format!("{}1", "~".repeat(n)));
+        too_deep(format!("{}1", "NOT ".repeat(n)));
+        too_deep(format!("{}1", "- ".repeat(n)));
+        too_deep(format!("2{}", "**2".repeat(n)));
+        too_deep(format!("{}1{}", "abs(".repeat(n), ")".repeat(n)));
+        too_deep((0..n).map(|i| format!("q{i}")).collect::<Vec<_>>().join(" + "));
+        too_deep((0..n).map(|i| format!("q{i} > 0")).collect::<Vec<_>>().join(" AND "));
+        // Room for real work: a sum of a hundred terms, fifty parentheses.
+        assert!(matches!(expr(&(0..100).map(|i| format!("q{i}")).collect::<Vec<_>>().join(" + ")), Expr::Binary(BinOp::Add, ..)));
+        assert_eq!(expr(&format!("{}1{}", "(".repeat(50), ")".repeat(50))), Expr::Num(1.0));
     }
 }

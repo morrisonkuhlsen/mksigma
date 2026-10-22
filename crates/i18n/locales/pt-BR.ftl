@@ -949,6 +949,7 @@ err-unknown-command = comando desconhecido: { $name }
 err-expected = { $command }: esperava { $expected }
 err-unexpected-char = caractere inesperado { $char }
 err-unclosed-string = um texto entre aspas não foi fechado
+err-expression-too-deep = a expressão está aninhada demais; divida-a em vários comandos COMPUTE, ou use SUM, MEAN e as outras funções sobre listas
 err-unsupported = { $command }: { $what } ainda não é suportado
 err-duplicate-name = já existe uma variável chamada { $name }
 err-not-empty = só é possível acrescentar variáveis a um conjunto de dados vazio

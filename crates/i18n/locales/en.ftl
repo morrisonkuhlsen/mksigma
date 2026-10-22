@@ -949,6 +949,7 @@ err-unknown-command = unknown command: { $name }
 err-expected = { $command }: expected { $expected }
 err-unexpected-char = unexpected character { $char }
 err-unclosed-string = a quoted string is not closed
+err-expression-too-deep = the expression is nested too deeply; break it into several COMPUTE commands, or use SUM, MEAN and the other functions over lists
 err-unsupported = { $command }: { $what } is not supported yet
 err-duplicate-name = a variable named { $name } already exists
 err-not-empty = variables can only be added to an empty dataset

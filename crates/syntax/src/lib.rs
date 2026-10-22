@@ -144,6 +144,8 @@ pub enum SyntaxError {
     UnexpectedChar(char),
     #[error("{}", mksigma_i18n::tr!("err-unclosed-string"))]
     UnterminatedString,
+    #[error("{}", mksigma_i18n::tr!("err-expression-too-deep"))]
+    TooDeep,
     #[error("{}", mksigma_i18n::tr!("err-unsupported", command = *command, what = mksigma_i18n::phrase(what)))]
     Unsupported { command: &'static str, what: String },
 }

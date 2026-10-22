@@ -517,6 +517,19 @@ mod tests {
         Compiler { ds: &ds }.compile(expr).err().map(|e| e.to_string()).unwrap_or_default()
     }
 
+    /// The deepest tree the parser allows (#20) compiles and evaluates, numbers and text, on a
+    /// test thread's small stack; one level more is an error.
+    #[test]
+    fn the_deepest_expression_evaluates() {
+        let sum = vec!["x"; 500].join(" + ");
+        assert_eq!(eval(&sum, 0), Some(2000.0));
+        let nested = format!("{}x{}", "ABS(".repeat(60), ")".repeat(60));
+        assert_eq!(eval(&nested, 0), Some(4.0));
+        let text = format!("{}s{}", "LTRIM(".repeat(60), ")".repeat(60));
+        assert_eq!(eval_text(&text, 1), "ab");
+        assert!(mksigma_syntax::parse(&format!("COMPUTE t = {sum} + x.")).is_err());
+    }
+
     #[test]
     fn arithmetic_and_precedence() {
         assert_eq!(eval("x + 2 * 3 ** 2", 0), Some(22.0));
