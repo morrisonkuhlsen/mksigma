@@ -102,6 +102,7 @@ decimals-auto = Auto
 ## Window and status
 status-sample-start = Conjunto de dados de exemplo. Use Arquivo > Abrir… ou solte um arquivo .sav na janela.
 status-in-syntax-editor = { $name } está no editor de sintaxe: Executar o executa
+status-dashboard-review = { $name } é um dashboard que grava um arquivo ou lê um de outro computador: está no editor de sintaxe, para conferir antes de Executar
 status-opened-dashboard = Painel { $name } aberto
 status-new-dataset = Novo conjunto de dados: acrescente variáveis na Visualização de variáveis, ou abra um arquivo.
 status-sample = Conjunto de dados de exemplo.

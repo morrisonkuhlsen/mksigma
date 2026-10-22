@@ -102,6 +102,7 @@ decimals-auto = Auto
 ## Window and status
 status-sample-start = Sample dataset. Use File > Open… or drop a .sav file on the window.
 status-in-syntax-editor = { $name } is in the syntax editor: Run runs it
+status-dashboard-review = { $name } is a dashboard that writes a file or reads one from another computer: it is in the syntax editor, to look at before Run
 status-opened-dashboard = Opened the dashboard { $name }
 status-new-dataset = New dataset: add variables in Variable View, or open a file.
 status-sample = Sample dataset.

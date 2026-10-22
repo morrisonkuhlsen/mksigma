@@ -60,6 +60,37 @@ pub fn check_syntax(src: &str) -> Result<(), EngineError> {
     mksigma_syntax::parse(src).map(drop).map_err(EngineError::from)
 }
 
+/// What opening a syntax file does with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnOpen {
+    /// Into the syntax editor, to run with Run.
+    Edit,
+    /// A saved dashboard (its last command is `DASHBOARD`) that only reads files on this
+    /// computer: it runs at once.
+    Run,
+    /// A dashboard that writes a file or reads one from another computer: into the editor, for
+    /// a look before Run.
+    Review,
+}
+
+/// Decides from the parsed program, never from the text alone, whether a syntax file opened
+/// runs at once: a word in a comment or a variable's name makes nothing run.
+pub fn on_open(src: &str) -> OnOpen {
+    let Ok(program) = mksigma_syntax::parse(src) else { return OnOpen::Edit };
+    if !matches!(program.last(), Some(Command::Dashboard(_))) {
+        return OnOpen::Edit;
+    }
+    // `\\host\share`, `//host/share` or a URL: opening would reach another machine.
+    let remote = |path: &str| path.starts_with("\\\\") || path.starts_with("//") || path.contains("://");
+    let risky = program.iter().any(|c| match c {
+        Command::SaveStata { .. } => true,
+        Command::GetFile(path) | Command::GetStata(path) | Command::GetSas(path) => remote(path),
+        Command::GetData(get) => remote(&get.file),
+        _ => false,
+    });
+    if risky { OnOpen::Review } else { OnOpen::Run }
+}
+
 #[derive(Debug, Default)]
 pub struct Session {
     pub dataset: Dataset,
@@ -1332,6 +1363,22 @@ fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_parsed_dashboard_that_writes_nothing_runs_on_open() {
+        // The word alone (a comment, a variable's name) is not a dashboard (#25).
+        assert_eq!(on_open("* dashboard later.\nDESCRIPTIVES dashboard_id."), OnOpen::Edit);
+        assert_eq!(on_open("DASHBOARD /TILES=(1 1).\nDESCRIPTIVES age."), OnOpen::Edit, "DASHBOARD must come last");
+        assert_eq!(on_open("not syntax at all DASHBOARD"), OnOpen::Edit);
+        assert_eq!(on_open("GET FILE='loja.sav'.\nDESCRIPTIVES vendas.\nDASHBOARD /TILES=(1 1)."), OnOpen::Run);
+        assert_eq!(
+            on_open("GET FILE='loja.sav'.\nSAVE TRANSLATE OUTFILE='C:\\x.dta' /TYPE=STATA /REPLACE.\nDASHBOARD /TILES=(1 1)."),
+            OnOpen::Review
+        );
+        for remote in ["\\\\host\\share\\a.sav", "//host/share/a.sav", "https://example.org/a.sav"] {
+            assert_eq!(on_open(&format!("GET FILE='{remote}'.\nDESCRIPTIVES age.\nDASHBOARD /TILES=(1 1).")), OnOpen::Review, "{remote}");
+        }
+    }
 
     #[test]
     fn runs_descriptives_on_the_sample() {

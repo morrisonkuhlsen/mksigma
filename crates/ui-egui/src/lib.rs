@@ -238,8 +238,9 @@ impl SigmaApp {
         self.after_run(result.map_err(|e| e.to_string()), None);
     }
 
-    /// Opens a syntax file into the editor. A saved dashboard (it has `DASHBOARD`) runs at once
-    /// on an empty Output and shows the dashboard; other syntax waits for Run.
+    /// Opens a syntax file into the editor. A saved dashboard (its last command `DASHBOARD`, and
+    /// nothing in it that writes a file or reads one from another computer) runs at once on an
+    /// empty Output and shows the dashboard; other syntax waits for Run.
     pub fn open_syntax(&mut self, path: &Path) {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
@@ -252,10 +253,16 @@ impl SigmaApp {
         self.syntax = text.clone();
         // Paths in it start from its folder, as data files kept beside it are named.
         self.session.base_dir = path.parent().map(Path::to_path_buf);
-        let is_dashboard = mksigma_engine::check_syntax(&text).is_ok() && text.to_ascii_uppercase().contains("DASHBOARD");
-        if !is_dashboard {
-            self.status = Some(Status::Info(tr!("status-in-syntax-editor", name = name.as_str())));
-            return;
+        match mksigma_engine::on_open(&text) {
+            mksigma_engine::OnOpen::Run => {}
+            mksigma_engine::OnOpen::Edit => {
+                self.status = Some(Status::Info(tr!("status-in-syntax-editor", name = name.as_str())));
+                return;
+            }
+            mksigma_engine::OnOpen::Review => {
+                self.status = Some(Status::Warning(tr!("status-dashboard-review", name = name.as_str())));
+                return;
+            }
         }
         self.session.clear_output();
         self.output_state = OutputState::default();

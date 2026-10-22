@@ -771,6 +771,32 @@ fn a_saved_dashboard_opens_again() {
 }
 
 #[test]
+fn a_syntax_file_that_mentions_dashboards_waits_for_run() {
+    let dir = temp_path("guarded-sps");
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("victim.dta");
+    // A comment with the word, and a command that would overwrite a file (#25).
+    let sps = dir.join("comment.sps");
+    std::fs::write(&sps, "* dashboard later.\nDESCRIPTIVES age.\n").unwrap();
+    let mut app = SigmaApp::default();
+    app.open_path(&sps);
+    assert!(app.session.output.items.is_empty(), "nothing ran");
+    assert!(app.syntax.contains("DESCRIPTIVES age."));
+    // A real dashboard that writes a file: in the editor, with a warning, not run.
+    let board = dir.join("board.sps");
+    std::fs::write(
+        &board,
+        format!("SAVE TRANSLATE OUTFILE='{}' /TYPE=STATA /REPLACE.\nDESCRIPTIVES age.\nDASHBOARD /TILES=(1 1).\n", target.display()),
+    )
+    .unwrap();
+    app.open_path(&board);
+    assert!(!target.exists(), "no file written");
+    assert!(matches!(&app.status, Some(Status::Warning(s)) if s.contains("board.sps")), "{:?}", app.status);
+    assert!(!app.output_state.dashboard);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn a_dashboard_needs_data_from_a_file() {
     let mut app = SigmaApp::default();
     app.session.run_syntax("DESCRIPTIVES age.").unwrap();
