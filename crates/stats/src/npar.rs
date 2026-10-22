@@ -33,7 +33,8 @@ fn ranks(values: &[(f64, f64)]) -> (Vec<f64>, f64) {
         let mut weight = 0.0;
         while let Some(&k) = order.get(j) {
             match values.get(k) {
-                Some((v, w)) if *v == x => weight += w,
+                // `total_cmp`, not `==`: a NaN equals itself here, so the loop always advances.
+                Some((v, w)) if v.total_cmp(&x).is_eq() => weight += w,
                 _ => break,
             }
             j += 1;
@@ -212,6 +213,14 @@ mod tests {
         // A weight of 2 counts as two tied cases.
         let (r, _) = ranks(&[(5.0, 2.0), (1.0, 1.0)]);
         assert_eq!(r, [2.5, 1.0]);
+    }
+
+    #[test]
+    fn ranking_a_nan_terminates() {
+        // A NaN never equals itself with `==`; ranking used to loop forever on one (#21).
+        let (r, _) = ranks(&[(f64::NAN, 1.0), (1.0, 1.0), (f64::NAN, 1.0), (f64::INFINITY, 1.0)]);
+        assert_eq!(r.len(), 4);
+        assert_eq!(r[1], 1.0);
     }
 
     fn stat(items: &[Item], row: &str) -> f64 {

@@ -72,9 +72,17 @@ pub(crate) fn read(bytes: &[u8], dict: Dictionary) -> Result<SavFile, SavError> 
     let data = bytes.get(data_offset..).unwrap_or_default();
     let c = Cursor::new(data, big_endian);
     let mut segments = Segments { c, compressed: compression == Compression::Bytecode, bias, codes: [0; 8], next: 8, done: false };
-    let number = |raw: [u8; 8]| {
+    let mut non_finite = 0usize;
+    let mut number = |raw: [u8; 8]| {
         let x = if big_endian { f64::from_be_bytes(raw) } else { f64::from_le_bytes(raw) };
-        if x.to_bits() == sysmis.to_bits() { Value::SysMis } else { Value::Num(x) }
+        if x.to_bits() == sysmis.to_bits() {
+            Value::SysMis
+        } else if !x.is_finite() {
+            non_finite += 1;
+            Value::SysMis
+        } else {
+            Value::Num(x)
+        }
     };
 
     let mut case_count = 0usize;
@@ -120,6 +128,9 @@ pub(crate) fn read(bytes: &[u8], dict: Dictionary) -> Result<SavFile, SavError> 
     }
     if let Some(n) = n_cases.filter(|n| *n != case_count) {
         warnings.push(format!("the header says {n} cases, the file holds {case_count}"));
+    }
+    if non_finite > 0 {
+        warnings.push(mksigma_i18n::tr!("sav-warn-non-finite", n = non_finite));
     }
 
     Ok(SavFile { dataset, product, created, compression, warnings })

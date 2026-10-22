@@ -256,6 +256,21 @@ fn an_incomplete_last_case_is_dropped_with_a_warning() {
     assert_eq!(f.warnings.len(), 2, "{:?}", f.warnings);
 }
 
+#[test]
+fn numbers_that_are_not_finite_read_as_system_missing_with_a_warning() {
+    for big_endian in [false, true] {
+        let mut b = Builder::new(big_endian);
+        b.header(b"$FL2", 1, 0, 0, 4).var(&Var { width: 0, name: "X", label: None, n_missing: 0, missing: &[], print: F8_2 }).end_dictionary();
+        for x in [f64::NAN, f64::INFINITY, 4.0, f64::NEG_INFINITY] {
+            b.f64(x);
+        }
+        let f = read(&b.buf).unwrap();
+        assert_eq!(f.dataset.column(0).unwrap(), [Value::SysMis, Value::SysMis, Value::Num(4.0), Value::SysMis]);
+        assert_eq!(f.warnings.len(), 1, "{:?}", f.warnings);
+        assert!(f.warnings[0].contains('3'), "{:?}", f.warnings);
+    }
+}
+
 mod round_trip {
     use mksigma_core::{Dataset, Format, FormatKind, Measure, MissingValues, Value, Variable};
 

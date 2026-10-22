@@ -981,6 +981,7 @@ err-dta-invalid = invalid { $what } in the Stata file at byte { $offset }
 err-dta-release = Stata files of format { $release } can't be read yet (formats 113 to 115 and 117 to 119 can: Stata 8 and later)
 dta-warn-bad-utf8 = some text wasn't valid UTF-8 and was read with replacement characters
 dta-warn-extended-missing = { $n } values were Stata's extended missing values (.a to .z), read as system-missing
+sav-warn-non-finite = { $n } values were not finite numbers (NaN or infinity), read as system-missing
 dta-warn-truncated = strings longer than { $width } bytes were cut to that length
 dta-warn-renamed = variable { $from } was renamed { $to }, a valid name here
 err-dta-too-many-variables = a Stata file holds up to 32,767 variables; this dataset has { $n }

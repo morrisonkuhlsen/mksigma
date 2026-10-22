@@ -22,6 +22,15 @@ impl Value {
             _ => None,
         }
     }
+
+    /// The value a dataset stores: a number that isn't finite (NaN, ±infinity) becomes
+    /// system-missing, so no procedure ever sees one.
+    pub fn finite(self) -> Value {
+        match self {
+            Value::Num(x) if !x.is_finite() => Value::SysMis,
+            v => v,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -428,7 +437,7 @@ impl Dataset {
             return Err(DatasetError::CaseWidth { expected: self.variables.len(), got: values.len() });
         }
         for (column, v) in self.columns.iter_mut().zip(values) {
-            column.push(v);
+            column.push(v.finite());
         }
         Ok(())
     }
@@ -475,7 +484,7 @@ impl Dataset {
             return Err(DatasetError::ColumnLength { expected: self.n_cases(), got: column.len() });
         }
         self.variables.insert(index, var);
-        self.columns.insert(index, column);
+        self.columns.insert(index, column.into_iter().map(Value::finite).collect());
         if let Some(w) = self.weight.as_mut().filter(|w| **w >= index) {
             *w += 1;
         }
@@ -507,7 +516,7 @@ impl Dataset {
             return Err(DatasetError::CaseWidth { expected: self.variables.len(), got: values.len() });
         }
         for (column, v) in self.columns.iter_mut().zip(values) {
-            column.insert(index, v);
+            column.insert(index, v.finite());
         }
         Ok(())
     }
@@ -534,7 +543,7 @@ impl Dataset {
             }
         }
         let column = self.columns.get_mut(index).ok_or(DatasetError::NoVariable(index))?;
-        Ok(std::mem::replace(column, values))
+        Ok(std::mem::replace(column, values.into_iter().map(Value::finite).collect()))
     }
 
     /// Removes the cases at `indexes` (ascending, no repeats) and returns their values, in the
@@ -586,7 +595,7 @@ impl Dataset {
             }
             for (c, out) in columns.iter_mut().zip(rebuilt.iter_mut()) {
                 let v = if restore { current.as_mut().and_then(Iterator::next) } else { c.next() };
-                out.push(v.unwrap_or(Value::SysMis));
+                out.push(v.map_or(Value::SysMis, Value::finite));
             }
         }
         self.columns = rebuilt;
@@ -628,7 +637,7 @@ impl Dataset {
     pub fn set_value(&mut self, case: usize, index: usize, value: Value) -> Result<(), DatasetError> {
         let var = self.variables.get(index).ok_or(DatasetError::NoVariable(index))?;
         let value = match (var.var_type, value) {
-            (VarType::Numeric, v @ (Value::Num(_) | Value::SysMis)) => v,
+            (VarType::Numeric, v @ (Value::Num(_) | Value::SysMis)) => v.finite(),
             (VarType::String(width), Value::Str(mut s)) => {
                 let mut end = usize::from(width).min(s.len());
                 while !s.is_char_boundary(end) {
@@ -679,6 +688,25 @@ mod tests {
         ds.push_case(vec![Value::Num(1.0)]).unwrap();
         assert_eq!(ds.n_cases(), 1);
         assert_eq!(ds.add_variable(Variable::numeric("y")), Err(DatasetError::NotEmpty));
+    }
+
+    #[test]
+    fn numbers_that_are_not_finite_are_stored_as_system_missing() {
+        let mut ds = Dataset::new();
+        ds.add_variable(Variable::numeric("x")).unwrap();
+        ds.push_case(vec![Value::Num(f64::NAN)]).unwrap();
+        ds.insert_case(1, vec![Value::Num(f64::INFINITY)]).unwrap();
+        ds.push_case(vec![Value::Num(1.0)]).unwrap();
+        ds.set_value(2, 0, Value::Num(f64::NEG_INFINITY)).unwrap();
+        assert_eq!(ds.column(0), Some(&[Value::SysMis, Value::SysMis, Value::SysMis][..]));
+        ds.replace_column(0, vec![Value::Num(2.0), Value::Num(f64::NAN), Value::Num(3.0)]).unwrap();
+        assert_eq!(ds.column(0), Some(&[Value::Num(2.0), Value::SysMis, Value::Num(3.0)][..]));
+        ds.insert_variable(1, Variable::numeric("y"), vec![Value::Num(f64::INFINITY), Value::Num(4.0), Value::SysMis]).unwrap();
+        assert_eq!(ds.column(1), Some(&[Value::SysMis, Value::Num(4.0), Value::SysMis][..]));
+        let removed = ds.remove_cases(&[0]).unwrap();
+        ds.restore_cases(&[0], vec![vec![Value::Num(f64::NAN), Value::Num(5.0)]]).unwrap();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(ds.column(0).and_then(|c| c.first()), Some(&Value::SysMis));
     }
 
     #[test]

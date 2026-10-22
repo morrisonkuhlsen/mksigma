@@ -131,7 +131,7 @@ pub fn descriptives(ds: &Dataset, names: &[String]) -> Result<Table, StatsError>
                 m.add(x, *w);
             }
         }
-        let num = |value: f64| Cell::Num { value, decimals: 2 };
+        let num = |value: f64| num(Some(value), 2);
         let cells = if m.w == 0.0 {
             vec![Cell::Int(0), Cell::Empty, Cell::Empty, Cell::Empty, Cell::Empty]
         } else {
