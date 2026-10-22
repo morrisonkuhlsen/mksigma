@@ -413,6 +413,8 @@ fn read_data(
     warnings: &mut Vec<String>,
 ) -> Result<(Vec<Vec<Value>>, Vec<Refs>), DtaError> {
     let width: usize = kinds.iter().map(|k| k.bytes()).sum();
+    // Without variables there are no values to read, whatever N says.
+    let n = if width == 0 { 0 } else { n };
     // The data must be there before anything is set aside for it.
     let total = width.checked_mul(n).ok_or(DtaError::Truncated { offset: c.at })?;
     if total > c.left() {
@@ -520,6 +522,7 @@ fn build(
     let widest =
         |column: usize| rows.iter().filter_map(|r| r.get(column)).map(|v| if let Value::Str(s) = v { s.len() } else { 0 }).max().unwrap_or(0);
     let mut truncated = false;
+    let mut out_of_range = 0usize;
     let mut widths = Vec::with_capacity(d.kinds.len());
     let mut dates = Vec::with_capacity(d.kinds.len());
     for (column, kind) in d.kinds.iter().enumerate() {
@@ -558,8 +561,14 @@ fn build(
     }
     for mut row in rows {
         for ((value, width), date) in row.iter_mut().zip(&widths).zip(&dates) {
-            if let (Value::Num(x), Some(kind)) = (&mut *value, date) {
-                *x = date_value(*x, *kind);
+            if let (Value::Num(x), Some(kind)) = (&*value, date) {
+                *value = match date_value(*x, *kind) {
+                    Some(date) => Value::Num(date),
+                    None => {
+                        out_of_range += 1;
+                        Value::SysMis
+                    }
+                };
             }
             if let (Value::Str(s), Some(w)) = (value, width)
                 && s.len() > *w
@@ -576,6 +585,9 @@ fn build(
     }
     if truncated {
         warnings.push(tr!("dta-warn-truncated", width = MAX_STRING));
+    }
+    if out_of_range > 0 {
+        warnings.push(tr!("dta-warn-date-range", n = out_of_range));
     }
     Ok(ds)
 }
@@ -643,28 +655,35 @@ fn number_format(stata: &str, kind: Kind, whole: bool) -> Format {
 }
 
 /// A Stata date in MK Sigma's terms, seconds from 14 October 1582: from days (`%td`),
-/// milliseconds (`%tc`), months (`%tm`, its first day) or quarters (`%tq`, its first day).
-fn date_value(x: f64, kind: FormatKind) -> f64 {
+/// milliseconds (`%tc`), months (`%tm`, its first day) or quarters (`%tq`, its first day);
+/// `None` for a month or quarter beyond a million years either side.
+fn date_value(x: f64, kind: FormatKind) -> Option<f64> {
     match kind {
-        FormatKind::Date => STATA_EPOCH + x * 86_400.0,
-        FormatKind::DateTime => STATA_EPOCH + x / 1000.0,
+        FormatKind::Date => Some(STATA_EPOCH + x * 86_400.0),
+        FormatKind::DateTime => Some(STATA_EPOCH + x / 1000.0),
         FormatKind::MoYr => month_start(x),
         FormatKind::QYr => month_start(x * 3.0),
-        _ => x,
+        _ => Some(x),
     }
 }
 
+/// The most months from January 1960 a date may be: a million years.
+pub(crate) const MAX_MONTHS: f64 = 12_000_000.0;
+
 /// The first day of month `m` counted from January 1960, in seconds from 14 October 1582.
-fn month_start(m: f64) -> f64 {
+fn month_start(m: f64) -> Option<f64> {
+    if m.is_nan() || m.abs() > MAX_MONTHS {
+        return None;
+    }
     let m = m.floor() as i64;
     let year = 1960 + m.div_euclid(12);
     let month = m.rem_euclid(12) + 1;
-    STATA_EPOCH + days_from_1960(year, month, 1) as f64 * 86_400.0
+    Some(STATA_EPOCH + days_from_1960(year, month, 1) as f64 * 86_400.0)
 }
 
 /// The date of day `days` from 1 January 1970 (Hinnant's civil-from-days): year, month, day.
 pub(crate) fn civil(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
+    let z = days.saturating_add(719_468);
     let era = z.div_euclid(146_097);
     let doe = z - era * 146_097;
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;

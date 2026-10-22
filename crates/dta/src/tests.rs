@@ -311,6 +311,51 @@ fn dates_count_from_1582() {
 }
 
 #[test]
+fn dates_out_of_range_are_missing_not_a_crash() {
+    // A month and a quarter of 1e300, and a month that is fine (#23).
+    let mut data = Bytes::new(false);
+    data.f64(1e300).f64(-1e300).f64(1.0);
+    let vars = [var(65526, "m", "%tm"), var(65526, "q", "%tq"), var(65526, "ok", "%tm")];
+    let file = read(&tagged(118, false, &vars, 1, &data.out, b"", &[])).unwrap();
+    assert_eq!(file.dataset.column(0).unwrap()[0], Value::SysMis);
+    assert_eq!(file.dataset.column(1).unwrap()[0], Value::SysMis);
+    assert_eq!(num(&file.dataset, 2, 0), 137_775.0 * 86_400.0 + 31.0 * 86_400.0);
+    assert_eq!(file.warnings, [tr!("dta-warn-date-range", n = 2)]);
+    // Writing a MOYR or QYR far out of range.
+    let mut ds = Dataset::new();
+    for (name, kind) in [("m", FormatKind::MoYr), ("q", FormatKind::QYr)] {
+        let mut v = Variable::numeric(name);
+        v.format = mksigma_core::Format::new(kind, 8, 0);
+        ds.add_variable(v).unwrap();
+    }
+    ds.push_case(vec![Value::Num(1e24), Value::Num(-1e300)]).unwrap();
+    ds.push_case(vec![Value::Num(137_775.0 * 86_400.0), Value::Num(137_775.0 * 86_400.0)]).unwrap();
+    let written = write(&ds, "").unwrap();
+    assert_eq!(written.warnings, [tr!("dta-warn-date-range-written")]);
+    let back = read(&written.bytes).unwrap().dataset;
+    assert_eq!(back.column(0).unwrap(), [Value::SysMis, Value::Num(137_775.0 * 86_400.0)]);
+    assert_eq!(back.column(1).unwrap(), [Value::SysMis, Value::Num(137_775.0 * 86_400.0)]);
+    // No overflow at the extremes of the day count.
+    for days in [i64::MIN, i64::MAX] {
+        assert!((1..=12).contains(&civil(days).1));
+    }
+}
+
+#[test]
+fn no_variables_and_a_huge_n_reads_no_cases() {
+    // Format 118: K = 0, N = 2^62.
+    let file = read(&tagged(118, false, &[], 1 << 62, b"", b"", &[])).unwrap();
+    assert_eq!((file.dataset.n_cases(), file.dataset.variables().len()), (0, 0));
+    // Format 114: nvar = 0, nobs = 0xFFFFFFFF.
+    let mut b = Bytes::new(false);
+    b.u8(114).u8(2).u8(1).u8(0).u16(0).u32(u32::MAX);
+    b.fixed("", 81).fixed("", 18);
+    b.u16(0);
+    b.u8(0).u32(0);
+    assert_eq!(read(&b.out).map(|f| f.dataset.n_cases()), Ok(0));
+}
+
+#[test]
 fn names_stata_allows_and_spss_style_names_dont() {
     let mut data = Bytes::new(false);
     data.u8(1).u8(2).u8(3);

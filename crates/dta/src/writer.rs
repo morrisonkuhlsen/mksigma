@@ -60,22 +60,28 @@ enum Unit {
     Quarters,
 }
 
-/// The year and month (0–11) of seconds from 14 October 1582.
-fn year_month(x: f64) -> (i64, i64) {
+/// The year and month (0–11) of seconds from 14 October 1582; `None` beyond a million years
+/// either side of 1960.
+fn year_month(x: f64) -> Option<(i64, i64)> {
+    let days = (x - STATA_EPOCH) / 86_400.0;
+    if days.is_nan() || days.abs() > crate::MAX_MONTHS * 31.0 {
+        return None;
+    }
     // Days from 14 October 1582 to 1 January 1970.
     let (y, m, _) = crate::civil((x / 86_400.0).floor() as i64 - 141_428);
-    (y, i64::from(m) - 1)
+    Some((y, i64::from(m) - 1))
 }
 
-fn convert(x: f64, unit: Unit) -> f64 {
+/// A value in the variable's Stata unit; `None` for a month or quarter out of range.
+fn convert(x: f64, unit: Unit) -> Option<f64> {
     match unit {
-        Unit::Plain => x,
-        Unit::Days => ((x - STATA_EPOCH) / 86_400.0).floor(),
-        Unit::Milliseconds => ((x - STATA_EPOCH) * 1000.0).round(),
+        Unit::Plain => Some(x),
+        Unit::Days => Some(((x - STATA_EPOCH) / 86_400.0).floor()),
+        Unit::Milliseconds => Some(((x - STATA_EPOCH) * 1000.0).round()),
         Unit::Months | Unit::Quarters => {
-            let (y, m) = year_month(x);
+            let (y, m) = year_month(x)?;
             let months = (y - 1960) * 12 + m;
-            if unit == Unit::Months { months as f64 } else { months.div_euclid(3) as f64 }
+            Some(if unit == Unit::Months { months as f64 } else { months.div_euclid(3) as f64 })
         }
     }
 }
@@ -189,7 +195,7 @@ pub fn write(ds: &Dataset, timestamp: &str) -> Result<Written, DtaError> {
                     _ => Unit::Plain,
                 };
                 let values: Vec<f64> =
-                    column(j).iter().filter_map(Value::as_num).filter(|x| user_missing(var, *x).is_none()).map(|x| convert(x, unit)).collect();
+                    column(j).iter().filter_map(Value::as_num).filter(|x| user_missing(var, *x).is_none()).filter_map(|x| convert(x, unit)).collect();
                 dropped_user_missing |= column(j).iter().filter_map(Value::as_num).any(|x| user_missing(var, x).is_some());
                 let whole = values.iter().all(|x| x.fract() == 0.0);
                 let within = |lo: f64, hi: f64| whole && values.iter().all(|x| *x >= lo && *x <= hi);
@@ -310,6 +316,7 @@ pub fn write(ds: &Dataset, timestamp: &str) -> Result<Written, DtaError> {
     o.tag("</characteristics>");
     o.section("<data>");
     let mut strls: Vec<(u16, u64, &str)> = Vec::new();
+    let mut out_of_range = false;
     for case in 0..n {
         for (j, (var, store)) in vars.iter().zip(&stores).enumerate() {
             let value = column(j).get(case).unwrap_or(&Value::SysMis);
@@ -332,11 +339,16 @@ pub fn write(ds: &Dataset, timestamp: &str) -> Result<Written, DtaError> {
                 }
                 _ => {
                     // `.` for system-missing, `.a`, `.b`… for user-missing values.
+                    let converted = value.as_num().and_then(|x| convert(x, units.get(j).copied().unwrap_or(Unit::Plain)));
                     let missing = match value {
-                        Value::Num(x) => user_missing(var, *x).map(|k| k + 1),
+                        Value::Num(x) => user_missing(var, *x).map(|k| k + 1).or_else(|| {
+                            // A date out of range is written as `.`.
+                            out_of_range |= converted.is_none();
+                            converted.is_none().then_some(0)
+                        }),
                         _ => Some(0),
                     };
-                    let x = value.as_num().map_or(0.0, |x| convert(x, units.get(j).copied().unwrap_or(Unit::Plain)));
+                    let x = converted.unwrap_or(0.0);
                     match (*store, missing) {
                         (Store::Byte, None) => o.bytes.push(x as i8 as u8),
                         (Store::Byte, Some(m)) => o.bytes.push(101 + m),
@@ -352,6 +364,9 @@ pub fn write(ds: &Dataset, timestamp: &str) -> Result<Written, DtaError> {
         }
     }
     o.tag("</data>");
+    if out_of_range {
+        warnings.push(tr!("dta-warn-date-range-written"));
+    }
     o.section("<strls>");
     for (v, obs, text) in strls {
         o.tag("GSO");
