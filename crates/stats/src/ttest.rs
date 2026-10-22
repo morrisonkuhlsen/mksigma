@@ -32,7 +32,7 @@ fn t_value(diff: f64, se: Option<f64>) -> Option<f64> {
     se.map(|se| diff / se).filter(|t| t.is_finite())
 }
 
-/// SPSS's note for a test that has data but no t: every value the same.
+/// The note for a test that has data but no t: every value the same.
 fn zero_sd_note(m: &Moments, name: &str, notes: &mut Vec<Item>) {
     if m.w > 0.0 && m.std_dev().is_none_or(|sd| sd == 0.0) {
         notes.push(Item::Text(tr!("o-t-zero-sd", name = name)));
@@ -108,7 +108,7 @@ fn independent(ds: &Dataset, variables: &[String], group: &str, first: &Value, s
             ));
         }
 
-        // Nothing to compare when a group is empty: SPSS says so instead of a t.
+        // Nothing to compare when a group is empty: a note says so instead of a t.
         let both = m1.w > 0.0 && m2.w > 0.0;
         let diff = both.then_some(m1.mean - m2.mean);
         if !both {
@@ -336,7 +336,7 @@ mod tests {
         })
     }
 
-    /// The edge cases of #28: each gives SPSS's note and blanks, never a made-up number.
+    /// The edge cases of #28: each gives a note and blanks, never a made-up number.
     #[test]
     fn an_empty_group_has_no_difference() {
         let items = independent_x(&dataset(&[(1.0, 3.0, 0.0), (1.0, 5.0, 0.0), (1.0, 7.0, 0.0)]));
@@ -346,7 +346,7 @@ mod tests {
             assert_eq!(row.1[5], Cell::Empty, "Sig");
             assert_eq!(row.1[6], Cell::Empty, "the mean difference isn't −0 or the other mean");
         }
-        assert_eq!(note(&items), Some("t cannot be computed for x because at least one of the groups is empty."));
+        assert_eq!(note(&items), Some("No t for x: one of the two groups has no valid cases."));
     }
 
     #[test]
@@ -357,12 +357,12 @@ mod tests {
             assert_eq!((&row.1[3], &row.1[5], &row.1[8], &row.1[9]), (&Cell::Empty, &Cell::Empty, &Cell::Empty, &Cell::Empty));
             assert_eq!(value(&row.1[6]), -3.0, "the difference is still shown");
         }
-        assert!(note(&items).is_some_and(|n| n.contains("both groups are 0")));
+        assert!(note(&items).is_some_and(|n| n.contains("within each group every value is the same")));
         // One sample and paired: every value (or difference) the same.
         let ds = dataset(&[(1.0, 4.0, 1.0), (1.0, 4.0, 1.0), (1.0, 4.0, 1.0)]);
         let one = t_test(&ds, &TTest::OneSample { variables: vec!["x".into()], test_value: 0.0 }, 0.95).unwrap();
         assert_eq!(&table(&one[1]).rows[0].1[..3], [Cell::Empty, Cell::Int(2), Cell::Empty]);
-        assert!(note(&one).is_some_and(|n| n.ends_with("the standard deviation is 0.")));
+        assert!(note(&one).is_some_and(|n| n.ends_with("the standard error is 0.")));
         let paired = t_test(&ds, &TTest::Paired { pairs: vec![("x".into(), "y".into())] }, 0.95).unwrap();
         assert_eq!(table(&paired[2]).rows[0].1[8], Cell::Empty);
         assert!(note(&paired).is_some());
