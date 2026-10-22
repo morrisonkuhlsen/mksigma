@@ -47,7 +47,7 @@ fn is_name(word: &str) -> bool {
 fn literal(token: &Token) -> Option<Literal> {
     match token {
         Token::Str(s) => Some(Literal::Str(s.clone())),
-        Token::Word(w) if !is_name(w) => w.parse().ok().map(Literal::Num),
+        Token::Word(w) if !is_name(w) => w.parse().ok().filter(|x: &f64| x.is_finite()).map(Literal::Num),
         _ => None,
     }
 }

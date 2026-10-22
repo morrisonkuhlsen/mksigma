@@ -445,7 +445,7 @@ fn read_data(
                 Kind::Long => integer(i64::from(c.u32()? as i32), 2_147_483_620, &mut extended),
                 Kind::Float => {
                     let x = f32::from_bits(c.u32()?);
-                    if x.is_nan() || x > f32::from_bits(0x7eff_ffff) {
+                    if !x.is_finite() || x > f32::from_bits(0x7eff_ffff) {
                         extended += usize::from(x > f32::from_bits(0x7f00_0000));
                         Value::SysMis
                     } else {
@@ -455,7 +455,7 @@ fn read_data(
                 }
                 Kind::Double => {
                     let x = f64::from_bits(c.u64()?);
-                    if x.is_nan() || x > f64::from_bits(0x7fdf_ffff_ffff_ffff) {
+                    if !x.is_finite() || x > f64::from_bits(0x7fdf_ffff_ffff_ffff) {
                         extended += usize::from(x > f64::from_bits(0x7fe0_0000_0000_0000));
                         Value::SysMis
                     } else {

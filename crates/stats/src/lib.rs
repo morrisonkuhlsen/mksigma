@@ -131,7 +131,7 @@ pub fn descriptives(ds: &Dataset, names: &[String]) -> Result<Table, StatsError>
                 m.add(x, *w);
             }
         }
-        let num = |value: f64| Cell::Num { value, decimals: 2 };
+        let num = |value: f64| num(Some(value), 2);
         let cells = if m.w == 0.0 {
             vec![Cell::Int(0), Cell::Empty, Cell::Empty, Cell::Empty, Cell::Empty]
         } else {
@@ -181,6 +181,19 @@ mod tests {
             ds.push_case(vec![Value::Num(x), y.map_or(Value::SysMis, Value::Num)]).unwrap();
         }
         ds
+    }
+
+    #[test]
+    fn non_finite_values_are_missing() {
+        // A NaN and an infinity that got past the readers change nothing (#21).
+        let mut ds = dataset();
+        ds.push_case(vec![Value::Num(f64::NAN), Value::Num(f64::INFINITY)]).unwrap();
+        ds.push_case(vec![Value::Num(f64::NEG_INFINITY), Value::Num(f64::NAN)]).unwrap();
+        let names = ["x".to_string(), "y".to_string()];
+        assert_eq!(descriptives(&ds, &names).unwrap().rows, descriptives(&dataset(), &names).unwrap().rows);
+        let options = frequencies::Options { variables: vec!["x".into()], table: true, ..Default::default() };
+        let shown = format!("{:?}", frequencies::frequencies(&ds, &options).unwrap());
+        assert!(!shown.contains("NaN") && !shown.contains("inf"), "{shown}");
     }
 
     #[test]

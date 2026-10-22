@@ -134,7 +134,7 @@ pub(crate) fn crosstabs(rest: &[Token]) -> Result<Command, SyntaxError> {
 fn literal(token: &Token) -> Option<Literal> {
     match token {
         Token::Str(s) => Some(Literal::Str(s.clone())),
-        Token::Word(w) => w.parse().ok().map(Literal::Num),
+        Token::Word(w) => w.parse().ok().filter(|x: &f64| x.is_finite()).map(Literal::Num),
         _ => None,
     }
 }
@@ -178,7 +178,7 @@ fn by_group(tokens: &[Token]) -> Option<(Vec<String>, String, f64, f64)> {
             .iter()
             .filter(|t| **t != Token::Comma)
             .map(|t| match t {
-                Token::Word(w) => w.parse().ok(),
+                Token::Word(w) => w.parse().ok().filter(|x: &f64| x.is_finite()),
                 _ => None,
             })
             .collect::<Option<_>>()?,
@@ -654,6 +654,13 @@ mod tests {
 
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn an_overflowing_number_is_no_number() {
+        // Rust reads `1e999` as infinity; MK Sigma doesn't take it (#21).
+        assert!(parse("T-TEST GROUPS=g(1e999 2) /VARIABLES=x.").is_err());
+        assert!(parse("COMPUTE y = 1e999.").is_err());
     }
 
     #[test]

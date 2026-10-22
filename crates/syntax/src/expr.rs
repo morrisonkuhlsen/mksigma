@@ -171,7 +171,8 @@ impl Parser<'_> {
             }
             // A number that starts with its sign: `-2**2` is still −(2²).
             Some(Token::Word(w)) if !is_name(&w) => {
-                let x: f64 = w.parse().map_err(|_| SyntaxError::Expected { command: "expression", expected: "a number" })?;
+                let x: f64 =
+                    w.parse().ok().filter(|x: &f64| x.is_finite()).ok_or(SyntaxError::Expected { command: "expression", expected: "a number" })?;
                 if x < 0.0 && matches!(self.peek(), Some(Token::Power)) {
                     self.pos += 1;
                     let exponent = self.unary()?;

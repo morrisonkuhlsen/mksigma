@@ -335,6 +335,9 @@ impl Variable {
     pub fn is_missing(&self, v: &Value) -> bool {
         match (&self.missing, v) {
             (_, Value::SysMis) => true,
+            // NaN and ±Inf are no value to compute with; the readers map them to system-missing,
+            // and anything that slips past is missing too (#21).
+            (_, Value::Num(n)) if !n.is_finite() => true,
             (MissingValues::None, _) => false,
             (MissingValues::Discrete(list), v) => list.contains(v),
             (MissingValues::Range { low, high, discrete }, Value::Num(n)) => (*low..=*high).contains(n) || *discrete == Some(*n),
@@ -662,6 +665,13 @@ impl Dataset {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_finite_numbers_are_missing() {
+        let x = Variable::numeric("x");
+        assert!([f64::NAN, f64::INFINITY, f64::NEG_INFINITY].iter().all(|n| x.is_missing(&Value::Num(*n))));
+        assert!(!x.is_missing(&Value::Num(f64::MAX)));
+    }
 
     #[test]
     fn names_are_unique_ignoring_case() {

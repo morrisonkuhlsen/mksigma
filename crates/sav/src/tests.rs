@@ -248,6 +248,19 @@ fn corrupted_bytes_never_panic() {
 }
 
 #[test]
+fn non_finite_numbers_read_as_system_missing_with_a_warning() {
+    let mut b = Builder::new(false);
+    b.header(b"$FL2", 1, 0, 0, 4).var(&Var { width: 0, name: "X", label: None, n_missing: 0, missing: &[], print: F8_2 }).end_dictionary();
+    for x in [1.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        b.f64(x);
+    }
+    let f = read(&b.buf).unwrap();
+    assert_eq!(f.dataset.column(0).unwrap(), [Value::Num(1.5), Value::SysMis, Value::SysMis, Value::SysMis]);
+    assert_eq!(f.warnings.len(), 1, "{:?}", f.warnings);
+    assert!(f.warnings[0].starts_with("3 values"), "{:?}", f.warnings);
+}
+
+#[test]
 fn an_incomplete_last_case_is_dropped_with_a_warning() {
     let mut file = uncompressed(false);
     file.truncate(file.len() - 8);

@@ -98,7 +98,12 @@ pub(crate) fn count(var: &Variable, column: &[Value], weights: &[f64], order: Or
     let mut system_missing = 0.0;
     for (value, &w) in column.iter().zip(weights).filter(|(_, w)| **w > 0.0) {
         let key = match value {
+            // A non-finite number is system-missing, not a "NaN" category (#21).
             Value::SysMis => {
+                system_missing += w;
+                continue;
+            }
+            Value::Num(x) if !x.is_finite() => {
                 system_missing += w;
                 continue;
             }
@@ -179,7 +184,7 @@ fn statistics(var: &Variable, counts: &Counts, wanted: &[Statistic]) -> (Vec<Cel
     let top = counts.valid.iter().map(|(_, w)| *w).fold(0.0, f64::max);
     let modes: Vec<f64> = counts.valid.iter().filter(|(_, w)| *w == top).filter_map(|(v, _)| v.as_num()).collect();
     let mode = modes.iter().copied().reduce(f64::min);
-    let num = |value: f64| Cell::Num { value, decimals: 2 };
+    let num = |value: f64| crate::num(Some(value), 2);
     let have = m.w > 0.0;
     let sd = m.std_dev();
     let cells =
