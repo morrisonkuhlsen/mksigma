@@ -178,8 +178,10 @@ fn pearson(pairs: &[(f64, f64, f64)], w: bool, how: &str, one_tailed: bool, full
     let dx = || paren(row(vec![xi(), text("−"), bar(var("x"))]));
     let dy = || paren(row(vec![yi(), text("−"), bar(var("y"))]));
     let sxy: f64 = pairs.iter().map(|(x, y, w)| w * (x - mx) * (y - my)).sum();
-    let sxx: f64 = pairs.iter().map(|(x, _, w)| w * (x - mx).powi(2)).sum();
-    let syy: f64 = pairs.iter().map(|(_, y, w)| w * (y - my).powi(2)).sum();
+    // A constant's sum of squares is 0, as the table takes it, whatever rounding leaves.
+    let constant = |f: fn(&(f64, f64, f64)) -> f64| pairs.first().is_some_and(|first| pairs.iter().all(|p| f(p) == f(first)));
+    let sxx: f64 = if constant(|p| p.0) { 0.0 } else { pairs.iter().map(|(x, _, w)| w * (x - mx).powi(2)).sum() };
+    let syy: f64 = if constant(|p| p.1) { 0.0 } else { pairs.iter().map(|(_, y, w)| w * (y - my).powi(2)).sum() };
     let cross: Vec<Math> = pairs
         .iter()
         .map(|(x, y, wi)| {
@@ -1689,6 +1691,11 @@ pub fn regression(ds: &Dataset, options: &crate::RegressionOptions, full: bool) 
     let df_residual = big_n - (p + first) as f64;
     if p == 0 || df_residual <= 0.0 {
         steps.push(say(&tr!("ex-it-needs-more-cases-than-predictors-plus-one")));
+        return Ok(Explanation { title: tr!("ex-title-regression"), sections: vec![(tr!("ex-the-model"), steps)] });
+    }
+    // As the table: a constant dependent leaves nothing to explain.
+    if first == 1 && cases.first().is_some_and(|f| cases.iter().all(|c| c.0 == f.0)) {
+        steps.push(say(&tr!("ex-the-dependent-is-constant")));
         return Ok(Explanation { title: tr!("ex-title-regression"), sections: vec![(tr!("ex-the-model"), steps)] });
     }
     let x_name = |j: usize| if p == 1 { var("x") } else { sub(var("x"), text(&(j + 1).to_string())) };

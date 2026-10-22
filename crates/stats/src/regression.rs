@@ -53,8 +53,13 @@ pub(crate) fn residuals(cases: &[Case], set: &[usize], constant: bool, target: i
     Some(sub.iter().map(|(v, x, w)| (v - intercept - slopes.iter().zip(x).map(|(c, xi)| c * xi).sum::<f64>(), *w)).collect())
 }
 
-/// The weighted sum of squares of `f` about its mean, or about 0 without a constant.
+/// The weighted sum of squares of `f` about its mean, or about 0 without a constant. Exactly 0
+/// for a constant about its mean, told by its values: the mean of a value such as 3.7 isn't
+/// exact, so the sum would come out a hair above 0 and pass for variation.
 fn spread_of(cases: &[Case], constant: bool, f: impl Fn(&Case) -> f64) -> f64 {
+    if constant && cases.first().is_some_and(|first| cases.iter().all(|c| f(c) == f(first))) {
+        return 0.0;
+    }
     let total_w: f64 = cases.iter().map(|c| c.2).sum();
     let mean = if constant { cases.iter().map(|c| f(c) * c.2).sum::<f64>() / total_w } else { 0.0 };
     cases.iter().map(|c| c.2 * (f(c) - mean).powi(2)).sum()
@@ -260,6 +265,10 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
     let first = usize::from(with_constant);
     if p == 0 || n - (p + first) as f64 <= 0.0 {
         return Ok(vec![Item::Warning(tr!("o-regression-needs-cases", n = n, needed = p + first))]);
+    }
+    // A constant dependent has nothing to explain.
+    if with_constant && spread_of(&cases, true, |c| c.0) == 0.0 {
+        return Ok(vec![Item::Warning(tr!("o-regression-constant-dependent", name = yvar.display_name()))]);
     }
     // The tolerance test; the model holds the predictors that entered.
     let (entered, left_out) = entry(&cases, p, options.tolerance, with_constant);
@@ -492,6 +501,29 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(&items[..], [Item::Warning(s)] if s.contains("tolerance")), "{items:?}");
+    }
+
+    /// Constants that aren't exact in binary (#27): their sums of squares came out a hair above 0.
+    #[test]
+    fn a_constant_dependent_or_predictor_of_3_7() {
+        let xs = [1.0, 4.0, 2.0, 8.0, 5.0, 7.0, 3.0, 6.0, 9.0, 0.5, 2.5, 7.5];
+        let two = |dependent: &str| Options { dependent: dependent.into(), predictors: vec!["x1".into(), "x2".into()], ..Options::default() };
+        // y = 3.7 throughout: no model, and a warning that says why.
+        let flat_y: Vec<(f64, f64, f64)> = xs.iter().zip(xs.iter().rev()).map(|(a, b)| (3.7, *a, *b)).collect();
+        let items = regression(&dataset(&flat_y), &two("y")).unwrap();
+        assert!(matches!(&items[..], [Item::Warning(s)] if s.contains("constant")), "{items:?}");
+        let explained = crate::explain::regression(&dataset(&flat_y), &two("y"), false).unwrap();
+        assert!(format!("{:?}", explained.sections).contains(&tr!("ex-the-dependent-is-constant")), "its Σ says why");
+        // x2 = 3.7 throughout: the model on x1, x2 excluded with a tolerance of 0.
+        let flat_x: Vec<(f64, f64, f64)> = xs.iter().enumerate().map(|(i, a)| (2.0 * a + if i % 2 == 0 { 0.5 } else { -0.5 }, *a, 3.7)).collect();
+        let items = regression(&dataset(&flat_x), &two("y")).unwrap();
+        let Some(Item::Table(coef)) = items.iter().find(|i| matches!(i, Item::Table(t) if t.title == "Coefficients")) else { panic!("{items:?}") };
+        assert_eq!(coef.rows.len(), 2, "the constant and x1");
+        let Some(Item::Table(excluded)) = items.iter().find(|i| matches!(i, Item::Table(t) if t.title == "Excluded Variables")) else {
+            panic!("{items:?}")
+        };
+        assert_eq!(excluded.rows[0].0, "x2");
+        assert_eq!(value(&excluded.rows[0].1[4]), 0.0, "tolerance 0");
     }
 
     #[test]
