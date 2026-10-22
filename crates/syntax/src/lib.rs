@@ -46,6 +46,9 @@ pub enum Command {
     Descriptives { variables: Vec<String> },
     /// `DISPLAY DICTIONARY`
     DisplayDictionary,
+    /// `EXECUTE`: runs pending transformations. They already run as they are given, so it
+    /// does nothing; syntax pasted from elsewhere has one after almost every transformation.
+    Execute,
     /// `FREQUENCIES [VARIABLES=] var... [/FORMAT=...] [/STATISTICS=...]`
     Frequencies {
         variables: Vec<String>,
@@ -301,6 +304,13 @@ fn parse_command(tokens: &[Token]) -> Result<Command, SyntaxError> {
             _ => Err(SyntaxError::Expected { command: "DISPLAY", expected: "DICTIONARY" }),
         };
     }
+    if is_keyword(name, "EXECUTE") {
+        return if rest.is_empty() {
+            Ok(Command::Execute)
+        } else {
+            Err(SyntaxError::Expected { command: "EXECUTE", expected: "the end of the command" })
+        };
+    }
     if is_keyword(name, "DESCRIPTIVES") {
         let Parts { variables, subcommands } = parts("DESCRIPTIVES", rest)?;
         if let Some((sub, _)) = subcommands.first() {
@@ -465,6 +475,8 @@ mod tests {
     fn display_dictionary() {
         assert_eq!(parse("DISPLAY DICTIONARY."), Ok(vec![Command::DisplayDictionary]));
         assert_eq!(parse("disp dic."), Ok(vec![Command::DisplayDictionary]));
+        assert_eq!(parse("EXECUTE.\nexe."), Ok(vec![Command::Execute, Command::Execute]));
+        assert!(parse("EXECUTE x.").is_err());
         assert!(parse("DISPLAY LABELS.").is_err());
     }
 

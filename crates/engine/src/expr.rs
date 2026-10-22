@@ -94,6 +94,8 @@ pub(crate) enum Node {
     Index(Box<Node>, Box<Node>),
     Number(Box<Node>),
     ToString(Box<Node>, Format),
+    /// `$CASENUM`: the case's number, from 1.
+    CaseNum,
 }
 
 fn invalid(message: String) -> EngineError {
@@ -127,6 +129,9 @@ impl Compiler<'_> {
         Ok(match e {
             Expr::Num(x) => (Node::Num(*x), Type::Num),
             Expr::Str(s) => (Node::Str(s.clone()), Type::Str),
+            // The system variables: `$SYSMIS` is the system-missing value.
+            Expr::Var(name) if name.eq_ignore_ascii_case("$SYSMIS") => (Node::Num(f64::NAN), Type::Num),
+            Expr::Var(name) if name.eq_ignore_ascii_case("$CASENUM") => (Node::CaseNum, Type::Num),
             Expr::Var(name) => match self.variable(name)? {
                 (i, Type::Num) => (Node::Var(i), Type::Num),
                 (i, Type::Str) => (Node::StrVar(i), Type::Str),
@@ -326,7 +331,8 @@ impl Case<'_> {
 
     pub(crate) fn num(&self, node: &Node) -> Option<f64> {
         match node {
-            Node::Num(x) => Some(*x),
+            Node::Num(x) => Some(*x).filter(|x| !x.is_nan()),
+            Node::CaseNum => Some(self.case.saturating_add(1) as f64),
             Node::Var(i) => self.var(*i),
             Node::RawVar(i) => self.value(*i).and_then(Value::as_num),
             Node::Neg(a) => self.num(a).map(|x| -x),

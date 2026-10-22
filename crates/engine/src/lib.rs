@@ -136,6 +136,7 @@ fn changes_data(command: &Command) -> bool {
         Command::Descriptives { .. }
             | Command::Frequencies { .. }
             | Command::DisplayDictionary
+            | Command::Execute
             | Command::Crosstabs { .. }
             | Command::TTest { .. }
             | Command::Oneway { .. }
@@ -1154,6 +1155,7 @@ impl Session {
             Command::SelectIf(cond) => return transform::select_if(&mut self.dataset, cond),
             Command::Slice(spec) => self.set_slicer(spec.as_ref())?,
             Command::OutputStyle(spec) => self.set_style(spec),
+            Command::Execute => {}
             _ => {
                 // The run keeps the command as written, so `ALL` means the variables of the day.
                 let items = analyse(&self.dataset, written)?;
@@ -1363,6 +1365,26 @@ fn analyse(ds: &Dataset, command: &Command) -> Result<Vec<Item>, EngineError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Syntax as SPSS users paste it (#34): EXECUTE after the transformations, $SYSMIS and
+    /// $CASENUM in expressions.
+    #[test]
+    fn pasted_syntax_with_execute_and_system_variables_runs() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("COMPUTE twice = age * 2.\nEXECUTE.\nIF (age > 30) twice = $SYSMIS.\nCOMPUTE n = $casenum.\nEXE.").unwrap();
+        let (t, _) = s.dataset.variable("twice").unwrap();
+        let (a, _) = s.dataset.variable("age").unwrap();
+        let (n, _) = s.dataset.variable("n").unwrap();
+        for case in 0..s.dataset.n_cases() {
+            let age = s.dataset.column(a).unwrap()[case].as_num().unwrap();
+            let expected = if age > 30.0 { Value::SysMis } else { Value::Num(age * 2.0) };
+            assert_eq!(s.dataset.column(t).unwrap()[case], expected, "case {case}");
+            assert_eq!(s.dataset.column(n).unwrap()[case], Value::Num(case as f64 + 1.0));
+        }
+        // EXECUTE is no step of its own, and leaves nothing in the Output.
+        assert_eq!(s.steps().len(), 3);
+        assert!(s.steps().iter().all(|st| !format!("{st:?}").contains("EXE")));
+    }
 
     #[test]
     fn only_a_parsed_dashboard_that_writes_nothing_runs_on_open() {
