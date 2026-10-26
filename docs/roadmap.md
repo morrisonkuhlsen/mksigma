@@ -27,11 +27,14 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   (pyreadstat). To do: `.zsav`, strings over 255 bytes, long-string missing values.
 - CSV import — **done**: `GET DATA /TYPE=TXT` (`/FILE`, `/DELIMITERS` with `\t`, `/QUALIFIER`,
   `/FIRSTCASE`, `/ENCODING`, `/VARIABLES=name format`), RFC 4180 quoting (doubled qualifiers,
-  fields across lines), UTF-8 with a Windows-1252 fallback. MK Sigma extensions: without
-  `/VARIABLES` the names come from the first record (`/READNAMES`) and types are inferred
-  (numbers, decimal commas when the delimiter isn't a comma, strings as wide as their longest
-  value; repeated whole-number codes are Nominal); without `/DELIMITERS` the delimiter is
-  detected. Opening `.csv`/`.tsv`/`.txt` in the app or CLI runs `GET DATA`, so the History
+  fields across lines; a qualifier mid-field is literal), the encoding from a byte-order mark
+  (UTF-8, UTF-16), else UTF-8 with bad bytes replaced, or Windows-1252 when nothing beyond
+  ASCII is UTF-8. MK Sigma extensions: without `/VARIABLES` the names come from the first
+  record (`/READNAMES`) and types are inferred (numbers with grouped thousands, and decimal
+  commas when the delimiter isn't a comma, read one way per column, the file's other columns
+  settling `1.500`; identifiers with leading zeros or over 15 digits, such as CEP and CPF, stay
+  strings; strings as wide as their longest value; repeated whole-number codes are Nominal);
+  without `/DELIMITERS` the delimiter is detected. Opening `.csv`/`.tsv`/`.txt` in the app or CLI runs `GET DATA`, so the History
   records it. To do: `.xlsx` (`/TYPE=XLSX`), fixed-width text, dates in text.
 - **Recorded data preparation** (Power Query style): every transformation is a syntax command
   shown as a list of applied steps that can be edited, reordered and replayed.
