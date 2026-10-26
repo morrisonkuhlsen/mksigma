@@ -29,11 +29,15 @@ pub struct Tokens {
     pub input_bg: Color32,
     /// The Output's page.
     pub paper: Color32,
-    /// Icon colours beside the accent: data, analysis, charts, warnings.
+    /// Icon colours beside the accent, one meaning each: charts (blue, teal), running and adding
+    /// (green), files and labels (orange), removing and PDF (red), relations between variables
+    /// and Learn (violet).
     pub blue: Color32,
+    pub teal: Color32,
     pub green: Color32,
     pub orange: Color32,
     pub red: Color32,
+    pub violet: Color32,
     pub danger: Color32,
     pub warn: Color32,
 }
@@ -60,10 +64,12 @@ impl Tokens {
             cell_text: Color32::from_rgb(0x14, 0x14, 0x18),
             input_bg: Color32::WHITE,
             paper: Color32::WHITE,
-            blue: Color32::from_rgb(0x1F, 0x6F, 0xC5),
-            green: Color32::from_rgb(0x1E, 0x8A, 0x5A),
-            orange: Color32::from_rgb(0xE0, 0x7A, 0x1F),
-            red: Color32::from_rgb(0xC9, 0x3C, 0x3C),
+            blue: Color32::from_rgb(0x1E, 0x7B, 0xC9),
+            teal: Color32::from_rgb(0x0E, 0x93, 0x86),
+            green: Color32::from_rgb(0x1D, 0x92, 0x5E),
+            orange: Color32::from_rgb(0xE0, 0x86, 0x1C),
+            red: Color32::from_rgb(0xD6, 0x45, 0x3D),
+            violet: Color32::from_rgb(0x7A, 0x4B, 0xD6),
             danger: Color32::from_rgb(0xC4, 0x2B, 0x1C),
             warn: Color32::from_rgb(0xA3, 0x62, 0x00),
         }
@@ -89,10 +95,12 @@ impl Tokens {
             cell_text: Color32::from_rgb(0xEC, 0xEC, 0xF1),
             input_bg: Color32::from_rgb(0x1A, 0x1B, 0x20),
             paper: Color32::from_rgb(0x26, 0x27, 0x2D),
-            blue: Color32::from_rgb(0x6C, 0xAE, 0xF5),
-            green: Color32::from_rgb(0x5C, 0xC5, 0x8E),
-            orange: Color32::from_rgb(0xF2, 0xA0, 0x55),
-            red: Color32::from_rgb(0xF0, 0x7A, 0x7A),
+            blue: Color32::from_rgb(0x6C, 0xB0, 0xF5),
+            teal: Color32::from_rgb(0x4F, 0xCF, 0xBF),
+            green: Color32::from_rgb(0x5C, 0xCB, 0x92),
+            orange: Color32::from_rgb(0xF5, 0xB1, 0x58),
+            red: Color32::from_rgb(0xF3, 0x80, 0x80),
+            violet: Color32::from_rgb(0xB5, 0x96, 0xFF),
             danger: Color32::from_rgb(0xF1, 0x70, 0x5F),
             warn: Color32::from_rgb(0xF0, 0xC0, 0x60),
         }

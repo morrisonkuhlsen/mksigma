@@ -76,14 +76,8 @@ pub(crate) const ON_INK: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xF
 pub(crate) const ON_INK_SOFT: egui::Color32 = egui::Color32::from_rgba_premultiplied(184, 184, 184, 184);
 pub(crate) const BRAND: egui::Color32 = egui::Color32::from_rgb(0x25, 0x40, 0xD8);
 
-/// The theme's tokens drawing in white, for icons on the ink column.
-fn on_ink(t: &Tokens) -> Tokens {
-    Tokens { accent: ON_INK, accent_soft: egui::Color32::from_white_alpha(50), header_line: egui::Color32::from_white_alpha(50), ..*t }
-}
-
 /// A place in the column: a pill, blue when it is the page shown.
 fn place(ui: &mut egui::Ui, icon: Icon, label: &str, on: bool) -> bool {
-    let t = Tokens::get(ui.ctx());
     let (slot, response) = ui.allocate_exact_size(egui::vec2(COLUMN, 38.0), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, label));
     let pill = slot.shrink2(egui::vec2(14.0, 3.0));
@@ -93,11 +87,12 @@ fn place(ui: &mut egui::Ui, icon: Icon, label: &str, on: bool) -> bool {
         ui.painter().rect_filled(pill, 0.0, egui::Color32::from_white_alpha(18));
     }
     let color = if on { ON_INK } else { ON_INK_SOFT };
-    icons::paint(
+    icons::paint_mono(
         ui.painter(),
         egui::Rect::from_center_size(egui::pos2(pill.left() + 22.0, pill.center().y), egui::vec2(16.0, 16.0)),
         icon,
-        &on_ink(&t),
+        color,
+        if on { BRAND } else { INK },
     );
     ui.painter().text(egui::pos2(pill.left() + 44.0, pill.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(14.5), color);
     response.clicked()
@@ -354,12 +349,16 @@ fn start_card(ui: &mut egui::Ui, icon: Icon, title: &str, text: &str) -> bool {
     p.rect_stroke(rect, 0.0, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { BRAND } else { t.border }), egui::StrokeKind::Inside);
     let badge = egui::pos2(rect.left() + 34.0, rect.top() + 34.0);
     p.circle_filled(badge, 18.0, if hot { BRAND } else { t.accent_soft });
-    let ink = if hot { on_ink(&t) } else { t };
     let mut painter = p.clone();
     if !ui.is_enabled() {
         painter.set_opacity(0.4);
     }
-    icons::paint(&painter, egui::Rect::from_center_size(badge, egui::vec2(18.0, 18.0)), icon, &ink);
+    let icon_rect = egui::Rect::from_center_size(badge, egui::vec2(18.0, 18.0));
+    if hot {
+        icons::paint_mono(&painter, icon_rect, icon, ON_INK, BRAND);
+    } else {
+        icons::paint(&painter, icon_rect, icon, &t);
+    }
     let text_color = if ui.is_enabled() { t.text } else { t.text_dim };
     painter.text(egui::pos2(rect.left() + 18.0, rect.top() + 66.0), egui::Align2::LEFT_TOP, title, egui::FontId::proportional(15.5), text_color);
     let galley = painter.layout(text.to_string(), egui::FontId::proportional(12.5), t.text_dim, size.x - 36.0);

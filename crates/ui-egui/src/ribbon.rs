@@ -133,9 +133,13 @@ pub(crate) fn accent_button(ui: &mut egui::Ui, icon: Icon, text: &str) -> egui::
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
     let fill = if response.hovered() { t.accent.gamma_multiply(0.85) } else { t.accent };
     ui.painter().rect_filled(rect, 0.0, fill);
-    let mut on = t;
-    on.accent = ink;
-    icons::paint(ui.painter(), egui::Rect::from_center_size(egui::pos2(rect.left() + 15.0, rect.center().y), egui::vec2(12.0, 12.0)), icon, &on);
+    icons::paint_mono(
+        ui.painter(),
+        egui::Rect::from_center_size(egui::pos2(rect.left() + 15.0, rect.center().y), egui::vec2(12.0, 12.0)),
+        icon,
+        ink,
+        fill,
+    );
     ui.painter().galley(egui::pos2(rect.left() + 26.0, rect.center().y - galley.size().y / 2.0), galley, ink);
     response
 }
