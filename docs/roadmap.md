@@ -94,7 +94,10 @@ Done: case weights (`WEIGHT BY` from the file), `DESCRIPTIVES` weighted, `FREQUE
 tables with labels and missing sections, `/FORMAT` order and `NOTABLE`, `/STATISTICS` mean,
 SE mean, mode, std. deviation, variance, range, minimum, maximum, sum). To do in `FREQUENCIES`:
 median, percentiles, skewness, kurtosis. `ALL` and `first TO last` work in every procedure's and
-dictionary command's variable lists (expanded by file order each time an analysis runs).
+dictionary command's variable lists (expanded by file order each time an analysis runs), in
+`RECODE`, in the pairs of `T-TEST /PAIRS` and `NPAR TESTS /WILCOXON` (paired once expanded), and
+among function arguments (`SUM(q1 TO q5)`); lists of new variables (`NUMERIC`, `STRING`,
+`RECODE … INTO`) take `x1 TO x5` as numbered names. To do: `TO` in `RENAME VARIABLES`.
 
 Done: `CROSSTABS` (counts, expected, row/column/total percentages; Pearson, continuity
 correction, likelihood ratio, Fisher's exact for 2×2, linear-by-linear; expected-count note),

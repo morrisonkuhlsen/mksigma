@@ -1193,7 +1193,8 @@ fn npar_of(specs: &[mksigma_syntax::NparSpec]) -> Vec<mksigma_stats::NparTest> {
             NparSpec::MannWhitney { variables, group, first, second } => {
                 NparTest::MannWhitney { variables: variables.clone(), group: group.clone(), first: *first, second: *second }
             }
-            NparSpec::Wilcoxon { pairs } => NparTest::Wilcoxon { pairs: pairs.clone() },
+            // `lists::expand` checked that the expanded lists pair up.
+            NparSpec::Wilcoxon { pairs } => NparTest::Wilcoxon { pairs: pairs.pairs().unwrap_or_default() },
             NparSpec::KruskalWallis { variables, group, low, high } => {
                 NparTest::KruskalWallis { variables: variables.clone(), group: group.clone(), low: *low, high: *high }
             }
@@ -1242,7 +1243,8 @@ fn t_test_of(test: &mksigma_syntax::TTestSpec) -> mksigma_stats::TTest {
         TTestSpec::Independent { variables, group, first, second } => {
             mksigma_stats::TTest::Independent { variables: variables.clone(), group: group.clone(), first: value(first), second: value(second) }
         }
-        TTestSpec::Paired { pairs } => mksigma_stats::TTest::Paired { pairs: pairs.clone() },
+        // `lists::expand` checked that the expanded lists pair up.
+        TTestSpec::Paired { pairs } => mksigma_stats::TTest::Paired { pairs: pairs.pairs().unwrap_or_default() },
     }
 }
 
@@ -1691,6 +1693,39 @@ mod tests {
     fn nums(s: &Session, var: &str) -> Vec<Option<f64>> {
         let (i, _) = s.dataset.variable(var).unwrap();
         s.dataset.column(i).unwrap().iter().map(Value::as_num).collect()
+    }
+
+    /// `TO` wherever SPSS takes it (#36): function arguments, RECODE and its INTO, the pairs of
+    /// T-TEST and Wilcoxon, and new variables.
+    #[test]
+    fn to_expands_in_functions_recode_pairs_and_new_variables() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("COMPUTE q1 = $CASENUM ** 2.\nCOMPUTE q2 = $CASENUM * 2.\nCOMPUTE q3 = $CASENUM.").unwrap();
+        let cases: Vec<f64> = (1..=s.dataset.n_cases()).map(|c| c as f64).collect();
+        let expect = |f: &dyn Fn(f64) -> f64| cases.iter().map(|c| Some(f(*c))).collect::<Vec<_>>();
+
+        s.run_syntax("COMPUTE total = SUM(q1 TO q3).\nCOMPUTE media = MEAN.3(q1 TO q2, q3).").unwrap();
+        assert_eq!(nums(&s, "total"), expect(&|c| c * c + 3.0 * c));
+        assert_eq!(nums(&s, "media"), expect(&|c| (c * c + 3.0 * c) / 3.0));
+
+        s.run_syntax("T-TEST PAIRS=q1 TO q3.\nNPAR TESTS /WILCOXON=q1 WITH q2 TO q3.").unwrap();
+        let text = s.output.to_text();
+        for pair in ["q1 - q2", "q1 - q3", "q2 - q3", "q3 - q1"] {
+            assert!(text.contains(pair), "{pair} in {text}");
+        }
+        let err = s.run_syntax("T-TEST PAIRS=q1 TO q2 WITH q3 (PAIRED).").unwrap_err();
+        assert!(matches!(err, EngineError::Syntax(SyntaxError::Expected { command: "T-TEST", .. })), "{err:?}");
+
+        s.run_syntax("RECODE q2 TO q3 (LO THRU 4=1) (ELSE=0) INTO r1 TO r2.").unwrap();
+        assert_eq!(nums(&s, "r1"), expect(&|c| if c <= 2.0 { 1.0 } else { 0.0 }));
+        assert_eq!(nums(&s, "r2"), expect(&|c| if c <= 4.0 { 1.0 } else { 0.0 }));
+        s.run_syntax("RECODE q2 TO q3 (ELSE=0).").unwrap();
+        assert_eq!(nums(&s, "q3"), expect(&|_| 0.0));
+        assert!(s.run_syntax("RECODE q1 TO q3 (1=0) INTO a b.").is_err(), "three variables, two targets");
+
+        s.run_syntax("NUMERIC n08 TO n10.\nSTRING s1 TO s2 (A4).").unwrap();
+        assert!(["n08", "n09", "n10", "s1", "s2"].iter().all(|v| s.dataset.variable(v).is_some()));
+        assert!(s.run_syntax("NUMERIC x TO y.").is_err());
     }
 
     #[test]

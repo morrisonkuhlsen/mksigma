@@ -1037,6 +1037,7 @@ err-step-only-commands = only command steps can be rewritten
 err-to-needs-variables = TO needs a variable before and after it
 err-to-needs-after = { $word } TO needs a variable after TO
 err-to-empty = { $first } comes after { $last } in the file, so { $first } TO { $last } is empty
+err-to-numbered = { $first } TO { $last } doesn't name new variables: both need the same root and a number, the second no smaller, such as x1 TO x5
 err-compute-numeric-text = { $command }: { $name } is numeric but gets text
 err-compute-string-number = { $command }: { $name } is a string variable but gets a number
 err-compute-declare-string = { $command }: declare the new string variable first, e.g. STRING { $name } (A20).

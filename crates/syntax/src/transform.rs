@@ -180,7 +180,9 @@ fn recode(rest: &[Token]) -> Result<Command, SyntaxError> {
             }
             _ => return Err(SyntaxError::Expected { command: CMD, expected: "INTO and new variable names, or the end" }),
         };
-        if !into.is_empty() && into.len() != variables.len() {
+        // With ALL or TO the counts are known once the lists are expanded (#36).
+        let expands = |l: &[String]| l.iter().any(|w| w.eq_ignore_ascii_case("ALL") || w.eq_ignore_ascii_case("TO"));
+        if !into.is_empty() && into.len() != variables.len() && !expands(&variables) && !expands(&into) {
             return Err(SyntaxError::Expected { command: CMD, expected: "as many INTO variables as variables to recode" });
         }
         groups.push(RecodeGroup { variables, specs, into });

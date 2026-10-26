@@ -1037,6 +1037,7 @@ err-step-only-commands = só passos de comando podem ser reescritos
 err-to-needs-variables = TO precisa de uma variável antes e depois dele
 err-to-needs-after = { $word } TO precisa de uma variável depois de TO
 err-to-empty = { $first } vem depois de { $last } no arquivo, então { $first } TO { $last } é vazio
+err-to-numbered = { $first } TO { $last } não nomeia variáveis novas: os dois precisam da mesma raiz e de um número, o segundo não menor, como x1 TO x5
 err-compute-numeric-text = { $command }: { $name } é numérica, mas recebe texto
 err-compute-string-number = { $command }: { $name } é uma variável de texto, mas recebe um número
 err-compute-declare-string = { $command }: declare antes a nova variável de texto, por exemplo STRING { $name } (A20).

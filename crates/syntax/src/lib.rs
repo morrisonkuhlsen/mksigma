@@ -17,7 +17,7 @@ pub use data::GetData;
 pub use dictionary::{Level, Literal, MissingSpec, NewVariables, ValueLabelList};
 pub use expr::{BinOp, Expr};
 use lexer::Token;
-pub use procedures::{BarStat, CrosstabCells, GraphSpec, NparSpec, PostHocTest, TTestSpec};
+pub use procedures::{BarStat, CrosstabCells, GraphSpec, NparSpec, PairList, PostHocTest, TTestSpec};
 pub use slice::SliceSpec;
 pub use style::StyleSpec;
 pub use transform::{RecodeFrom, RecodeGroup, RecodeSpec, RecodeTo};

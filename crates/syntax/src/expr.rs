@@ -34,6 +34,9 @@ pub enum Expr {
     /// A function call: upper-cased name without any `.n` suffix, the suffix (minimum valid
     /// arguments, as in `MEAN.2`), and the arguments.
     Call(String, Option<usize>, Vec<Expr>),
+    /// `first TO last` among a function's arguments (`SUM(q1 TO q5)`): the variables from
+    /// `first` to `last` in the dictionary's order (#36).
+    Range(String, String),
 }
 
 const ERR: SyntaxError = SyntaxError::Expected { command: "expression", expected: "a value, variable, function or (" };
@@ -224,6 +227,15 @@ impl Parser<'_> {
                 if !matches!(self.peek(), Some(Token::RParen)) {
                     loop {
                         let (arg, d) = self.or()?;
+                        // `q1 TO q5`: a range of variables, expanded when the call is compiled.
+                        let arg = match (arg, self.peek(), self.tokens.get(self.pos + 1)) {
+                            (Expr::Var(first), Some(Token::Word(to)), Some(Token::Word(last))) if to.eq_ignore_ascii_case("TO") && is_name(last) => {
+                                let last = last.clone();
+                                self.pos += 2;
+                                Expr::Range(first, last)
+                            }
+                            (arg, ..) => arg,
+                        };
                         args.push(arg);
                         depth = depth.max(d);
                         match self.next() {
@@ -310,6 +322,14 @@ mod tests {
         assert_eq!(expr("char.substr(s, 2)"), Expr::Call("CHAR.SUBSTR".into(), None, vec![Expr::Var("s".into()), Expr::Num(2.0)]));
         assert_eq!(expr("rnd(x)"), Expr::Call("RND".into(), None, vec![Expr::Var("x".into())]));
         assert_eq!(expr("concat('a', \"b\")"), Expr::Call("CONCAT".into(), None, vec![Expr::Str("a".into()), Expr::Str("b".into())]));
+        // A range of variables as an argument (#36).
+        assert_eq!(
+            expr("SUM(q1 TO q5, extra)"),
+            Expr::Call("SUM".into(), None, vec![Expr::Range("q1".into(), "q5".into()), Expr::Var("extra".into())])
+        );
+        assert_eq!(expr("mean.3(a to c)"), Expr::Call("MEAN".into(), Some(3), vec![Expr::Range("a".into(), "c".into())]));
+        let bad = |src: &str| parse(&commands(src).unwrap()[0].tokens).is_err();
+        assert!(bad("SUM(1 TO 5)") && bad("SUM(a TO)") && bad("a TO b"), "TO joins two names, inside a call");
     }
 
     #[test]

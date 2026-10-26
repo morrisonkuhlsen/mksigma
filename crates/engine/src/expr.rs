@@ -160,10 +160,33 @@ impl Compiler<'_> {
                 (node, Type::Num)
             }
             Expr::Call(name, min, args) => self.call(name, *min, args)?,
+            // The parser makes ranges only among a function's arguments, which `call` expands.
+            Expr::Range(..) => return Err(invalid(tr!("err-to-needs-variables"))),
         })
     }
 
+    /// The arguments with each `first TO last` replaced by the variables it stands for (#36).
+    fn ranges(&self, args: &[Expr]) -> Result<Vec<Expr>, EngineError> {
+        let mut out = Vec::with_capacity(args.len());
+        for arg in args {
+            match arg {
+                Expr::Range(first, last) => {
+                    out.extend(crate::lists::names(self.ds, &[first.clone(), "TO".into(), last.clone()])?.into_iter().map(Expr::Var))
+                }
+                arg => out.push(arg.clone()),
+            }
+        }
+        Ok(out)
+    }
+
     fn call(&self, name: &str, min: Option<usize>, args: &[Expr]) -> Result<(Node, Type), EngineError> {
+        let expanded;
+        let args = if args.iter().any(|a| matches!(a, Expr::Range(..))) {
+            expanded = self.ranges(args)?;
+            expanded.as_slice()
+        } else {
+            args
+        };
         let n = args.len();
         let arity =
             |ok: bool, expected: &str| if ok { Ok(()) } else { Err(invalid(tr!("err-takes", name = name, what = mksigma_i18n::phrase(expected)))) };
