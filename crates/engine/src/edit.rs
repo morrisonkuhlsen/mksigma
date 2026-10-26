@@ -234,7 +234,10 @@ pub(crate) fn new_variables(ds: &mut Dataset, command: &Command) -> Result<Vec<E
     for var in planned {
         let column = vec![Dataset::blank(&var); ds.n_cases()];
         let index = ds.variables().len();
-        ds.insert_variable(index, var.clone(), column.clone())?;
+        if let Err(e) = ds.insert_variable(index, var.clone(), column.clone()) {
+            crate::history::roll_back(ds, &edits);
+            return Err(e.into());
+        }
         edits.push(Edit::InsertVariable { index, var, column });
     }
     Ok(edits)
@@ -247,8 +250,14 @@ pub(crate) fn delete_variables(ds: &mut Dataset, names: &[String]) -> Result<Vec
     targets.dedup();
     let mut edits = Vec::with_capacity(targets.len());
     for index in targets.into_iter().rev() {
-        let (var, column) = ds.remove_variable(index)?;
-        edits.push(Edit::RemoveVariable { index, var, column });
+        let weighted = ds.weight == Some(index);
+        match ds.remove_variable(index) {
+            Ok((var, column)) => edits.push(Edit::RemoveVariable { index, var, column, weighted }),
+            Err(e) => {
+                crate::history::roll_back(ds, &edits);
+                return Err(e.into());
+            }
+        }
     }
     Ok(edits)
 }

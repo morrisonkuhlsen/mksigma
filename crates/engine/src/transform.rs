@@ -155,6 +155,15 @@ pub(crate) fn recode(ds: &mut Dataset, groups: &[RecodeGroup]) -> Result<Vec<Edi
                     }
                 }
             };
+            // In place, the new values must fit the variable's type: checked here, before any
+            // target is written, so a RECODE changes all its variables or none.
+            if into.is_none() && ((numeric && to_text) || (!numeric && to_number)) {
+                return Err(EngineError::Invalid(if numeric {
+                    tr!("err-compute-numeric-text", command = "RECODE", name = name)
+                } else {
+                    tr!("err-compute-string-number", command = "RECODE", name = name)
+                }));
+            }
             if group.specs.iter().any(|s| s.to == RecodeTo::Copy) && (kind == Type::Num) != numeric {
                 return Err(EngineError::Invalid(tr!("err-recode-copy", name = name)));
             }
@@ -196,7 +205,17 @@ pub(crate) fn recode(ds: &mut Dataset, groups: &[RecodeGroup]) -> Result<Vec<Edi
             planned.push((target, column));
         }
     }
-    planned.into_iter().map(|(target, column)| store(ds, target, column)).collect()
+    let mut edits = Vec::with_capacity(planned.len());
+    for (target, column) in planned {
+        match store(ds, target, column) {
+            Ok(edit) => edits.push(edit),
+            Err(e) => {
+                crate::history::roll_back(ds, &edits);
+                return Err(e);
+            }
+        }
+    }
+    Ok(edits)
 }
 
 /// `SELECT IF`: keeps the cases where the condition is true; false or missing go.

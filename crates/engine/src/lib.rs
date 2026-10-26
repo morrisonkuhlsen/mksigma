@@ -115,8 +115,9 @@ pub struct Session {
     slicers: Vec<Slicer>,
     /// The `GET FILE` or `GET DATA` command that reads the data, if one can.
     data_source: Option<String>,
-    /// How many of the first steps `data_source` already holds (a file saved after them).
-    steps_in_source: usize,
+    /// The steps `data_source` already holds (a file saved after them): the current steps must
+    /// start with these for syntax to rebuild the data from it.
+    source_steps: Vec<AppliedStep>,
     /// The dashboard's tiles, in order: a run and the place of the item among the run's items,
     /// so a tile follows its item when filters run the analyses again.
     tiles: Vec<(usize, usize)>,
@@ -211,7 +212,7 @@ impl Session {
     fn load(&mut self, dataset: Dataset) {
         // Syntax that read it sets this again after loading.
         self.data_source = None;
-        self.steps_in_source = 0;
+        self.source_steps.clear();
         self.base = dataset.clone();
         self.dataset = dataset;
         self.version += 1;
@@ -353,25 +354,34 @@ impl Session {
         Ok(())
     }
 
-    /// The session as syntax that rebuilds its dashboard: where the data came from, the applied
-    /// steps, every analysis with output, the slicers and the tiles. `None` when the data didn't
-    /// come from a file through `GET FILE` or `GET DATA` (nothing could read it again).
     /// The data was written to the system file `path`: from now on it is where the data comes
     /// from, with the steps so far in it.
     pub fn saved_to(&mut self, path: &str) {
         let stata = std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("dta"));
         let get = if stata { "GET STATA FILE" } else { "GET FILE" };
         self.data_source = Some(format!("{get}={}.", mksigma_syntax::quote(path)));
-        self.steps_in_source = self.steps.len();
+        self.source_steps = self.steps.clone();
     }
 
+    /// The session as syntax that rebuilds its dashboard: where the data came from, the applied
+    /// steps, every analysis with output, the slicers and the tiles. `None` when the data didn't
+    /// come from a file through `GET FILE` or `GET DATA` (nothing could read it again), or when
+    /// the steps no longer start with those the saved file holds.
     pub fn dashboard_syntax(&self) -> Option<String> {
         let source = self.data_source.as_ref()?;
+        // Undo, redo and step changes after a save can leave steps the file doesn't hold, or
+        // take away steps it does: then no syntax rebuilds the data from it.
+        let held = self.source_steps.len();
+        let still_held =
+            self.steps.len() >= held && self.steps.iter().zip(&self.source_steps).all(|(a, b)| a.kind == b.kind && a.enabled == b.enabled);
+        if !still_held {
+            return None;
+        }
         let mut out = String::from("* MK Sigma dashboard: run it to rebuild the analyses and the dashboard.\n");
         out.push_str(source);
         out.push('\n');
         let mut skipped = 0;
-        for step in self.steps.iter().skip(self.steps_in_source).filter(|s| s.enabled) {
+        for step in self.steps.iter().skip(held).filter(|s| s.enabled) {
             match step.syntax() {
                 Some(syntax) => {
                     out.push_str(syntax);
@@ -951,7 +961,7 @@ impl Session {
     pub fn set_cell(&mut self, case: usize, variable: usize, input: &str) -> Result<(), EngineError> {
         let name = self.dataset.variables().get(variable).map(|v| v.name.clone()).ok_or(DatasetError::NoVariable(variable))?;
         let edits = edit::set_cell(&mut self.dataset, case, variable, input)?;
-        let step = AppliedStep::new(StepKind::Cell { case, variable: name, input: input.to_string() });
+        let step = AppliedStep::after(StepKind::Cell { case, variable: name, input: input.to_string() }, &self.steps);
         self.record("cell edit".to_string(), edits, None, step);
         Ok(())
     }
@@ -960,14 +970,24 @@ impl Session {
     pub fn insert_case(&mut self, index: usize) -> Result<(), EngineError> {
         let values = self.dataset.blank_case();
         self.dataset.insert_case(index, values.clone())?;
-        self.record("insert case".to_string(), vec![Edit::InsertCase { index, values }], None, AppliedStep::new(StepKind::InsertCase(index)));
+        self.record(
+            "insert case".to_string(),
+            vec![Edit::InsertCase { index, values }],
+            None,
+            AppliedStep::after(StepKind::InsertCase(index), &self.steps),
+        );
         Ok(())
     }
 
     /// Deletes the case at `index` (Data View).
     pub fn delete_case(&mut self, index: usize) -> Result<(), EngineError> {
         let values = self.dataset.remove_case(index)?;
-        self.record("delete case".to_string(), vec![Edit::RemoveCase { index, values }], None, AppliedStep::new(StepKind::DeleteCase(index)));
+        self.record(
+            "delete case".to_string(),
+            vec![Edit::RemoveCase { index, values }],
+            None,
+            AppliedStep::after(StepKind::DeleteCase(index), &self.steps),
+        );
         Ok(())
     }
 
@@ -1033,10 +1053,6 @@ impl Session {
 
     /// Sets the step list, replays it, and records the change for undo.
     fn change_steps(&mut self, label: String, after: Vec<AppliedStep>) {
-        // The saved file holds the old steps: no syntax can rebuild the new list from it.
-        if self.steps_in_source > 0 {
-            self.data_source = None;
-        }
         let before = std::mem::replace(&mut self.steps, after);
         self.replay();
         self.history.push(Entry::Steps { label, before, after: self.steps.clone() });
@@ -1049,9 +1065,16 @@ impl Session {
     fn replay(&mut self) {
         self.dataset = self.base.clone();
         let mut steps = std::mem::take(&mut self.steps);
+        // The steps so far that added or removed cases: a step that names a row was made after
+        // exactly these, or its row is now another case.
+        let mut rows: Vec<StepKind> = Vec::new();
         for step in &mut steps {
             step.error = None;
             if !step.enabled {
+                continue;
+            }
+            if step.names_a_row() && step.rows != rows {
+                step.error = Some(tr!("err-step-rows-changed"));
                 continue;
             }
             let result = match &step.kind {
@@ -1069,6 +1092,9 @@ impl Session {
                 StepKind::DeleteCase(index) => self.dataset.remove_case(*index).map(drop).map_err(EngineError::from),
             };
             step.error = result.err().map(|e| e.to_string());
+            if step.error.is_none() && step.moves_rows() {
+                rows.push(step.kind.clone());
+            }
         }
         self.steps = steps;
     }
@@ -1830,6 +1856,86 @@ mod tests {
         s.set_step_enabled(0, true).unwrap();
         assert_eq!(snapshot(&s), incremental);
         assert!(s.steps().iter().all(|st| st.error.is_none()));
+    }
+
+    #[test]
+    fn undoing_the_deletion_of_the_weight_variable_weights_again() {
+        // Issue #32: income came back, but the cases stayed unweighted until a replay.
+        let mut s = Session::with_sample().unwrap();
+        s.base.weight = Some(1);
+        s.dataset.weight = Some(1);
+        s.run_syntax("DELETE VARIABLES age income.").unwrap();
+        assert_eq!(s.dataset.weight, None);
+        s.undo().unwrap();
+        assert_eq!(s.dataset.weight, Some(1), "undo weights the cases by income again");
+        s.redo().unwrap();
+        assert_eq!(s.dataset.weight, None);
+        s.undo().unwrap();
+        // Replaying from the base agrees with undo.
+        s.run_syntax("COMPUTE x = 1.").unwrap();
+        let live = snapshot(&s);
+        s.set_step_enabled(0, false).unwrap();
+        s.set_step_enabled(0, true).unwrap();
+        assert_eq!(snapshot(&s), live);
+        assert_eq!(s.dataset.weight, Some(1));
+    }
+
+    #[test]
+    fn undo_after_a_save_keeps_the_dashboard_syntax_true_to_the_file() {
+        // Issue #32: the syntax read the saved file (with b) and skipped c.
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("COMPUTE a = 1.\nCOMPUTE b = 2.").unwrap();
+        s.saved_to("saved.sav");
+        assert!(s.dashboard_syntax().is_some_and(|d| !d.contains("COMPUTE")), "the file holds both steps");
+        s.undo().unwrap();
+        assert_eq!(s.dashboard_syntax(), None, "the file holds b, which the steps no longer do");
+        s.redo().unwrap();
+        assert!(s.dashboard_syntax().is_some_and(|d| !d.contains("COMPUTE")), "redo puts b back");
+        s.run_syntax("COMPUTE c = 3.").unwrap();
+        let syntax = s.dashboard_syntax().unwrap_or_default();
+        assert!(syntax.contains("GET FILE='saved.sav'.\nCOMPUTE c = 3.\n"), "{syntax}");
+        // Changing a step the file holds: the file no longer matches.
+        s.set_step_enabled(0, false).unwrap();
+        assert_eq!(s.dashboard_syntax(), None);
+        s.undo().unwrap();
+        assert!(s.dashboard_syntax().is_some());
+    }
+
+    #[test]
+    fn a_cell_edit_never_lands_on_another_case() {
+        // Issue #32: with the SELECT IF off, the edit of case 1 went to another person.
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("SELECT IF (age > 30).").unwrap();
+        assert_eq!(s.dataset.column(0).unwrap()[0], Value::Num(35.0));
+        s.set_cell(0, 0, "36").unwrap();
+        s.insert_case(1).unwrap();
+        s.set_step_enabled(0, false).unwrap();
+        assert_eq!(s.dataset.column(0).unwrap()[0], Value::Num(23.0), "the first person of all keeps their age");
+        assert_eq!(s.dataset.n_cases(), 8, "the insert, made among the selected cases, is skipped too");
+        assert_eq!(s.steps()[1].error, Some(tr!("err-step-rows-changed")));
+        assert_eq!(s.steps()[2].error, Some(tr!("err-step-rows-changed")));
+        s.set_step_enabled(0, true).unwrap();
+        assert_eq!(s.dataset.column(0).unwrap()[0], Value::Num(36.0));
+        assert_eq!(s.dataset.n_cases(), 6);
+        assert!(s.steps().iter().all(|st| st.error.is_none()));
+        // A step that doesn't add or remove cases leaves the edits where they were.
+        s.run_syntax("COMPUTE x = 1.").unwrap();
+        s.move_step(3, true).unwrap();
+        s.move_step(2, true).unwrap();
+        assert!(s.steps().iter().all(|st| st.error.is_none()));
+    }
+
+    #[test]
+    fn recode_changes_all_its_variables_or_none() {
+        // Issue #32: score was recoded, age failed, and the change to score had no undo.
+        let mut s = Session::with_sample().unwrap();
+        let before = snapshot(&s);
+        let err = s.run_syntax("RECODE score (58=1) / age (23='a').").unwrap_err();
+        assert_eq!(err, EngineError::Invalid(tr!("err-compute-numeric-text", command = "RECODE", name = "age")));
+        assert_eq!(snapshot(&s), before);
+        assert!(s.steps().is_empty() && s.journal.is_empty() && s.undo_label().is_none());
+        assert!(s.run_syntax("RECODE score (58=1) INTO s1 / age (23=1) INTO s1.").is_err());
+        assert_eq!(snapshot(&s), before, "a clash of targets writes none of them");
     }
 
     #[test]

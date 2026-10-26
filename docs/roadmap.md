@@ -47,7 +47,9 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
 - **Applied steps panel** — **done**: every change to the data since the file was opened (data
   commands, cell edits, inserted and deleted cases) is a step; switch one off, rewrite its
   command, move or remove it, and the data is replayed from the file. Steps that fail on replay
-  are skipped and shown in red with the reason. Step changes are undoable. Next: steps saved
+  are skipped and shown in red with the reason; so is a cell edit or a case inserted or deleted
+  when the steps before it that add or remove cases changed, as its row would be another case.
+  Step changes are undoable. Next: cell edits that follow their case by a stable case id; steps saved
   with the file (a `.sps` beside the `.sav`), inserting a step in the middle.
 - Desktop app: File ▸ Open (native dialog, Ctrl+O), drag and drop, opening a file given on the
   command line, Data View (virtualized rows, value-labels toggle, missing values dimmed) and a
@@ -86,7 +88,10 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   `mksigma-cli run --out`.
 - Undo and redo — **done**: every change to the data (syntax commands, cell edits, cases) is
   one step, stored as the smallest reversible record (metadata before/after, old value, the
-  removed column); undoing a command also takes it out of the History. Edit menu names the
+  removed column, whether it weighted the cases); undoing a command also takes it out of the
+  History. A command changes all it was asked to or nothing (a `RECODE` whose second variable
+  fails leaves the first as it was). After a save, the dashboard syntax builds on the file only
+  while the steps still start with those it holds. Edit menu names the
   step; Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y when no text box has the keyboard.
 - Adding and deleting — **done**: `NUMERIC`, `STRING`, `DELETE VARIABLES`; blank last rows in
   Data View (adds a case) and Variable View (adds a numeric variable); right-click a case
