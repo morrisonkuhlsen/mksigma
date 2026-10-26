@@ -30,7 +30,7 @@ pub enum GraphSpec {
 #[derive(Debug, Clone, PartialEq)]
 pub enum NparSpec {
     MannWhitney { variables: Vec<String>, group: String, first: f64, second: f64 },
-    Wilcoxon { pairs: Vec<(String, String)> },
+    Wilcoxon { pairs: PairList },
     KruskalWallis { variables: Vec<String>, group: String, low: f64, high: f64 },
 }
 
@@ -48,7 +48,7 @@ pub enum TTestSpec {
     /// `/GROUPS=g(a b) /VARIABLES=...`
     Independent { variables: Vec<String>, group: String, first: Literal, second: Literal },
     /// `/PAIRS=...`
-    Paired { pairs: Vec<(String, String)> },
+    Paired { pairs: PairList },
 }
 
 fn words(tokens: &[Token]) -> Option<Vec<String>> {
@@ -141,30 +141,54 @@ fn literal(token: &Token) -> Option<Literal> {
 
 /// `a b WITH c d (PAIRED)` pairs a–c and b–d; without (PAIRED), every left variable with every
 /// right one; `a b c` alone, every pair of the list.
-fn pair_list(tokens: &[Token]) -> Result<Vec<(String, String)>, &'static str> {
+/// `/PAIRS=` and `/WILCOXON=` as written: `a b c` pairs every two, `a b WITH c d` each on the
+/// left with each on the right, and `a b WITH c d (PAIRED)` in order. The lists may hold `ALL`
+/// and `TO`, so the pairs are made once they are expanded (#36).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PairList {
+    pub left: Vec<String>,
+    /// The list after `WITH`.
+    pub with: Option<Vec<String>>,
+    /// `(PAIRED)`: the n-th on the left with the n-th on the right.
+    pub paired: bool,
+}
+
+impl PairList {
+    /// The pairs, or what the lists lack.
+    pub fn pairs(&self) -> Result<Vec<(String, String)>, &'static str> {
+        let list: Vec<(String, String)> = match &self.with {
+            Some(right) if self.paired => {
+                if self.left.len() != right.len() {
+                    return Err("as many variables after WITH as before it, for (PAIRED)");
+                }
+                self.left.iter().cloned().zip(right.iter().cloned()).collect()
+            }
+            Some(right) => self.left.iter().flat_map(|a| right.iter().map(move |b| (a.clone(), b.clone()))).collect(),
+            None => self.left.iter().enumerate().flat_map(|(i, a)| self.left.iter().skip(i + 1).map(move |b| (a.clone(), b.clone()))).collect(),
+        };
+        if list.is_empty() {
+            return Err("at least two variables to pair");
+        }
+        Ok(list)
+    }
+}
+
+fn pair_list(tokens: &[Token]) -> Result<PairList, &'static str> {
     let paired = matches!(tokens, [.., Token::LParen, Token::Word(p), Token::RParen] if is_keyword(p, "PAIRED"));
     let tokens = if paired { tokens.get(..tokens.len().saturating_sub(3)).unwrap_or_default() } else { tokens };
     let with = tokens.iter().position(|t| matches!(t, Token::Word(w) if w.eq_ignore_ascii_case("WITH")));
-    let list: Vec<(String, String)> = match with {
+    let list = match with {
         Some(at) => {
             let left = words(tokens.get(..at).unwrap_or_default()).ok_or("variables WITH variables")?;
             let right = words(tokens.get(at + 1..).unwrap_or_default()).ok_or("variables WITH variables")?;
-            if paired {
-                if left.len() != right.len() {
-                    return Err("as many variables after WITH as before it, for (PAIRED)");
-                }
-                left.into_iter().zip(right).collect()
-            } else {
-                left.iter().flat_map(|a| right.iter().map(move |b| (a.clone(), b.clone()))).collect()
-            }
+            PairList { left, with: Some(right), paired }
         }
-        None => {
-            let vars = words(tokens).ok_or("a variable list")?;
-            vars.iter().enumerate().flat_map(|(i, a)| vars.iter().skip(i + 1).map(move |b| (a.clone(), b.clone()))).collect()
-        }
+        None => PairList { left: words(tokens).ok_or("a variable list")?, with: None, paired },
     };
-    if list.is_empty() {
-        return Err("at least two variables to pair");
+    // Lists without ALL or TO pair now, so their mistakes are syntax errors.
+    let expands = |l: &[String]| l.iter().any(|w| w.eq_ignore_ascii_case("ALL") || w.eq_ignore_ascii_case("TO"));
+    if !expands(&list.left) && !list.with.as_deref().is_some_and(expands) {
+        list.pairs()?;
     }
     Ok(list)
 }
@@ -690,14 +714,16 @@ mod tests {
         );
         let Command::TTest { test: TTestSpec::Independent { first, .. }, .. } = one("T-TEST GROUPS=g(1, 2) /VARIABLES=x.") else { panic!() };
         assert_eq!(first, Literal::Num(1.0));
-        assert_eq!(
-            one("T-TEST PAIRS=pre1 pre2 WITH pos1 pos2 (PAIRED)."),
-            Command::TTest { test: TTestSpec::Paired { pairs: vec![("pre1".into(), "pos1".into()), ("pre2".into(), "pos2".into())] }, ci: 0.95 }
-        );
+        let Command::TTest { test: TTestSpec::Paired { pairs }, .. } = one("T-TEST PAIRS=pre1 pre2 WITH pos1 pos2 (PAIRED).") else { panic!() };
+        assert_eq!(pairs.pairs().unwrap(), [("pre1".into(), "pos1".into()), ("pre2".into(), "pos2".into())]);
         let Command::TTest { test: TTestSpec::Paired { pairs }, .. } = one("T-TEST PAIRS=a b c.") else { panic!() };
-        assert_eq!(pairs.len(), 3, "every pair of the list");
+        assert_eq!(pairs.pairs().unwrap().len(), 3, "every pair of the list");
         assert!(parse("T-TEST /VARIABLES=x.").is_err(), "needs TESTVAL, GROUPS or PAIRS");
         assert!(parse("T-TEST PAIRS=a WITH b c (PAIRED).").is_err());
+        // With TO the lists are kept as written, and paired once expanded (#36).
+        let Command::TTest { test: TTestSpec::Paired { pairs }, .. } = one("T-TEST PAIRS=a TO c.") else { panic!() };
+        assert_eq!(pairs, PairList { left: names(&["a", "TO", "c"]), with: None, paired: false });
+        assert!(parse("T-TEST PAIRS=a TO c WITH d (PAIRED).").is_ok(), "the counts are checked after expansion");
     }
 
     #[test]
@@ -811,7 +837,7 @@ mod tests {
             one("NPAR TESTS /M-W= renda nota BY sexo(1 2) /WILCOXON=pre WITH pos (PAIRED) /K-W=nota BY escola(3 1) /MISSING ANALYSIS."),
             Command::NparTests(vec![
                 NparSpec::MannWhitney { variables: names(&["renda", "nota"]), group: "sexo".into(), first: 1.0, second: 2.0 },
-                NparSpec::Wilcoxon { pairs: vec![("pre".into(), "pos".into())] },
+                NparSpec::Wilcoxon { pairs: PairList { left: names(&["pre"]), with: Some(names(&["pos"])), paired: true } },
                 NparSpec::KruskalWallis { variables: names(&["nota"]), group: "escola".into(), low: 1.0, high: 3.0 },
             ])
         );
