@@ -1,14 +1,24 @@
 //! Delimited text data (CSV, TSV and the like), as `GET DATA /TYPE=TXT` reads it.
 //!
 //! Records follow RFC 4180: fields split by a delimiter, optionally enclosed in a qualifier
-//! (a doubled qualifier inside is one literal qualifier, and enclosed fields may span lines);
-//! records end at `\n`, `\r\n` or `\r`. Text is UTF-8 (a byte-order mark is skipped), or the
-//! encoding asked for; bytes that aren't UTF-8 are read as Windows-1252, with a warning.
+//! (a doubled qualifier inside is one literal qualifier, and enclosed fields may span lines). A
+//! qualifier opens enclosed text only at the start of a field, after any spaces; anywhere else
+//! it is a literal character (`TV 42" LED`). Records end at `\n`, `\r\n` or `\r`.
+//!
+//! A byte-order mark says the encoding: UTF-8, or UTF-16 as Excel's "Unicode Text" saves it.
+//! Without one, text is in the encoding asked for, or UTF-8: in text that is otherwise UTF-8 a
+//! bad byte is replaced, and text with no UTF-8 beyond ASCII is read as Windows-1252, each with
+//! a warning.
 //!
 //! Without a list of variables, names come from the first record (or are `VAR00001`...) and
-//! each column's type is inferred: numeric when every non-empty field is a number, with a
-//! decimal comma accepted when the delimiter isn't a comma; otherwise a string as wide as its
-//! longest value. Empty numeric fields are system-missing.
+//! each column's type is inferred: numeric when every non-empty field is a number, otherwise a
+//! string as wide as its longest value. Identifiers stay strings: a column with digits written
+//! with a leading zero (a CEP, a CPF) or more than 15 of them, which a double can't hold exactly.
+//! Numbers may group thousands, and when the delimiter isn't a comma the decimal separator may
+//! be a comma (`1.234,56`). Each column is read one way throughout, the one that reads all its
+//! fields; when both do and differ (`1.500`), the way the file's other columns show, or else a
+//! comma with `;` as delimiter and a point otherwise, with a warning. Empty numeric fields are
+//! system-missing.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use mksigma_core::{Dataset, DatasetError, Format, FormatKind, Measure, Value, Variable, is_valid_name};
@@ -63,22 +73,55 @@ pub struct TextFile {
 }
 
 fn decode(bytes: &[u8], label: Option<&str>, warnings: &mut Vec<String>) -> Result<String, CsvError> {
-    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    // A byte-order mark says the encoding, whatever the label (#39).
+    if let Some((encoding, bom)) = encoding_rs::Encoding::for_bom(bytes) {
+        return Ok(decode_with(encoding, bytes.get(bom..).unwrap_or_default(), warnings));
+    }
     let encoding = match label {
         Some(l) => encoding_rs::Encoding::for_label(l.trim().as_bytes()).ok_or_else(|| CsvError::Encoding(l.to_string()))?,
         None => match std::str::from_utf8(bytes) {
             Ok(text) => return Ok(text.to_string()),
+            // UTF-8 with a stray bad byte stays UTF-8, the byte replaced; text whose only UTF-8 is
+            // ASCII is Windows-1252, as spreadsheets save it (#39).
             Err(_) => {
-                warnings.push("the file is not UTF-8; it was read as Windows-1252".to_string());
-                encoding_rs::WINDOWS_1252
+                let (valid, invalid) = utf8_sequences(bytes);
+                if valid > 0 && valid >= invalid {
+                    encoding_rs::UTF_8
+                } else {
+                    warnings.push(mksigma_i18n::tr!("csv-warn-windows-1252"));
+                    encoding_rs::WINDOWS_1252
+                }
             }
         },
     };
-    let (text, _, malformed) = encoding.decode(bytes);
+    Ok(decode_with(encoding, bytes, warnings))
+}
+
+fn decode_with(encoding: &'static encoding_rs::Encoding, bytes: &[u8], warnings: &mut Vec<String>) -> String {
+    let (text, malformed) = encoding.decode_without_bom_handling(bytes);
     if malformed {
-        warnings.push(format!("some bytes are not valid {}; they were replaced", encoding.name()));
+        warnings.push(mksigma_i18n::tr!("csv-warn-replaced", encoding = encoding.name()));
     }
-    Ok(text.into_owned())
+    text.into_owned()
+}
+
+/// In bytes that aren't all UTF-8: the characters beyond ASCII that are valid UTF-8, and the
+/// invalid sequences.
+fn utf8_sequences(mut bytes: &[u8]) -> (usize, usize) {
+    let beyond_ascii = |text: &str| text.chars().filter(|c| !c.is_ascii()).count();
+    let (mut valid, mut invalid) = (0, 0);
+    loop {
+        match std::str::from_utf8(bytes) {
+            Ok(text) => return (valid + beyond_ascii(text), invalid),
+            Err(e) => {
+                let good = bytes.get(..e.valid_up_to()).unwrap_or_default();
+                valid += std::str::from_utf8(good).map_or(0, beyond_ascii);
+                invalid += 1;
+                // A sequence cut short by the end of the file has no length: nothing follows it.
+                bytes = bytes.get(e.valid_up_to() + e.error_len().unwrap_or(bytes.len())..).unwrap_or_default();
+            }
+        }
+    }
 }
 
 /// The fields of every record. A record with nothing on its line is left out.
@@ -89,6 +132,8 @@ fn records(text: &str, delimiters: &[char], qualifier: Option<char>) -> Result<V
     // Whether the record has anything: a field, a delimiter or a qualifier.
     let mut started = false;
     let mut quoted = false;
+    // At the start of a field, where a qualifier opens enclosed text; elsewhere it is literal (#39).
+    let mut fresh = true;
     let mut chars = text.chars().peekable();
     let mut end_record = |record: &mut Vec<String>, field: &mut String, started: &mut bool| -> Result<(), CsvError> {
         if *started {
@@ -116,9 +161,12 @@ fn records(text: &str, delimiters: &[char], qualifier: Option<char>) -> Result<V
             continue;
         }
         match c {
-            _ if Some(c) == qualifier => {
+            _ if Some(c) == qualifier && fresh => {
+                // Spaces before it are no part of the field.
+                field.clear();
                 quoted = true;
                 started = true;
+                fresh = false;
             }
             _ if delimiters.contains(&c) => {
                 record.push(std::mem::take(&mut field));
@@ -126,16 +174,19 @@ fn records(text: &str, delimiters: &[char], qualifier: Option<char>) -> Result<V
                     return Err(CsvError::TooManyFields);
                 }
                 started = true;
+                fresh = true;
             }
             '\r' | '\n' => {
                 if c == '\r' && chars.peek() == Some(&'\n') {
                     chars.next();
                 }
                 end_record(&mut record, &mut field, &mut started)?;
+                fresh = true;
             }
             _ => {
                 field.push(c);
                 started = true;
+                fresh &= c == ' ';
             }
         }
     }
@@ -144,19 +195,30 @@ fn records(text: &str, delimiters: &[char], qualifier: Option<char>) -> Result<V
 }
 
 /// The candidate that splits the first lines most evenly into more than one field, outside
-/// qualified text: the same count on every line wins over a larger but uneven one.
+/// qualified text (opened, as `records` reads it, only at the start of a field): the same count
+/// on every line wins over a larger but uneven one.
 fn detect_delimiter(text: &str, qualifier: Option<char>) -> char {
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).take(20).collect();
     let count = |line: &str, d: char| {
-        let mut quoted = false;
-        line.chars()
-            .filter(|c| {
-                if Some(*c) == qualifier {
-                    quoted = !quoted;
+        let (mut n, mut quoted, mut fresh) = (0, false, true);
+        let mut chars = line.chars().peekable();
+        while let Some(c) = chars.next() {
+            if quoted {
+                // A doubled qualifier is a literal one; a single one closes.
+                if Some(c) == qualifier && chars.next_if(|next| Some(*next) == qualifier).is_none() {
+                    quoted = false;
                 }
-                !quoted && *c == d
-            })
-            .count()
+            } else if Some(c) == qualifier && fresh {
+                quoted = true;
+                fresh = false;
+            } else if c == d {
+                n += 1;
+                fresh = true;
+            } else {
+                fresh &= c == ' ';
+            }
+        }
+        n
     };
     let mut best = (',', 0usize, false);
     for d in [',', ';', '\t', '|'] {
@@ -170,25 +232,134 @@ fn detect_delimiter(text: &str, qualifier: Option<char>) -> char {
     best.0
 }
 
-/// A number as written in a field: digits with an optional sign, decimal separator and
-/// exponent. Words such as `inf` or `NaN` are not numbers.
-fn number(field: &str, decimal_comma: bool) -> Option<f64> {
+/// The decimal separator of a column's numbers; the other one groups thousands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Decimal {
+    Point,
+    Comma,
+}
+
+impl Decimal {
+    /// The decimal separator and the thousands one.
+    fn marks(self) -> (char, char) {
+        match self {
+            Decimal::Point => ('.', ','),
+            Decimal::Comma => (',', '.'),
+        }
+    }
+}
+
+/// A number as written in a field: digits with an optional sign, decimal separator, exponent,
+/// and thousands grouped by the other separator (`1,234.5`, or `1.234,5` with a decimal comma).
+/// Words such as `inf` or `NaN` are not numbers.
+fn number(field: &str, decimal: Decimal) -> Option<f64> {
+    let (point, group) = decimal.marks();
+    let digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
     let field = field.trim();
-    if field.is_empty() || !field.chars().all(|c| c.is_ascii_digit() || matches!(c, '+' | '-' | '.' | ',' | 'e' | 'E')) {
+    let (mantissa, exponent) = match field.split_once(['e', 'E']) {
+        Some((m, e)) => (m, Some(e)),
+        None => (field, None),
+    };
+    let negative = mantissa.starts_with('-');
+    let mantissa = mantissa.strip_prefix(['+', '-']).unwrap_or(mantissa);
+    let (whole, fraction) = mantissa.split_once(point).unwrap_or((mantissa, ""));
+    let mut groups = whole.split(group);
+    let lead = groups.next().unwrap_or_default();
+    // Groups of three after a lead of one to three digits: `1,234,567`, not `12,34`.
+    let grouped = whole.contains(group);
+    if (whole.is_empty() && fraction.is_empty())
+        || !digits(fraction)
+        || !digits(lead)
+        || (grouped && !(1..=3).contains(&lead.len()))
+        || !groups.all(|g| g.len() == 3 && digits(g))
+    {
         return None;
     }
-    let normal = match (decimal_comma, field.contains(',')) {
-        (_, false) => std::borrow::Cow::Borrowed(field),
-        (true, true) if !field.contains('.') && field.matches(',').count() == 1 => std::borrow::Cow::Owned(field.replace(',', ".")),
-        _ => return None,
-    };
+    if let Some(e) = exponent {
+        let magnitude = e.strip_prefix(['+', '-']).unwrap_or(e);
+        if magnitude.is_empty() || !digits(magnitude) {
+            return None;
+        }
+    }
+    let mut normal = String::with_capacity(field.len() + 2);
+    if negative {
+        normal.push('-');
+    }
+    // The 0 makes `.5` a number.
+    normal.push('0');
+    normal.extend(whole.chars().filter(|c| *c != group));
+    if !fraction.is_empty() {
+        normal.push('.');
+        normal.push_str(fraction);
+    }
+    if let Some(e) = exponent {
+        normal.push('e');
+        normal.push_str(e);
+    }
     normal.parse::<f64>().ok().filter(|x| x.is_finite())
 }
 
 /// Digits after the decimal separator, ignoring any exponent.
-fn decimals(field: &str) -> usize {
+fn decimals(field: &str, decimal: Decimal) -> usize {
     let mantissa = field.trim().split(['e', 'E']).next().unwrap_or_default();
-    mantissa.split(['.', ',']).nth(1).map_or(0, str::len)
+    mantissa.split_once(decimal.marks().0).map_or(0, |(_, fraction)| fraction.len())
+}
+
+/// The digits and sign before the decimal separator, without thousands separators.
+fn integer_width(field: &str, decimal: Decimal) -> usize {
+    let mantissa = field.trim().split(['e', 'E']).next().unwrap_or_default();
+    let whole = mantissa.split_once(decimal.marks().0).map_or(mantissa, |(whole, _)| whole);
+    whole.chars().filter(|c| c.is_ascii_digit() || *c == '-').count()
+}
+
+/// Digits that identify rather than count, which a number would change: a leading zero
+/// (`01310100`, a CEP) or more than 15 of them, beyond what a double holds exactly (#39).
+fn identifier(field: &str) -> bool {
+    let field = field.trim();
+    !field.is_empty() && field.bytes().all(|b| b.is_ascii_digit()) && ((field.len() > 1 && field.starts_with('0')) || field.len() > 15)
+}
+
+/// Which decimal separators read every field of a column as a number.
+#[derive(Debug, PartialEq)]
+enum Fit<'a> {
+    Neither,
+    Point,
+    Comma,
+    /// Both do; the first field they read differently (`1.500`), if any.
+    Either(Option<&'a str>),
+}
+
+/// `comma`: whether a decimal comma may be read (the delimiter isn't a comma).
+fn fit<'a>(filled: &[&'a str], comma: bool) -> Fit<'a> {
+    let all = |d| filled.iter().map(|f| number(f, d)).collect::<Option<Vec<f64>>>();
+    match (all(Decimal::Point).is_some(), comma && all(Decimal::Comma).is_some()) {
+        (true, true) => Fit::Either(filled.iter().copied().find(|f| number(f, Decimal::Point) != number(f, Decimal::Comma))),
+        (true, false) => Fit::Point,
+        (false, true) => Fit::Comma,
+        (false, false) => Fit::Neither,
+    }
+}
+
+/// The decimal separator the file's columns show where only one reads them (`2,5`, `3.14`),
+/// and `true`; with none, or both, a guess and `false`: a comma when `;` delimits, as
+/// spreadsheets save in comma-decimal languages, and a point otherwise.
+fn file_decimal(columns: &[Vec<&str>], comma: bool, semicolon: bool) -> (Decimal, bool) {
+    let (mut points, mut commas) = (0, 0);
+    for fields in columns {
+        let filled: Vec<&str> = fields.iter().map(|f| f.trim()).filter(|f| !f.is_empty()).collect();
+        match fit(&filled, comma) {
+            Fit::Point => points += 1,
+            Fit::Comma => commas += 1,
+            _ => {}
+        }
+    }
+    match (points, commas) {
+        _ if !comma => (Decimal::Point, true),
+        (0, 1..) => (Decimal::Comma, true),
+        (1.., 0) => (Decimal::Point, true),
+        _ if semicolon => (Decimal::Comma, false),
+        _ => (Decimal::Point, false),
+    }
 }
 
 /// A valid, unused variable name from a header; the header becomes the label when it differs.
@@ -221,16 +392,15 @@ fn name_from(header: &str, column: usize, used: &mut Vec<String>) -> (String, Op
     (name, label)
 }
 
-/// A column's variable and values, inferred from its fields.
-fn infer(name: String, label: Option<String>, fields: &[&str], decimal_comma: bool) -> (Variable, Vec<Value>) {
+/// A column's variable and values, inferred from its fields: numbers with `decimal` as their
+/// decimal separator, or strings when it is `None`.
+fn infer(name: String, label: Option<String>, fields: &[&str], decimal: Option<Decimal>) -> (Variable, Vec<Value>) {
     let filled: Vec<&str> = fields.iter().map(|f| f.trim()).filter(|f| !f.is_empty()).collect();
-    let as_numbers = |comma: bool| filled.iter().map(|f| number(f, comma)).collect::<Option<Vec<f64>>>();
-    let numeric = as_numbers(false).map(|_| false).or_else(|| if decimal_comma { as_numbers(true).map(|_| true) } else { None });
-    let mut var = match numeric {
-        Some(comma) => {
-            let values: Vec<Value> = fields.iter().map(|f| number(f, comma).map_or(Value::SysMis, Value::Num)).collect();
-            let places = filled.iter().map(|f| decimals(f)).max().unwrap_or(0).min(16);
-            let integer = filled.iter().map(|f| f.split(['.', ',', 'e', 'E']).next().unwrap_or_default().len()).max().unwrap_or(1);
+    let mut var = match decimal {
+        Some(decimal) => {
+            let values: Vec<Value> = fields.iter().map(|f| number(f, decimal).map_or(Value::SysMis, Value::Num)).collect();
+            let places = filled.iter().map(|f| decimals(f, decimal)).max().unwrap_or(0).min(16);
+            let integer = filled.iter().map(|f| integer_width(f, decimal)).max().unwrap_or(1);
             let width = (integer + if places > 0 { places + 1 } else { 0 }).clamp(8, 40);
             let mut var = Variable::numeric(name);
             var.format = Format::new(FormatKind::F, width as u16, places as u8);
@@ -257,14 +427,14 @@ fn infer(name: String, label: Option<String>, fields: &[&str], decimal_comma: bo
 
 /// A column's values under a given format; fields that aren't numbers in a numeric format are
 /// system-missing and counted in `bad`.
-fn typed(format: Format, fields: &[&str], decimal_comma: bool, bad: &mut usize) -> Vec<Value> {
+fn typed(format: Format, fields: &[&str], decimal: Decimal, bad: &mut usize) -> Vec<Value> {
     fields
         .iter()
         .map(|f| {
             if format.kind.is_string() {
                 return Value::Str(f.trim_end().chars().take(usize::from(format.width)).collect());
             }
-            match number(f, decimal_comma) {
+            match number(f, decimal) {
                 Some(x) => Value::Num(x),
                 None if f.trim().is_empty() => Value::SysMis,
                 None => {
@@ -281,7 +451,7 @@ pub fn read(bytes: &[u8], options: &Options) -> Result<TextFile, CsvError> {
     let text = decode(bytes, options.encoding.as_deref(), &mut warnings)?;
     let delimiters = if options.delimiters.is_empty() { vec![detect_delimiter(&text, options.qualifier)] } else { options.delimiters.clone() };
     let delimiter = delimiters.first().copied().unwrap_or(',');
-    let decimal_comma = !delimiters.contains(&',');
+    let comma = !delimiters.contains(&',');
     let all = records(&text, &delimiters, options.qualifier)?;
     let header = if options.read_names { all.first() } else { None };
     let first_case = options.first_case.unwrap_or(if options.read_names { 2 } else { 1 }).max(1);
@@ -298,12 +468,16 @@ pub fn read(bytes: &[u8], options: &Options) -> Result<TextFile, CsvError> {
     if longer > 0 {
         warnings.push(format!("{longer} records have more than {columns} fields; the extra fields were left out"));
     }
+    let table: Vec<Vec<&str>> = (0..columns).map(|c| rows.iter().map(|r| r.get(c).map_or("", String::as_str)).collect()).collect();
+    let (file, shown) = file_decimal(&table, comma, delimiters.contains(&';'));
     let mut ds = Dataset::new();
     let mut column_values = Vec::with_capacity(columns);
     let mut used = Vec::new();
     let mut bad = 0;
-    for c in 0..columns {
-        let fields: Vec<&str> = rows.iter().map(|r| r.get(c).map_or("", String::as_str)).collect();
+    // Columns whose numbers read either way with nothing in the file to tell, and one such number.
+    let (mut either, mut example) = (Vec::new(), None);
+    for (c, fields) in table.iter().enumerate() {
+        let filled: Vec<&str> = fields.iter().map(|f| f.trim()).filter(|f| !f.is_empty()).collect();
         let (var, values) = match options.variables.get(c) {
             Some((name, format)) => {
                 if !is_valid_name(name) || used.iter().any(|u: &String| u.eq_ignore_ascii_case(name)) {
@@ -312,14 +486,34 @@ pub fn read(bytes: &[u8], options: &Options) -> Result<TextFile, CsvError> {
                 used.push(name.clone());
                 let mut var = if format.kind.is_string() { Variable::string(name.clone(), format.width) } else { Variable::numeric(name.clone()) };
                 var.format = *format;
-                (var, typed(*format, &fields, decimal_comma, &mut bad))
+                // The separator that reads more of its fields, the file's on a tie.
+                let read = |d| filled.iter().filter(|f| number(f, d).is_some()).count();
+                let decimal = match (read(Decimal::Point), if comma { read(Decimal::Comma) } else { 0 }) {
+                    (points, commas) if commas > points => Decimal::Comma,
+                    (points, commas) if points > commas => Decimal::Point,
+                    _ => file,
+                };
+                (var, typed(*format, fields, decimal, &mut bad))
             }
             None => {
                 let (name, label) = match header.and_then(|h| h.get(c)) {
                     Some(h) => name_from(h, c, &mut used),
                     None => name_from("", c, &mut used),
                 };
-                infer(name, label, &fields, decimal_comma)
+                let decimal = match fit(&filled, comma) {
+                    _ if filled.iter().any(|f| identifier(f)) => None,
+                    Fit::Neither => None,
+                    Fit::Point => Some(Decimal::Point),
+                    Fit::Comma => Some(Decimal::Comma),
+                    Fit::Either(differ) => {
+                        if let Some(f) = differ.filter(|_| !shown) {
+                            either.push(name.clone());
+                            example.get_or_insert(f);
+                        }
+                        Some(file)
+                    }
+                };
+                infer(name, label, fields, decimal)
             }
         };
         ds.add_variable(var)?;
@@ -327,6 +521,13 @@ pub fn read(bytes: &[u8], options: &Options) -> Result<TextFile, CsvError> {
     }
     if bad > 0 {
         warnings.push(format!("{bad} fields are not numbers in numeric variables; they are system-missing"));
+    }
+    if let Some(example) = example {
+        let names = either.join(", ");
+        warnings.push(match file {
+            Decimal::Point => mksigma_i18n::tr!("csv-warn-decimal-point", names = names.as_str(), example = example),
+            Decimal::Comma => mksigma_i18n::tr!("csv-warn-decimal-comma", names = names.as_str(), example = example),
+        });
     }
     for case in 0..rows.len() {
         let values = column_values.iter().map(|column| column.get(case).cloned().unwrap_or(Value::SysMis)).collect();
@@ -379,10 +580,89 @@ mod tests {
         assert_eq!(column(&file.dataset, 2)[2], Value::SysMis);
         // With a comma delimiter, "7,5" would be two fields; a decimal comma is only read when
         // the comma isn't the delimiter.
-        assert_eq!(number("7,5", false), None);
-        assert_eq!(number("1,000,000", true), None);
-        assert_eq!(number("inf", false), None);
-        assert_eq!(number("-1.5e3", false), Some(-1500.0));
+        assert_eq!(number("7,5", Decimal::Point), None);
+        assert_eq!(number("1,000,000", Decimal::Comma), None);
+        assert_eq!(number("inf", Decimal::Point), None);
+        assert_eq!(number("-1.5e3", Decimal::Point), Some(-1500.0));
+    }
+
+    #[test]
+    fn thousands_separators() {
+        assert_eq!(number("1.234,56", Decimal::Comma), Some(1234.56));
+        assert_eq!(number("-1.234.567", Decimal::Comma), Some(-1_234_567.0));
+        assert_eq!(number("1,234.5", Decimal::Point), Some(1234.5));
+        assert_eq!(number("1,234,567", Decimal::Point), Some(1_234_567.0));
+        assert_eq!(number(".5", Decimal::Point), Some(0.5));
+        assert_eq!(number("1e+3", Decimal::Point), Some(1000.0));
+        for bad in ["1,23", "12,34,567", "1234,567", ",5", "1.2.3", "1e", "-", "1 000", "--1"] {
+            assert_eq!(number(bad, Decimal::Point), None, "{bad}");
+        }
+        for bad in ["1.23", "1.2345", "1,2,3", "1.234.56"] {
+            assert_eq!(number(bad, Decimal::Comma), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn brazilian_numbers_with_semicolons() {
+        // A spreadsheet in Portuguese: `;` delimits, `.` groups thousands, `,` is the decimal.
+        // "1.500" alone reads either way; beside "2,5" it is 1500 (#39).
+        let csv = "item;valor;peso\nA;1.234,56;1.500\nB;2,5;2.300\nC;1.500;\n";
+        let file = read(csv.as_bytes(), &Options::default()).unwrap();
+        assert_eq!(column(&file.dataset, 1), nums(&[1234.56, 2.5, 1500.0]));
+        assert_eq!(file.dataset.variables()[1].format, Format::new(FormatKind::F, 8, 2));
+        assert_eq!(column(&file.dataset, 2)[..2], nums(&[1500.0, 2300.0]), "as the valor column shows");
+        assert!(file.warnings.is_empty(), "{:?}", file.warnings);
+
+        // Without another column to go by, `;` means a decimal comma, with a warning.
+        let file = read(b"a;b\nx;1.500\n", &Options::default()).unwrap();
+        assert_eq!(column(&file.dataset, 1), nums(&[1500.0]));
+        assert_eq!(file.warnings.len(), 1);
+        // A point decimal elsewhere in the file says how to read it.
+        let file = read(b"a;b;c\nx;1.500;3.14\n", &Options::default()).unwrap();
+        assert_eq!(column(&file.dataset, 1), nums(&[1.5]));
+    }
+
+    #[test]
+    fn grouped_thousands_with_tabs_and_quoted_commas() {
+        // A US TSV: "1,234" is a thousand and more, not 1.234 (#39).
+        let file = read(b"n\tv\n1\t1,234\n2\t2,000.5\n", &Options::default()).unwrap();
+        assert_eq!(file.delimiter, '\t');
+        assert_eq!(column(&file.dataset, 1), nums(&[1234.0, 2000.5]));
+        let file = read(b"n\tv\n1\t1,234\n", &Options::default()).unwrap();
+        assert_eq!(column(&file.dataset, 1), nums(&[1234.0]), "either way: a point with tabs");
+        assert_eq!(file.warnings.len(), 1);
+        // A CSV with the grouped numbers quoted.
+        let file = read(b"n,v\n1,\"1,234.5\"\n2,7\n", &Options::default()).unwrap();
+        assert_eq!(column(&file.dataset, 1), nums(&[1234.5, 7.0]));
+    }
+
+    #[test]
+    fn identifiers_stay_strings() {
+        // A CEP and a CPF keep their leading zeros; 17 digits keep every one (#39).
+        let csv = "cep;cpf;conta;n\n01310100;01234567890;12345678901234567;1\n20040002;12345678909;12345678901234568;2\n";
+        let file = read(csv.as_bytes(), &Options::default()).unwrap();
+        let ds = &file.dataset;
+        assert_eq!(column(ds, 0), [Value::Str("01310100".into()), Value::Str("20040002".into())]);
+        assert_eq!(column(ds, 1)[0], Value::Str("01234567890".into()));
+        assert_eq!(column(ds, 2)[1], Value::Str("12345678901234568".into()));
+        assert_eq!(column(ds, 3), nums(&[1.0, 2.0]));
+        assert!(!identifier("0") && !identifier("0.5") && !identifier("123456789012345"));
+    }
+
+    #[test]
+    fn a_qualifier_inside_a_field_is_literal() {
+        // RFC 4180 opens quoted text only at a field's start; a quote mid-field used to swallow
+        // the rest of the file (#39).
+        let file = read(b"id,desc\n1,TV 42\" LED\n2,Radio\n", &Options::default()).unwrap();
+        assert_eq!(file.dataset.n_cases(), 2);
+        assert_eq!(column(&file.dataset, 1), [Value::Str("TV 42\" LED".into()), Value::Str("Radio".into())]);
+        // Spaces before an opening qualifier are dropped; text after a closing one is kept.
+        let file = read(b"a,b\n1, \"x,y\"\n2,\"p\"q\n", &Options::default()).unwrap();
+        assert_eq!(column(&file.dataset, 1), [Value::Str("x,y".into()), Value::Str("pq".into())]);
+        // Detection reads the quote the same way.
+        let file = read(b"a;b\n5\" disco;1\nlivro;2\n", &Options::default()).unwrap();
+        assert_eq!(file.delimiter, ';');
+        assert_eq!(column(&file.dataset, 1), nums(&[1.0, 2.0]));
     }
 
     #[test]
@@ -421,6 +701,18 @@ mod tests {
         assert_eq!(file.warnings.len(), 1);
         let file = read(b"\xEF\xBB\xBFa\n1\n", &Options::default()).unwrap();
         assert_eq!(file.dataset.variables()[0].name, "a", "the byte-order mark is skipped");
+        // Excel's "Unicode Text": UTF-16LE with a byte-order mark, tab-delimited (#39).
+        let utf16: Vec<u8> = [0xFEFF].into_iter().chain("nome\tn\nJoão\t1\n".encode_utf16()).flat_map(u16::to_le_bytes).collect();
+        let file = read(&utf16, &Options::default()).unwrap();
+        assert_eq!(column(&file.dataset, 0), [Value::Str("João".into())]);
+        assert!(file.warnings.is_empty());
+        let utf16be: Vec<u8> = [0xFEFF].into_iter().chain("a\n1\n".encode_utf16()).flat_map(u16::to_be_bytes).collect();
+        assert_eq!(column(&read(&utf16be, &Options::default()).unwrap().dataset, 0), nums(&[1.0]));
+        // UTF-8 with one bad byte: the byte is replaced, the rest stays UTF-8 (#39).
+        let file = read(b"nome\nJo\xC3\xA3o\nAna\xFF\n", &Options::default()).unwrap();
+        assert_eq!(column(&file.dataset, 0), [Value::Str("João".into()), Value::Str("Ana\u{FFFD}".into())]);
+        assert_eq!(file.warnings.len(), 1);
+        assert_eq!(utf8_sequences(b"Jo\xC3\xA3o \xE9 \xFF\xC3"), (1, 3), "a sequence cut short at the end counts");
         assert!(matches!(read(b"", &Options::default()), Err(CsvError::Empty)));
         assert!(matches!(read(b"a\n1\n", &Options { encoding: Some("klingon".into()), ..Options::default() }), Err(CsvError::Encoding(_))));
         let wide = ",".repeat(MAX_FIELDS + 1);
