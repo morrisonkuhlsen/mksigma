@@ -1038,6 +1038,7 @@ err-step-one-command = um passo é um comando
 err-step-changes-data = um passo altera os dados; execute análises pelo editor de sintaxe
 err-step-get-data = GET DATA começa dados novos; execute-o pelo editor de sintaxe
 err-step-only-commands = só passos de comando podem ser reescritos
+err-step-rows-changed = os casos mudaram desde esta edição (um passo anterior que inclui ou exclui casos foi desligado, removido, movido ou reescrito); a linha dela agora é outro caso, por isso foi ignorada
 err-to-needs-variables = TO precisa de uma variável antes e depois dele
 err-to-needs-after = { $word } TO precisa de uma variável depois de TO
 err-to-empty = { $first } vem depois de { $last } no arquivo, então { $first } TO { $last } é vazio

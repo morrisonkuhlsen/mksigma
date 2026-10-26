@@ -29,6 +29,8 @@ pub(crate) enum Edit {
         index: usize,
         var: Variable,
         column: Vec<Value>,
+        /// It was the weight variable: undo weights the cases by it again.
+        weighted: bool,
     },
     InsertCase {
         index: usize,
@@ -70,11 +72,28 @@ impl Edit {
             Edit::Dictionary { before, .. } => ds.replace_variables(before.clone()),
             Edit::Cell { case, var, before, .. } => ds.set_value(*case, *var, before.clone()),
             Edit::InsertVariable { index, .. } => ds.remove_variable(*index).map(drop),
-            Edit::RemoveVariable { index, var, column } => ds.insert_variable(*index, var.clone(), column.clone()),
+            Edit::RemoveVariable { index, var, column, weighted } => {
+                ds.insert_variable(*index, var.clone(), column.clone())?;
+                if *weighted {
+                    ds.weight = Some(*index);
+                }
+                Ok(())
+            }
             Edit::InsertCase { index, .. } => ds.remove_case(*index).map(drop),
             Edit::RemoveCase { index, values } => ds.insert_case(*index, values.clone()),
             Edit::Column { index, before, .. } => ds.replace_column(*index, before.clone()).map(drop),
             Edit::RemoveCases { indexes, rows } => ds.restore_cases(indexes, rows.clone()),
+        }
+    }
+}
+
+/// Reverses `edits`, newest first, after a command failed partway through them, so a command
+/// changes all it was asked to or nothing. Each edit reverses what it just did, so this can't
+/// fail on a dataset the edits left; an error would leave the data as the failing command did.
+pub(crate) fn roll_back(ds: &mut Dataset, edits: &[Edit]) {
+    for edit in edits.iter().rev() {
+        if edit.undo(ds).is_err() {
+            return;
         }
     }
 }

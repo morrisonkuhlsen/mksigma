@@ -1038,6 +1038,7 @@ err-step-one-command = a step is one command
 err-step-changes-data = a step changes the data; run analyses from the syntax editor
 err-step-get-data = GET DATA starts new data; run it from the syntax editor
 err-step-only-commands = only command steps can be rewritten
+err-step-rows-changed = the cases changed since this edit (a step before it that adds or removes cases was switched off, removed, moved or rewritten); its row is another case now, so it was skipped
 err-to-needs-variables = TO needs a variable before and after it
 err-to-needs-after = { $word } TO needs a variable after TO
 err-to-empty = { $first } comes after { $last } in the file, so { $first } TO { $last } is empty
