@@ -1,7 +1,7 @@
 //! MK Sigma's project tasks, run with `cargo xtask <task>`:
 //!
 //! - `ci`: every quality gate before a commit: fmt, clippy (warnings are errors), tests,
-//!   assets, layers, wasm. Stops at the first that fails.
+//!   assets, layers, panics, wasm. Stops at the first that fails.
 //! - `layers`: each crate depends only on crates at its layer or below, and nothing below the
 //!   UI layer on egui, eframe, winit or rfd.
 //! - `assets`: every asset file has its row in `ATTRIBUTION.md`.

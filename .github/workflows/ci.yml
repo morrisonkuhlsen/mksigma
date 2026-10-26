@@ -45,6 +45,10 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # `cargo xtask ci` doesn't pass --locked: a Cargo.lock out of step with the manifests fails here.
+      - name: Lockfile up to date
+        run: cargo fetch --locked
+
       - name: Quality gate
         env:
           MKSIGMA_REQUIRE_WASM: "1"

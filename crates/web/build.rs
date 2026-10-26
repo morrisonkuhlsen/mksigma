@@ -38,13 +38,18 @@ fn main() {
         .env_remove("RUSTFLAGS")
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env_remove("CARGO_BUILD_TARGET")
+        // Under `cargo clippy` the outer build runs rustc through clippy-driver with its lints
+        // (`-D warnings`): this build makes the engine, it doesn't lint it for wasm32.
+        .env_remove("RUSTC_WORKSPACE_WRAPPER")
+        .env_remove("CLIPPY_ARGS")
+        .env_remove("CLIPPY_CONF_DIR")
         .status();
     let built = target_dir.join("wasm32-unknown-unknown").join("wasm").join("mksigma_web.wasm");
     match status {
         Ok(s) if s.success() && std::fs::copy(&built, &wasm).is_ok() => {}
         _ if std::env::var_os("MKSIGMA_REQUIRE_WASM").is_some() => {
             println!(
-                "cargo::error=the dashboard engine couldn't be built for WebAssembly (rustup target add wasm32-unknown-unknown), and MKSIGMA_REQUIRE_WASM asks for it"
+                "cargo::error=the dashboard engine couldn't be built for WebAssembly (is wasm32-unknown-unknown installed? `-vv` shows that build's errors), and MKSIGMA_REQUIRE_WASM asks for it"
             );
         }
         _ => {
