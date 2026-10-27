@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use mksigma_core::{Dataset, Value, VarType, Variable};
 use mksigma_output::{Cell, Item, Table};
 
+use crate::groups::{Key, compare};
 use crate::{Moments, StatsError, category, n_cell, value_text};
 
 /// Row order of a frequency table.
@@ -59,13 +60,6 @@ pub struct Options {
     pub statistics: Vec<Statistic>,
 }
 
-/// Distinct values compare by bits (numbers, with −0 as 0) or by text (strings).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum Key {
-    Num(u64),
-    Str(String),
-}
-
 /// One variable's weighted counts.
 pub(crate) struct Counts {
     /// Valid values and their summed weights, in table order.
@@ -85,31 +79,20 @@ impl Counts {
     }
 }
 
-fn compare_values(a: &Value, b: &Value) -> std::cmp::Ordering {
-    match (a, b) {
-        (Value::Num(x), Value::Num(y)) => x.total_cmp(y),
-        (Value::Str(x), Value::Str(y)) => x.cmp(y),
-        _ => std::cmp::Ordering::Equal,
-    }
-}
-
 pub(crate) fn count(var: &Variable, column: &[Value], weights: &[f64], order: Order) -> Counts {
     let mut map: HashMap<Key, (Value, f64)> = HashMap::new();
     let mut system_missing = 0.0;
     for (value, &w) in column.iter().zip(weights).filter(|(_, w)| **w > 0.0) {
-        let key = match value {
-            Value::SysMis => {
-                system_missing += w;
-                continue;
-            }
-            Value::Num(x) => Key::Num(if *x == 0.0 { 0.0f64 } else { *x }.to_bits()),
-            Value::Str(s) => Key::Str(s.clone()),
-        };
+        if *value == Value::SysMis {
+            system_missing += w;
+            continue;
+        }
+        let key = Key::of(value);
         map.entry(key).or_insert_with(|| (value.clone(), 0.0)).1 += w;
     }
     let (mut user_missing, mut valid): (Vec<_>, Vec<_>) = map.into_values().partition(|(v, _)| var.is_missing(v));
-    user_missing.sort_by(|a, b| compare_values(&a.0, &b.0));
-    valid.sort_by(|a, b| compare_values(&a.0, &b.0));
+    user_missing.sort_by(|a, b| compare(&a.0, &b.0));
+    valid.sort_by(|a, b| compare(&a.0, &b.0));
     match order {
         Order::AscendingValue => {}
         Order::DescendingValue => valid.reverse(),

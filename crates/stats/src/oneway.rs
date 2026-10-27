@@ -7,7 +7,7 @@ use mksigma_core::{Dataset, Value};
 use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 
-use crate::groups::{anova, levene, moments, numeric, std_error, valid};
+use crate::groups::{Categories, anova, levene, moments, numeric, std_error, valid};
 use crate::{Moments, StatsError, dist, n_cell, num, range, value_text};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +27,10 @@ pub struct Options {
     pub alpha: f64,
 }
 
+/// The most groups post hoc tests compare: Tukey's significance takes a studentized range
+/// integral per pair, and 50 groups already make 1,225 pairs.
+pub(crate) const MAX_POSTHOC_GROUPS: usize = 50;
+
 /// Every ordered pair of groups (I, J), I ≠ J: the mean difference flagged at `alpha`, its
 /// standard error, significance and confidence interval.
 fn comparisons(test: PostHoc, labels: &[String], stats: &[Moments], mse: f64, df: f64, alpha: f64) -> Vec<(String, Vec<Cell>)> {
@@ -41,6 +45,23 @@ fn comparisons(test: PostHoc, labels: &[String], stats: &[Moments], mse: f64, df
         PostHoc::Tukey => range::quantile(1.0 - alpha, k, df).map(|q| q / std::f64::consts::SQRT_2),
         PostHoc::Bonferroni => dist::t_quantile(1.0 - alpha / (2.0 * m), df),
     };
+    // Each pair's significance, once: (I, J) and (J, I) share it.
+    let mut sigs = vec![vec![None; stats.len()]; stats.len()];
+    for (i, mi) in stats.iter().enumerate() {
+        for (j, mj) in stats.iter().enumerate().skip(i + 1) {
+            let diff = mi.mean - mj.mean;
+            let se = (mse * (1.0 / mi.w + 1.0 / mj.w)).sqrt();
+            let sig = match test {
+                PostHoc::Tukey => range::cdf((diff / se).abs() * std::f64::consts::SQRT_2, k, df).map(|p| 1.0 - p),
+                PostHoc::Bonferroni => dist::t_sig(diff / se, df).map(|p| (p * m).min(1.0)),
+            };
+            for (a, b) in [(i, j), (j, i)] {
+                if let Some(cell) = sigs.get_mut(a).and_then(|row| row.get_mut(b)) {
+                    *cell = sig;
+                }
+            }
+        }
+    }
     let mut rows = Vec::new();
     for (i, (li, mi)) in labels.iter().zip(stats).enumerate() {
         for (j, (lj, mj)) in labels.iter().zip(stats).enumerate() {
@@ -49,10 +70,7 @@ fn comparisons(test: PostHoc, labels: &[String], stats: &[Moments], mse: f64, df
             }
             let diff = mi.mean - mj.mean;
             let se = (mse * (1.0 / mi.w + 1.0 / mj.w)).sqrt();
-            let sig = match test {
-                PostHoc::Tukey => range::cdf((diff / se).abs() * std::f64::consts::SQRT_2, k, df).map(|p| 1.0 - p),
-                PostHoc::Bonferroni => dist::t_sig(diff / se, df).map(|p| (p * m).min(1.0)),
-            };
+            let sig = sigs.get(i).and_then(|row| row.get(j)).copied().flatten();
             let flagged = sig.is_some_and(|p| p < alpha);
             let first = j == 0 || (i == 0 && j == 1);
             rows.push((
@@ -75,33 +93,27 @@ fn comparisons(test: PostHoc, labels: &[String], stats: &[Moments], mse: f64, df
 pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> {
     let (fi, fvar) = numeric(ds, &options.factor)?;
     let (mut anova_rows, mut descriptive_rows, mut levene_rows, mut posthoc_rows) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut notes = Vec::new();
     let alpha = if options.alpha > 0.0 && options.alpha < 1.0 { options.alpha } else { 0.05 };
     for name in &options.dependents {
         let (i, var) = numeric(ds, name)?;
         // Groups by factor value, in ascending order.
-        let mut levels: Vec<f64> = Vec::new();
-        let mut groups: Vec<Vec<(f64, f64)>> = Vec::new();
+        let mut categories = Categories::<Vec<(f64, f64)>>::new(fvar);
         for case in 0..ds.n_cases() {
             let w = ds.case_weight(case);
             let (Some(level), Some(x)) = (valid(ds, fi, case), valid(ds, i, case)) else { continue };
             if w <= 0.0 {
                 continue;
             }
-            match levels.iter().position(|l| *l == level) {
-                Some(k) => groups.get_mut(k).into_iter().for_each(|g| g.push((x, w))),
-                None => {
-                    levels.push(level);
-                    groups.push(vec![(x, w)]);
-                }
-            }
+            categories.of(&Value::Num(level))?.push((x, w));
         }
-        let mut order: Vec<usize> = (0..levels.len()).collect();
-        order.sort_by(|a, b| levels.get(*a).zip(levels.get(*b)).map_or(std::cmp::Ordering::Equal, |(x, y)| x.total_cmp(y)));
-        let groups: Vec<Vec<(f64, f64)>> = order.iter().filter_map(|k| groups.get(*k).cloned()).collect();
-        let levels: Vec<f64> = order.iter().filter_map(|k| levels.get(*k).copied()).collect();
+        let (levels, groups): (Vec<f64>, Vec<Vec<(f64, f64)>>) =
+            categories.sorted().into_iter().map(|(level, g)| (level.as_num().unwrap_or(f64::NAN), g)).unzip();
         let label = var.display_name().to_string();
 
-        if let Some((parts, _, df2)) = anova(&groups).filter(|_| !options.posthoc.is_empty()) {
+        if !options.posthoc.is_empty() && groups.len() > MAX_POSTHOC_GROUPS {
+            notes.push(tr!("o-posthoc-too-many-groups", max = MAX_POSTHOC_GROUPS, name = fvar.display_name(), k = groups.len()));
+        } else if let Some((parts, _, df2)) = anova(&groups).filter(|_| !options.posthoc.is_empty()) {
             let labels: Vec<String> = levels.iter().map(|l| value_text(fvar, &Value::Num(*l))).collect();
             let stats: Vec<Moments> = groups.iter().map(|g| moments(g)).collect();
             let mse = parts.within / df2;
@@ -227,6 +239,7 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
         }));
         items.push(Item::Text(tr!("o-mean-difference-significant", alpha = format!("{alpha}"))));
     }
+    items.extend(notes.into_iter().map(Item::Warning));
     Ok(items)
 }
 

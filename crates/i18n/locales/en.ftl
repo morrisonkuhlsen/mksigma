@@ -466,6 +466,7 @@ o-levene-statistic = Levene Statistic
 o-within-groups = Within Groups
 o-between-groups = Between Groups
 o-bonferroni = Bonferroni
+o-posthoc-too-many-groups = Post hoc tests compare at most { $max } groups; { $name } has { $k }, so they were not computed.
 o-95-ci-lower = 95% CI Lower
 o-std-error = Std. Error
 o-test-of-homogeneity-of-variances = Test of Homogeneity of Variances
@@ -901,6 +902,7 @@ ex-rank-every = Every group ({ $group } from { $low } to { $high }) together, ra
 ## Errors
 err-unknown-variable = variable { $name } does not exist
 err-not-numeric = variable { $name } is not numeric
+err-too-many-levels = variable { $name } has more than { $max } categories, too many to group cases by
 phrase-a-format-in-parentheses-such-as-f8-2 = a format in parentheses, such as (F8.2)
 phrase-a-format-such-as-f8-2 = a format such as F8.2
 phrase-a-name-or-keyword = a name or keyword

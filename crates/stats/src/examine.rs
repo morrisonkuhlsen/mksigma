@@ -11,7 +11,7 @@ use mksigma_i18n::tr;
 use mksigma_output::chart::BoxStats;
 use mksigma_output::{Cell, Chart, Item, Table};
 
-use crate::groups::{moments, numeric, std_error, valid, valid_value};
+use crate::groups::{Categories, moments, numeric, std_error, valid, valid_value};
 use crate::{StatsError, category, dist, n_cell, num, value_text};
 
 #[derive(Debug, Clone, Default)]
@@ -152,18 +152,19 @@ fn descriptive_rows(label: String, values: &Sorted) -> Vec<(String, Vec<Cell>)> 
 
 /// The values of variable `vi` in one group per value of `by` (ascending), or in a single
 /// group; and the weight of the cases missing on it.
-pub(crate) fn groups_of(ds: &Dataset, vi: usize, by: Option<usize>) -> (Vec<Group>, f64) {
+pub(crate) fn groups_of(ds: &Dataset, vi: usize, by: Option<usize>) -> Result<(Vec<Group>, f64), StatsError> {
     // One group of values per category of `by`, or a single group.
-    let mut groups: Vec<Group> = Vec::new();
+    let mut categories = by.and_then(|bi| ds.variables().get(bi)).map(Categories::<Vec<(f64, f64)>>::new);
+    let mut all = Vec::new();
     let mut missing = 0.0;
     for case in 0..ds.n_cases() {
         let w = ds.case_weight(case);
         if w <= 0.0 {
             continue;
         }
-        let key = match by {
+        let category = match by {
             Some(bi) => match valid_value(ds, bi, case) {
-                Some(v) => Some(v.clone()),
+                Some(v) => Some(v),
                 None => continue,
             },
             None => None,
@@ -172,17 +173,17 @@ pub(crate) fn groups_of(ds: &Dataset, vi: usize, by: Option<usize>) -> (Vec<Grou
             missing += w;
             continue;
         };
-        match groups.iter_mut().find(|(k, _)| *k == key) {
-            Some((_, list)) => list.push((x, w)),
-            None => groups.push((key, vec![(x, w)])),
+        match (categories.as_mut(), category) {
+            (Some(categories), Some(v)) => categories.of(v)?.push((x, w)),
+            _ => all.push((x, w)),
         }
     }
-    groups.sort_by(|a, b| match (&a.0, &b.0) {
-        (Some(Value::Num(x)), Some(Value::Num(y))) => x.total_cmp(y),
-        (Some(Value::Str(x)), Some(Value::Str(y))) => x.cmp(y),
-        _ => std::cmp::Ordering::Equal,
-    });
-    (groups, missing)
+    let groups = match categories {
+        Some(categories) => categories.sorted().into_iter().map(|(v, list)| (Some(v), list)).collect(),
+        None if all.is_empty() => Vec::new(),
+        None => vec![(None, all)],
+    };
+    Ok((groups, missing))
 }
 
 pub fn examine(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> {
@@ -192,7 +193,7 @@ pub fn examine(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError>
     let mut charts = Vec::new();
     for name in &options.variables {
         let (vi, var) = numeric(ds, name)?;
-        let (groups, missing) = groups_of(ds, vi, by.map(|(bi, _)| bi));
+        let (groups, missing) = groups_of(ds, vi, by.map(|(bi, _)| bi))?;
         let valid_n: f64 = groups.iter().flat_map(|(_, g)| g.iter().map(|(_, w)| w)).sum();
         summary.push((var.display_name().to_string(), vec![n_cell(valid_n), n_cell(missing), n_cell(valid_n + missing)]));
         let mut boxes = Vec::new();

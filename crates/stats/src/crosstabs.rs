@@ -6,7 +6,9 @@ use mksigma_core::{Dataset, Value, VarType, Variable};
 use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 
-use crate::groups::valid_value;
+use std::collections::HashMap;
+
+use crate::groups::{Categories, Key, valid_value};
 use crate::{StatsError, dist, n_cell, num, value_text};
 
 /// What each crosstabulation cell shows (`/CELLS`).
@@ -41,17 +43,32 @@ pub(crate) struct Counts {
     cells: Vec<Vec<f64>>,
     /// Weighted cases with a missing value on either variable.
     missing: f64,
+    /// The margins and the total, summed once: the expected counts need them for every cell.
+    row_totals: Vec<f64>,
+    column_totals: Vec<f64>,
+    total: f64,
 }
 
 impl Counts {
+    fn new(rows: Vec<Value>, columns: Vec<Value>, cells: Vec<Vec<f64>>, missing: f64) -> Self {
+        let row_totals: Vec<f64> = cells.iter().map(|row| row.iter().sum()).collect();
+        let mut column_totals = vec![0.0; columns.len()];
+        for row in &cells {
+            for (total, cell) in column_totals.iter_mut().zip(row) {
+                *total += cell;
+            }
+        }
+        let total = row_totals.iter().sum();
+        Self { rows, columns, cells, missing, row_totals, column_totals, total }
+    }
     pub(crate) fn row_total(&self, r: usize) -> f64 {
-        self.cells.get(r).map_or(0.0, |row| row.iter().sum())
+        self.row_totals.get(r).copied().unwrap_or(0.0)
     }
     pub(crate) fn column_total(&self, c: usize) -> f64 {
-        self.cells.iter().filter_map(|row| row.get(c)).sum()
+        self.column_totals.get(c).copied().unwrap_or(0.0)
     }
     pub(crate) fn total(&self) -> f64 {
-        self.cells.iter().flatten().sum()
+        self.total
     }
     pub(crate) fn expected(&self, r: usize, c: usize) -> f64 {
         let n = self.total();
@@ -62,50 +79,45 @@ impl Counts {
     }
 }
 
-fn compare(a: &Value, b: &Value) -> std::cmp::Ordering {
-    match (a, b) {
-        (Value::Num(x), Value::Num(y)) => x.total_cmp(y),
-        (Value::Str(x), Value::Str(y)) => x.cmp(y),
-        _ => std::cmp::Ordering::Equal,
-    }
-}
-
-pub(crate) fn count(ds: &Dataset, row: usize, column: usize) -> Counts {
-    let mut pairs: Vec<(Value, Value, f64)> = Vec::new();
+/// The weighted counts of `row` by `column`, rounded; an error when either has more than
+/// `MAX_LEVELS` categories.
+pub(crate) fn count(ds: &Dataset, row: usize, column: usize) -> Result<Counts, StatsError> {
+    let (Some(row_var), Some(column_var)) = (ds.variables().get(row), ds.variables().get(column)) else {
+        return Ok(Counts::new(Vec::new(), Vec::new(), Vec::new(), 0.0));
+    };
+    let mut pairs: Vec<(Key, Key, f64)> = Vec::new();
     let mut missing = 0.0;
+    let (mut rows, mut columns) = (Categories::<()>::new(row_var), Categories::<()>::new(column_var));
     for case in 0..ds.n_cases() {
         let w = ds.case_weight(case);
         if w <= 0.0 {
             continue;
         }
         match (valid_value(ds, row, case), valid_value(ds, column, case)) {
-            (Some(r), Some(c)) => pairs.push((r.clone(), c.clone(), w)),
+            (Some(r), Some(c)) => {
+                rows.of(r)?;
+                columns.of(c)?;
+                pairs.push((Key::of(r), Key::of(c), w));
+            }
             _ => missing += w,
         }
     }
-    let mut rows: Vec<Value> = Vec::new();
-    let mut columns: Vec<Value> = Vec::new();
-    for (r, c, _) in &pairs {
-        if !rows.contains(r) {
-            rows.push(r.clone());
-        }
-        if !columns.contains(c) {
-            columns.push(c.clone());
-        }
-    }
-    rows.sort_by(compare);
-    columns.sort_by(compare);
+    let rows: Vec<Value> = rows.sorted().into_iter().map(|(v, ())| v).collect();
+    let columns: Vec<Value> = columns.sorted().into_iter().map(|(v, ())| v).collect();
+    let at = |values: &[Value]| -> HashMap<Key, usize> { values.iter().enumerate().map(|(i, v)| (Key::of(v), i)).collect() };
+    let (row_at, column_at) = (at(&rows), at(&columns));
     let mut cells = vec![vec![0.0; columns.len()]; rows.len()];
     for (r, c, w) in &pairs {
-        let (Some(ri), Some(ci)) = (rows.iter().position(|v| v == r), columns.iter().position(|v| v == c)) else { continue };
-        if let Some(cell) = cells.get_mut(ri).and_then(|row| row.get_mut(ci)) {
+        if let (Some(ri), Some(ci)) = (row_at.get(r), column_at.get(c))
+            && let Some(cell) = cells.get_mut(*ri).and_then(|row| row.get_mut(*ci))
+        {
             *cell += w;
         }
     }
     for cell in cells.iter_mut().flatten() {
         *cell = cell.round();
     }
-    Counts { rows, columns, cells, missing }
+    Ok(Counts::new(rows, columns, cells, missing))
 }
 
 fn pct(part: f64, whole: f64) -> Cell {
@@ -315,7 +327,7 @@ pub fn crosstabs(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErro
     let mut tables = Vec::new();
     for (ri, row_var) in &rows {
         for (ci, column_var) in &columns {
-            let counts = count(ds, *ri, *ci);
+            let counts = count(ds, *ri, *ci)?;
             let (valid, missing) = (counts.total(), counts.missing.round());
             let total = valid + missing;
             summary.push((
