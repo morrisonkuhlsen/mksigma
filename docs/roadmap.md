@@ -328,10 +328,16 @@ first, the optimal designs after); the other modules follow.
   - *A parity matrix:* a table in code of every procedure against SPSS, SAS, Stata, JMP,
     Minitab, JASP and jamovi (has it, part of it, not yet), printed by an xtask and in the
     docs, so the unification is visible and measured.
-  - *Noncentral distributions (#52):* t, F, χ² and beta, with CDF, quantile and a solver for the
-    noncentrality, from the published series (Lenth 1989, Ding 1992, Frick 1990). One piece
-    behind power and sample size, the run length of control charts, the power of a design and
-    confidence intervals for effect sizes.
+  - *Noncentral distributions (#52) — done* (`crates/stats/src/noncentral.rs`): t, F, χ² and
+    beta, each with its distribution function, survival function, quantile and a solver for the
+    noncentrality that gives a probability, from the published series (Lenth 1989, Ding 1992,
+    Frick 1990) summed outwards from the largest Poisson weight. The incomplete gamma and beta
+    functions are MK Sigma's, with Stirling's formula arranged so no large terms cancel: they
+    keep their digits with a million degrees of freedom. The t's tail away from δ, where Lenth's
+    series cancels, is an integral of positive terms by Gauss–Legendre. Held to 1e-10 relative
+    against mpmath at 40 digits and scipy (`tests/noncentral.rs`), df from 0.3 to 10⁶, λ to 10⁴,
+    tails to 10⁻³⁴. One piece behind power and sample size, the run length of control charts,
+    the power of a design and confidence intervals for effect sizes. **Next:** use it there.
 - **Quality: control charts, capability, measurement systems (Minitab's niche) — next:**
   industry uses it every day, and automotive suppliers are required to (IATF 16949). In the UI
   it is "Quality", not "Six Sigma", a Motorola trademark.

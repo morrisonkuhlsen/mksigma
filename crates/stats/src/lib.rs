@@ -17,6 +17,7 @@ pub mod explain;
 mod frequencies;
 mod groups;
 mod logistic;
+pub mod noncentral;
 mod npar;
 mod oneway;
 mod range;
