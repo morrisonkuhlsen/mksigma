@@ -3292,12 +3292,12 @@ mod tests {
         let Item::Table(t) = &items[0] else { panic!() };
         // The r of age with income: row 0 (Pearson), column 2 (column 0 names the statistic).
         let r = match &t.rows[0].1[2] {
-            Cell::Num { value, .. } => *value,
+            Cell::Num { value, .. } | Cell::Sig(value) => *value,
             Cell::Text(s) => s.trim_end_matches('*').parse().unwrap(),
             other => panic!("{other:?}"),
         };
         let p = match &t.rows[1].1[2] {
-            Cell::Num { value, .. } => *value,
+            Cell::Num { value, .. } | Cell::Sig(value) => *value,
             other => panic!("{other:?}"),
         };
         let tex = latex(&e);
@@ -3321,7 +3321,7 @@ mod tests {
     fn ends_on(tex: &str, cells: &[&Cell]) {
         for cell in cells {
             let x = match cell {
-                Cell::Num { value, .. } => *value,
+                Cell::Num { value, .. } | Cell::Sig(value) => *value,
                 // Whole numbers (a df) show as they are.
                 Cell::Int(k) => {
                     assert!(tex.contains(&format!("= {k}")), "{k} in {tex}");
@@ -3407,7 +3407,7 @@ mod tests {
         for (_, cells) in t.rows.iter().skip(2) {
             for cell in cells {
                 let x = match cell {
-                    Cell::Num { value, .. } => *value,
+                    Cell::Num { value, .. } | Cell::Sig(value) => *value,
                     Cell::Text(s) => s.trim_end_matches('a').parse().unwrap(),
                     other => panic!("{other:?}"),
                 };
@@ -3444,7 +3444,7 @@ mod tests {
                 continue;
             }
             for k in [0, 2, 3, 4] {
-                if let Some(cell @ Cell::Num { .. }) = cells.get(k) {
+                if let Some(cell @ (Cell::Num { .. } | Cell::Sig(_))) = cells.get(k) {
                     ends_on(&tex, &[cell]);
                 }
             }
@@ -3482,7 +3482,7 @@ mod tests {
             for (_, cells) in &t.rows {
                 for cell in cells {
                     let x = match cell {
-                        Cell::Num { value, .. } => *value,
+                        Cell::Num { value, .. } | Cell::Sig(value) => *value,
                         Cell::Text(s) if s.ends_with('*') => s.trim_end_matches('*').parse().unwrap(),
                         Cell::Int(k) => *k as f64,
                         _ => continue,
@@ -3537,6 +3537,7 @@ mod tests {
                     for cell in cells {
                         let (x, places) = match cell {
                             Cell::Num { value, decimals } => (*value, *decimals as usize),
+                            Cell::Sig(p) => (*p, usize::from(Cell::SIG_DECIMALS)),
                             Cell::Int(k) => (*k as f64, 0),
                             _ => continue,
                         };
@@ -3598,7 +3599,7 @@ mod tests {
                 for (_, cells) in &t.rows {
                     for cell in cells {
                         let x = match cell {
-                            Cell::Num { value, .. } => *value,
+                            Cell::Num { value, .. } | Cell::Sig(value) => *value,
                             Cell::Int(k) => *k as f64,
                             _ => continue,
                         };
@@ -3648,7 +3649,7 @@ mod tests {
             for (_, cells) in &t.rows {
                 for cell in cells {
                     let x = match cell {
-                        Cell::Num { value, .. } => *value,
+                        Cell::Num { value, .. } | Cell::Sig(value) => *value,
                         Cell::Int(k) => *k as f64,
                         _ => continue,
                     };
@@ -3686,7 +3687,7 @@ mod tests {
             for (_, cells) in &t.rows {
                 for cell in cells {
                     let x = match cell {
-                        Cell::Num { value, .. } => *value,
+                        Cell::Num { value, .. } | Cell::Sig(value) => *value,
                         Cell::Int(k) => *k as f64,
                         _ => continue,
                     };
@@ -3727,7 +3728,7 @@ mod tests {
                 for (_, cells) in &t.rows {
                     for cell in cells {
                         let x = match cell {
-                            Cell::Num { value, .. } => *value,
+                            Cell::Num { value, .. } | Cell::Sig(value) => *value,
                             Cell::Int(k) => *k as f64,
                             _ => continue,
                         };

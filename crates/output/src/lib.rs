@@ -49,16 +49,38 @@ impl Cases {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cell {
-    Num { value: f64, decimals: u8 },
+    Num {
+        value: f64,
+        decimals: u8,
+    },
+    /// A significance (p-value), always with [`Cell::SIG_DECIMALS`] places: the Output style's
+    /// decimals leave it alone.
+    Sig(f64),
     Int(i64),
     Text(String),
     Empty,
 }
 
 impl Cell {
+    pub const SIG_DECIMALS: u8 = 3;
+
+    /// Whether it holds a number, which aligns right.
+    pub fn is_numeric(&self) -> bool {
+        matches!(self, Cell::Num { .. } | Cell::Sig(_) | Cell::Int(_))
+    }
+
     pub fn render(&self) -> String {
         match self {
-            Cell::Num { value, decimals } => mksigma_i18n::decimal(&format!("{value:.*}", usize::from(*decimals))),
+            Cell::Num { value, decimals } => {
+                let s = format!("{value:.*}", usize::from(*decimals));
+                // A negative that rounds to zero shows as zero, as the Σ and the charts show it.
+                let s = match s.strip_prefix('-') {
+                    Some(rest) if rest.bytes().all(|b| b == b'0' || b == b'.') => rest.to_string(),
+                    _ => s,
+                };
+                mksigma_i18n::decimal(&s)
+            }
+            Cell::Sig(p) => Cell::Num { value: *p, decimals: Cell::SIG_DECIMALS }.render(),
             Cell::Int(n) => n.to_string(),
             Cell::Text(s) => s.clone(),
             Cell::Empty => String::new(),
@@ -152,10 +174,7 @@ fn table_to_text(t: &Table) -> String {
     }
     // Text columns align left, number columns right; the stub column holds labels.
     let right: Vec<bool> = std::iter::once(false)
-        .chain(
-            (0..t.columns.len())
-                .map(|col| t.rows.iter().filter_map(|(_, cells)| cells.get(col)).any(|c| matches!(c, Cell::Num { .. } | Cell::Int(_)))),
-        )
+        .chain((0..t.columns.len()).map(|col| t.rows.iter().filter_map(|(_, cells)| cells.get(col)).any(Cell::is_numeric)))
         .collect();
     let line = |row: &[String]| -> String {
         let cells: Vec<String> =
@@ -173,6 +192,14 @@ fn table_to_text(t: &Table) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn negative_zero_shows_as_zero() {
+        assert_eq!(Cell::Num { value: -0.0001, decimals: 3 }.render(), "0.000");
+        assert_eq!(Cell::Num { value: -0.0, decimals: 0 }.render(), "0");
+        assert_eq!(Cell::Num { value: -0.0006, decimals: 3 }.render(), "-0.001");
+        assert_eq!(Cell::Sig(-1e-12).render(), "0.000");
+    }
 
     #[test]
     fn renders_a_table_as_aligned_text() {

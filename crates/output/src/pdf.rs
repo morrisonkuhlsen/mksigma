@@ -246,10 +246,7 @@ impl Pages {
             t.rows.iter().map(|(label, cells)| std::iter::once(label.clone()).chain(cells.iter().map(|c| self.style.cell(c))).collect()).collect();
         let family = self.style.family;
         let numeric: Vec<bool> = std::iter::once(false)
-            .chain(
-                (0..t.columns.len())
-                    .map(|c| t.rows.iter().filter_map(|(_, cells)| cells.get(c)).any(|c| matches!(c, Cell::Num { .. } | Cell::Int(_)))),
-            )
+            .chain((0..t.columns.len()).map(|c| t.rows.iter().filter_map(|(_, cells)| cells.get(c)).any(Cell::is_numeric)))
             .collect();
         // A column is as wide as its widest cell and its header's longest word: headers wrap.
         // The size is the largest from 8.5 down to 6 points at which the table fits the page.

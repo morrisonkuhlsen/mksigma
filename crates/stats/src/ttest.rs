@@ -7,7 +7,7 @@ use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 
 use crate::groups::{levene, moments, numeric, std_error, valid, valid_value};
-use crate::{Moments, StatsError, dist, n_cell, num, value_text};
+use crate::{Moments, StatsError, dist, n_cell, num, p_value, value_text};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TTest {
@@ -56,7 +56,7 @@ fn one_sample(ds: &Dataset, variables: &[String], test_value: f64, ci: f64) -> R
         let sig = t.and_then(|t| dist::t_sig(t, df));
         tests.push((
             var.display_name().to_string(),
-            vec![num(t, 3), n_cell(df.max(0.0)), num(sig, 3), num((m.w > 0.0).then_some(diff), 3), lower, upper],
+            vec![num(t, 3), n_cell(df.max(0.0)), p_value(sig), num((m.w > 0.0).then_some(diff), 3), lower, upper],
         ));
     }
     let stat_columns = [tr!("o-n"), tr!("o-mean"), tr!("o-std-deviation"), tr!("o-std-error-mean")].map(String::from).to_vec();
@@ -135,9 +135,9 @@ fn independent(ds: &Dataset, variables: &[String], group: &str, first: &Value, s
                 _ => (Cell::Empty, Cell::Empty),
             };
             let [f, f_sig] = levene;
-            vec![Cell::Text(String::new()), f, f_sig, num(t, 3), df_cell, num(sig, 3), num(diff, 3), num(se, 3), lower, upper]
+            vec![Cell::Text(String::new()), f, f_sig, num(t, 3), df_cell, p_value(sig), num(diff, 3), num(se, 3), lower, upper]
         };
-        let levene_cells = [num(lev.map(|l| l.0), 3), num(lev.map(|l| l.3), 3)];
+        let levene_cells = [num(lev.map(|l| l.0), 3), p_value(lev.map(|l| l.3))];
         let mut equal = row(se_pooled, Some(df_pooled), n_cell(df_pooled), levene_cells);
         let mut unequal = row(se_welch, df_welch, num(df_welch, 3), [Cell::Empty, Cell::Empty]);
         equal[0] = Cell::Text(tr!("o-equal-variances-assumed"));
@@ -200,7 +200,7 @@ fn paired(ds: &Dataset, pairs: &[(String, String)], ci: f64) -> Result<Vec<Item>
         // Significance of r: t = r √((n − 2) / (1 − r²)) with n − 2 degrees of freedom.
         let r_sig = r.and_then(|r| dist::t_sig(r * ((n - 2.0) / (1.0 - r * r)).sqrt(), n - 2.0));
         let label = format!("{} & {}", avar.display_name(), bvar.display_name());
-        correlations.push((pair.clone(), vec![Cell::Text(label), n_cell(n), num(r, 3), num(r_sig, 3)]));
+        correlations.push((pair.clone(), vec![Cell::Text(label), n_cell(n), num(r, 3), p_value(r_sig)]));
 
         let se = std_error(&md);
         let df = md.w - 1.0;
@@ -219,7 +219,7 @@ fn paired(ds: &Dataset, pairs: &[(String, String)], ci: f64) -> Result<Vec<Item>
                 upper,
                 num(t, 3),
                 n_cell(df.max(0.0)),
-                num(t.and_then(|t| dist::t_sig(t, df)), 3),
+                p_value(t.and_then(|t| dist::t_sig(t, df))),
             ],
         ));
     }
@@ -261,7 +261,7 @@ mod tests {
 
     fn value(c: &Cell) -> f64 {
         match c {
-            Cell::Num { value, .. } => *value,
+            Cell::Num { value, .. } | Cell::Sig(value) => *value,
             Cell::Int(n) => *n as f64,
             other => panic!("not a number: {other:?}"),
         }

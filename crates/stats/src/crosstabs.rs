@@ -9,7 +9,7 @@ use mksigma_output::{Cell, Item, Table};
 use std::collections::HashMap;
 
 use crate::groups::{Categories, Key, valid_value};
-use crate::{StatsError, dist, n_cell, num, value_text};
+use crate::{StatsError, dist, n_cell, num, p_value, value_text};
 
 /// What each crosstabulation cell shows (`/CELLS`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,7 +290,7 @@ fn chi_square(row_var: &Variable, column_var: &Variable, counts: &Counts) -> Vec
             min_expected = min_expected.min(e);
         }
     }
-    let sig = |x: f64, df: f64| num(dist::chi_square_sig(x, df), 3);
+    let sig = |x: f64, df: f64| p_value(dist::chi_square_sig(x, df));
     let row = |name: String, value: f64, df: f64, extra: [Cell; 2]| {
         let [two, one] = extra;
         (name, vec![num(Some(value), 3), Cell::Int(df as i64), sig(value, df), two, one])
@@ -304,7 +304,7 @@ fn chi_square(row_var: &Variable, column_var: &Variable, counts: &Counts) -> Vec
         rows.push(row(tr!("o-continuity-correction"), yates, 1.0, [Cell::Empty, Cell::Empty]));
         rows.push(row(tr!("o-likelihood-ratio"), lr, df, [Cell::Empty, Cell::Empty]));
         let (two, one) = dist::fisher_exact(a, b, c, d);
-        rows.push((tr!("o-fisher-s-exact-test").to_string(), vec![Cell::Empty, Cell::Empty, Cell::Empty, num(Some(two), 3), num(Some(one), 3)]));
+        rows.push((tr!("o-fisher-s-exact-test").to_string(), vec![Cell::Empty, Cell::Empty, Cell::Empty, p_value(Some(two)), p_value(Some(one))]));
     } else {
         rows.push(row(tr!("o-likelihood-ratio"), lr, df, [Cell::Empty, Cell::Empty]));
     }
@@ -395,7 +395,7 @@ mod tests {
 
     fn value(c: &Cell) -> f64 {
         match c {
-            Cell::Num { value, .. } => *value,
+            Cell::Num { value, .. } | Cell::Sig(value) => *value,
             Cell::Int(n) => *n as f64,
             other => panic!("not a number: {other:?}"),
         }

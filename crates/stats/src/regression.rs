@@ -12,7 +12,7 @@ use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 
 use crate::groups::{numeric, valid};
-use crate::{StatsError, dist, n_cell, num};
+use crate::{StatsError, dist, n_cell, num, p_value};
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -320,7 +320,7 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
                     n_cell(df_regression),
                     num(Some(ms_regression), 3),
                     num(Some(f), 3),
-                    num(dist::f_sig(f, df_regression, df_residual), 3),
+                    p_value(dist::f_sig(f, df_regression, df_residual)),
                 ],
             ),
             (
@@ -343,7 +343,7 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
     let row = |name: String, coefficient: f64, se: f64, beta: Option<f64>| {
         let t = coefficient / se;
         let mut cells =
-            vec![Cell::Text(name), num(Some(coefficient), 3), num(Some(se), 3), num(beta, 3), num(Some(t), 3), num(dist::t_sig(t, df_residual), 3)];
+            vec![Cell::Text(name), num(Some(coefficient), 3), num(Some(se), 3), num(beta, 3), num(Some(t), 3), p_value(dist::t_sig(t, df_residual))];
         if let Some(tc) = t_crit {
             cells.push(num(Some(coefficient - tc * se), 3));
             cells.push(num(Some(coefficient + tc * se), 3));
@@ -381,7 +381,7 @@ pub fn regression(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsErr
                 let e = excluded(&all_cases, &entered, j, with_constant);
                 let sig = e.t.and_then(|t| dist::t_sig(t, e.df));
                 let name = all_names.get(j).cloned().unwrap_or_default();
-                (name, vec![num(e.beta_in, 3), num(e.t, 3), num(sig, 3), num(e.partial, 3), num(Some(e.tolerance), 3)])
+                (name, vec![num(e.beta_in, 3), num(e.t, 3), p_value(sig), num(e.partial, 3), num(Some(e.tolerance), 3)])
             })
             .collect();
         let columns = [tr!("o-beta-in"), tr!("o-t"), tr!("o-sig"), tr!("o-partial-correlation"), tr!("o-tolerance")].map(String::from).to_vec();
@@ -403,7 +403,7 @@ mod tests {
 
     fn value(c: &Cell) -> f64 {
         match c {
-            Cell::Num { value, .. } => *value,
+            Cell::Num { value, .. } | Cell::Sig(value) => *value,
             Cell::Int(n) => *n as f64,
             other => panic!("not a number: {other:?}"),
         }
