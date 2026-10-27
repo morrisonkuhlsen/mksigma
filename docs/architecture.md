@@ -29,7 +29,9 @@ methods (Welford for moments); least squares are solved by Householder QR, never
 `XᵀX`. `crates/stats/tests/nist.rs` audits the engine against NIST's
 Statistical Reference Datasets (univariate, ANOVA, linear regression; data built in code,
 certified values as constants): each dataset has a floor of correct digits (LRE) that no change
-may lower.
+may lower. The noncentral distributions (`noncentral.rs`) carry their own incomplete
+gamma and beta functions, accurate where `statrs`'s lose digits (parameters in the millions,
+the normal's far tail), and are held to 1e-10 relative by `crates/stats/tests/noncentral.rs`.
 
 ## Output (`output`)
 Tables, text and warnings as plain data. Frontends render them: text (CLI, tests), egui (app),
