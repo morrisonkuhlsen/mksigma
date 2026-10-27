@@ -7,7 +7,7 @@ use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 
 use crate::groups::{numeric, valid};
-use crate::{StatsError, dist, n_cell, num};
+use crate::{StatsError, dist, n_cell, num, p_value};
 
 #[derive(Debug, Clone, Default)]
 pub struct Options {
@@ -84,7 +84,7 @@ pub fn correlations(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsE
                 (Some(r), stars) => Cell::Text(format!("{}{stars}", mksigma_i18n::decimal(&format!("{r:.3}")))),
                 (None, _) => Cell::Empty,
             });
-            sig_cells.push(if same { Cell::Empty } else { num(sig, 3) });
+            sig_cells.push(if same { Cell::Empty } else { p_value(sig) });
             n_cells.push(n_cell(n));
         }
         let label = rvar.display_name().to_string();

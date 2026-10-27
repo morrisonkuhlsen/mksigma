@@ -8,7 +8,7 @@ use mksigma_i18n::tr;
 use mksigma_output::{Cell, Item, Table};
 
 use crate::groups::{Categories, anova, levene, moments, numeric, std_error, valid};
-use crate::{Moments, StatsError, dist, n_cell, num, range, value_text};
+use crate::{Moments, StatsError, dist, n_cell, num, p_value, range, value_text};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PostHoc {
@@ -80,7 +80,7 @@ fn comparisons(test: PostHoc, labels: &[String], stats: &[Moments], mse: f64, df
                     Cell::Text(lj.clone()),
                     if flagged { Cell::Text(format!("{}*", mksigma_i18n::decimal(&format!("{diff:.3}")))) } else { num(Some(diff), 3) },
                     num(Some(se), 3),
-                    num(sig, 3),
+                    p_value(sig),
                     num(critical.map(|c| diff - c * se), 3),
                     num(critical.map(|c| diff + c * se), 3),
                 ],
@@ -140,7 +140,7 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
                         n_cell(df1),
                         num(Some(parts.between / df1), 3),
                         num(f, 3),
-                        num(sig, 3),
+                        p_value(sig),
                     ],
                 ));
                 anova_rows.push((
@@ -199,7 +199,7 @@ pub fn oneway(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> 
         }
         if options.homogeneity {
             let (f, df1, df2, sig) = levene(&groups).map_or((None, None, None, None), |(f, a, b, s)| (Some(f), Some(a), Some(b), Some(s)));
-            levene_rows.push((label, vec![num(f, 3), df1.map_or(Cell::Empty, n_cell), df2.map_or(Cell::Empty, n_cell), num(sig, 3)]));
+            levene_rows.push((label, vec![num(f, 3), df1.map_or(Cell::Empty, n_cell), df2.map_or(Cell::Empty, n_cell), p_value(sig)]));
         }
     }
     let mut items = Vec::new();
@@ -281,7 +281,7 @@ mod tests {
         assert_eq!(anova.rows[0].1[1], Cell::Num { value: 24.0, decimals: 3 });
         assert_eq!(anova.rows[1].1[1], Cell::Num { value: 6.0, decimals: 3 });
         assert_eq!(anova.rows[0].1[4], Cell::Num { value: 12.0, decimals: 3 });
-        let Cell::Num { value: sig, .. } = anova.rows[0].1[5] else { panic!("sig") };
+        let Cell::Sig(sig) = anova.rows[0].1[5] else { panic!("sig") };
         assert!((sig - 0.008).abs() < 0.001, "F(2, 6) = 12 has p ≈ .008");
         let Item::Table(levene) = &items[1] else { panic!() };
         assert_eq!(levene.rows[0].1[0], Cell::Num { value: 0.0, decimals: 3 }, "equal spreads");
@@ -314,11 +314,11 @@ mod tests {
         assert_eq!(t.rows[0].1[2], Cell::Text("-4.000*".into()));
         assert_eq!(t.rows[0].1[3], Cell::Num { value: se, decimals: 3 });
         // Tukey: p = 1 − P(Q ≤ 4/√(1/3) ; k = 3, df = 6).
-        let Cell::Num { value: tukey, .. } = t.rows[0].1[4] else { panic!() };
+        let Cell::Sig(tukey) = t.rows[0].1[4] else { panic!() };
         let expected = 1.0 - range::cdf(4.0 / (1.0f64 / 3.0).sqrt(), 3.0, 6.0).unwrap();
         assert!((tukey - expected).abs() < 1e-12);
         // Bonferroni: three comparisons times the t test's p.
-        let Cell::Num { value: bonferroni, .. } = t.rows[6].1[4] else { panic!() };
+        let Cell::Sig(bonferroni) = t.rows[6].1[4] else { panic!() };
         let expected = 3.0 * dist::t_sig(-4.0 / se, 6.0).unwrap();
         assert!((bonferroni - expected).abs() < 1e-12);
         assert_eq!(t.rows.len(), 12, "six ordered pairs per test");

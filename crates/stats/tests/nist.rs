@@ -85,7 +85,7 @@ fn dataset(columns: &[(&str, &[f64])]) -> Dataset {
 
 fn value(cell: &Cell) -> f64 {
     match cell {
-        Cell::Num { value, .. } => *value,
+        Cell::Num { value, .. } | Cell::Sig(value) => *value,
         Cell::Int(k) => *k as f64,
         // A figure that isn't finite (an F with no residual) is left empty.
         Cell::Empty => f64::INFINITY,

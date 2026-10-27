@@ -2513,6 +2513,27 @@ mod tests {
         assert_eq!(s.output.style.size, 12, "clearing the Output keeps its style");
     }
 
+    /// `/DECIMALS` rounds the statistics, never the significances (issue #44).
+    #[test]
+    fn output_style_decimals_leave_significances_alone() {
+        let mut s = Session::with_sample().unwrap();
+        s.run_syntax("COMPUTE older = age > 35.\nT-TEST GROUPS=older(0 1) /VARIABLES=score.").unwrap();
+        let sig = |s: &Session| {
+            let Some(mksigma_output::Item::Table(t)) = s.output.items.iter().rev().find(|i| matches!(i, mksigma_output::Item::Table(_))) else {
+                panic!("no table")
+            };
+            let mksigma_output::Cell::Sig(p) = t.rows[0].1[5] else { panic!("no Sig. (2-tailed)") };
+            p
+        };
+        let p = sig(&s);
+        let shown = mksigma_i18n::decimal(&format!("{p:.3}"));
+        for decimals in [0, 1, 5] {
+            s.run_syntax(&format!("OUTPUT STYLE /DECIMALS={decimals}.")).unwrap();
+            assert!(s.output.to_html("x").contains(&format!(">{shown}<")), "p = {shown} under /DECIMALS={decimals}");
+            assert!(s.output.to_latex("x").contains(&shown));
+        }
+    }
+
     #[test]
     fn cell_edits() {
         let mut s = Session::with_sample().unwrap();

@@ -9,7 +9,7 @@ use statrs::distribution::{ContinuousCDF, Normal};
 
 use crate::groups::{numeric, valid};
 use crate::regression::invert;
-use crate::{StatsError, dist, n_cell, num, value_text};
+use crate::{StatsError, dist, n_cell, num, p_value, value_text};
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -241,7 +241,7 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
         rows: vec![(value_text(yvar, &Value::Num(low)), vec![Cell::Int(0)]), (value_text(yvar, &Value::Num(high)), vec![Cell::Int(1)])],
         categories: Vec::new(),
     };
-    let omnibus_row = || vec![num(Some(chi), 3), n_cell(df), num(chi_sig, 3)];
+    let omnibus_row = || vec![num(Some(chi), 3), n_cell(df), p_value(chi_sig)];
     let omnibus = Table {
         title: tr!("o-omnibus-tests-of-model-coefficients"),
         columns: [tr!("o-chi-square"), tr!("o-df"), tr!("o-sig")].map(String::from).to_vec(),
@@ -305,7 +305,7 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
                 num(se, 3),
                 num(wald, 3),
                 Cell::Int(1),
-                num(wald.and_then(|w| dist::chi_square_sig(w, 1.0)), 3),
+                p_value(wald.and_then(|w| dist::chi_square_sig(w, 1.0))),
                 num(Some(b.exp()), 3),
             ];
             if let Some(z) = z {
@@ -346,7 +346,7 @@ mod tests {
 
     fn value(c: &Cell) -> f64 {
         match c {
-            Cell::Num { value, .. } => *value,
+            Cell::Num { value, .. } | Cell::Sig(value) => *value,
             Cell::Int(n) => *n as f64,
             other => panic!("not a number: {other:?}"),
         }

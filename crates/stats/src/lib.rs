@@ -106,6 +106,11 @@ pub(crate) fn num(value: Option<f64>, decimals: u8) -> Cell {
     value.filter(|v| v.is_finite()).map_or(Cell::Empty, |value| Cell::Num { value, decimals })
 }
 
+/// A significance, or empty when it can't be computed.
+pub(crate) fn p_value(value: Option<f64>) -> Cell {
+    value.filter(|v| v.is_finite()).map_or(Cell::Empty, Cell::Sig)
+}
+
 /// N is the sum of weights, shown rounded to a whole number as SPSS shows it.
 fn n_cell(w: f64) -> Cell {
     Cell::Int(w.round() as i64)
@@ -205,7 +210,7 @@ mod tests {
 
     fn num(cell: &Cell) -> f64 {
         match cell {
-            Cell::Num { value, .. } => *value,
+            Cell::Num { value, .. } | Cell::Sig(value) => *value,
             other => panic!("not a number: {other:?}"),
         }
     }

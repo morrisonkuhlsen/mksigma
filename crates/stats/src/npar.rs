@@ -8,7 +8,7 @@ use mksigma_output::{Cell, Item, Table};
 use statrs::distribution::{ContinuousCDF, Normal};
 
 use crate::groups::{numeric, valid};
-use crate::{StatsError, dist, n_cell, num, value_text};
+use crate::{StatsError, dist, n_cell, num, p_value, value_text};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NparTest {
@@ -96,7 +96,7 @@ fn mann_whitney(ds: &Dataset, variables: &[String], group: &str, first: f64, sec
         let variance = n1 * n2 / (n * (n - 1.0)) * ((n.powi(3) - n) / 12.0 - ties / 12.0);
         let z = u.map(|u| (u - n1 * n2 / 2.0) / variance.sqrt()).filter(|z| z.is_finite());
         columns.push(var.display_name().to_string());
-        for (row, cell) in stats.iter_mut().zip([num(u, 3), num(w, 3), num(z, 3), num(z.and_then(two_sided), 3)]) {
+        for (row, cell) in stats.iter_mut().zip([num(u, 3), num(w, 3), num(z, 3), p_value(z.and_then(two_sided))]) {
             row.push(cell);
         }
     }
@@ -144,7 +144,7 @@ fn wilcoxon(ds: &Dataset, pairs: &[(String, String)]) -> Result<Vec<Item>, Stats
         let z = Some((tn.min(tp) - n * (n + 1.0) / 4.0) / variance.sqrt()).filter(|z| z.is_finite());
         columns.push(label);
         z_row.push(num(z, 3));
-        sig_row.push(num(z.and_then(two_sided), 3));
+        sig_row.push(p_value(z.and_then(two_sided)));
     }
     Ok(vec![
         table(tr!("o-ranks"), [String::new(), tr!("o-n"), tr!("o-mean-rank"), tr!("o-sum-of-ranks")].map(String::from).to_vec(), rank_rows),
@@ -177,7 +177,7 @@ fn kruskal_wallis(ds: &Dataset, variables: &[String], group: &str, low: f64, hig
         let df = levels.len() as f64 - 1.0;
         let h = Some(h).filter(|h| h.is_finite() && df >= 1.0);
         columns.push(var.display_name().to_string());
-        for (row, cell) in stats.iter_mut().zip([num(h, 3), n_cell(df.max(0.0)), num(h.and_then(|h| dist::chi_square_sig(h, df)), 3)]) {
+        for (row, cell) in stats.iter_mut().zip([num(h, 3), n_cell(df.max(0.0)), p_value(h.and_then(|h| dist::chi_square_sig(h, df)))]) {
             row.push(cell);
         }
     }

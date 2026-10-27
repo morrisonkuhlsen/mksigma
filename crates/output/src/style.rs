@@ -74,7 +74,8 @@ pub struct Style {
     /// Body text in points; titles and notes scale with it.
     pub size: u8,
     pub palette: Palette,
-    /// Decimals of every statistic shown with decimals; `None` keeps each statistic's own.
+    /// Decimals of every statistic shown with decimals but significances; `None` keeps each
+    /// statistic's own.
     pub decimals: Option<u8>,
 }
 
@@ -95,7 +96,7 @@ impl Style {
         f64::from(self.size) / f64::from(Style::SIZE)
     }
 
-    /// A cell's text under this style.
+    /// A cell's text under this style. Significances keep their own decimals.
     pub fn cell(&self, cell: &Cell) -> String {
         match (cell, self.decimals) {
             (Cell::Num { value, .. }, Some(decimals)) => Cell::Num { value: *value, decimals }.render(),
@@ -122,6 +123,11 @@ mod tests {
         let style = Style { decimals: Some(3), ..Style::default() };
         assert_eq!(style.cell(&Cell::Num { value: 2.5, decimals: 1 }), "2.500");
         assert_eq!(style.cell(&Cell::Int(7)), "7", "counts stay whole");
+        for decimals in [0, 1, 5] {
+            let style = Style { decimals: Some(decimals), ..Style::default() };
+            assert_eq!(style.cell(&Cell::Sig(0.04)), "0.040", "p-values keep three decimals under /DECIMALS={decimals}");
+            assert_eq!(style.cell(&Cell::Sig(0.051)), "0.051");
+        }
         assert_eq!(Style::default().cell(&Cell::Num { value: 2.5, decimals: 1 }), "2.5");
         assert_eq!(Style::default().syntax(), None);
         let style = Style { family: Family::Serif, size: 11, palette: Palette::Gray, decimals: None };

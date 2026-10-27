@@ -112,7 +112,7 @@ fn table(t: &Table, labels: &mut Labels, after: &[&Item], style: &Style) -> Stri
     // Numbers line up on the right, text on the left; the stub column holds labels.
     let align: String = std::iter::once('l')
         .chain((0..columns).map(|c| {
-            let numeric = t.rows.iter().filter_map(|(_, cells)| cells.get(c)).any(|cell| matches!(cell, Cell::Num { .. } | Cell::Int(_)));
+            let numeric = t.rows.iter().filter_map(|(_, cells)| cells.get(c)).any(Cell::is_numeric);
             if numeric { 'r' } else { 'l' }
         }))
         .collect();

@@ -161,7 +161,8 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   Times or Courier, the standard fonts every reader has) and LaTeX (class size, `\familydefault`,
   inline `xcolor` colours). Larger sizes scale charts whole. Default keeps each medium's usual
   look. Saved dashboards keep the style. Serif shows in exports only: the screen has the
-  interface's fonts.
+  interface's fonts. `/DECIMALS` leaves significances alone: they are cells of their own
+  (`Cell::Sig`) and keep three decimals.
 
 ## M4 — dashboards
 - **Slicers — done:** `SLICE var (values)`, `SLICE var (low THRU high)`, `SLICE var OFF`,
