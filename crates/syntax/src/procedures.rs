@@ -426,7 +426,9 @@ pub(crate) fn logistic(rest: &[Token]) -> Result<Command, SyntaxError> {
                     };
                     let value = value.ok_or(bad("CRITERIA keywords with a value, such as ITERATE(20)"))?;
                     match w.to_ascii_uppercase().as_str() {
-                        "ITERATE" if value >= 1.0 => iterations = value as usize,
+                        // Each iteration is a pass over the data: a bound keeps a typo from hanging.
+                        "ITERATE" if (1.0..=1000.0).contains(&value) => iterations = value as usize,
+                        "ITERATE" => return Err(bad("ITERATE(n) with n from 1 to 1000")),
                         "CUT" if value > 0.0 && value < 1.0 => cut = value,
                         // Entry criteria only matter for stepwise methods.
                         "PIN" | "POUT" | "EPS" | "LCON" | "BCON" => {}
@@ -857,5 +859,8 @@ mod tests {
         );
         assert!(parse("LOGISTIC REGRESSION VARIABLES y /METHOD=FSTEP(LR) x.").is_err());
         assert!(parse("LOGISTIC REGRESSION VARIABLES y /METHOD=ENTER x /CATEGORICAL=x.").is_err());
+        // ITERATE(1e30) used to become usize::MAX iterations (#29).
+        assert!(parse("LOGISTIC REGRESSION VARIABLES y /METHOD=ENTER x /CRITERIA=ITERATE(1e30).").is_err());
+        assert!(parse("LOGISTIC REGRESSION VARIABLES y /METHOD=ENTER x /CRITERIA=ITERATE(1000).").is_ok());
     }
 }
