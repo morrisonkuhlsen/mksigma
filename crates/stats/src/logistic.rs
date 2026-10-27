@@ -112,6 +112,17 @@ pub(crate) struct Iteration {
     pub ll: f64,
 }
 
+/// The two values of the dependent variable split apart by the covariates, so the likelihood
+/// keeps rising as the estimates grow and no maximum exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Separation {
+    /// Every case: a line through the covariates puts all the 0s on one side, all the 1s on the
+    /// other.
+    Complete,
+    /// Some cases are predicted exactly, the others not.
+    Quasi,
+}
+
 /// A model fitted by maximum likelihood.
 pub(crate) struct Fit {
     /// The weighted number of cases and of ones.
@@ -124,6 +135,7 @@ pub(crate) struct Fit {
     pub beta: Vec<f64>,
     pub ll: f64,
     pub converged: bool,
+    pub separation: Option<Separation>,
     /// The information at the final estimates, and its inverse (the estimates' covariance; the
     /// last iteration's inverse when this one has none).
     pub information: Vec<Vec<f64>>,
@@ -153,22 +165,55 @@ pub(crate) fn fit(rows: &[Row], k: usize, max: usize) -> Fit {
         for (b, s) in beta.iter_mut().zip(&step) {
             *b += s;
         }
-        let new_ll = log_likelihood(rows, &beta);
-        // SPSS's default: stop when no estimate changes by more than 0.1%.
+        ll = log_likelihood(rows, &beta);
+        // SPSS's default: stop when no estimate changes by more than 0.1%. (Its criterion on the
+        // log-likelihood, LCON, is off by default: under separation the log-likelihood flattens
+        // towards 0 while the estimates keep growing.)
         let small = step.iter().zip(&beta).all(|(s, b)| s.abs() <= 0.001 * b.abs().max(1e-8));
-        let flat = (new_ll - ll).abs() <= 1e-10 * new_ll.abs().max(1.0);
-        ll = new_ll;
         last_inverse = Some(inverse.clone());
         iterations.push(Iteration { gradient, information, inverse: Some(inverse), step, to: beta.clone(), ll });
-        if small || flat {
+        if small {
             converged = true;
             break;
         }
     }
+    let separation = separation(rows, &beta, converged);
+    if separation == Some(Separation::Complete) {
+        // The estimates may have stopped changing by 0.1% only because they are huge.
+        converged = false;
+    }
     // Standard errors from the information at the final estimates.
     let (_, information) = derivatives(rows, &beta);
     let covariance = invert(&information).or(last_inverse);
-    Fit { n, ones, p0, ll0, iterations, beta, ll, converged, information, covariance }
+    Fit { n, ones, p0, ll0, iterations, beta, ll, converged, separation, information, covariance }
+}
+
+/// Whether the covariates separate the two values, judged at the last estimates (Albert &
+/// Anderson 1984): complete when every case falls on its own side of 0 on the linear
+/// predictor and the fit is exact or still moving; quasi-complete when the iterations didn't
+/// converge and some cases are already predicted within 1e-6 of their value.
+fn separation(rows: &[Row], beta: &[f64], converged: bool) -> Option<Separation> {
+    let miss = |(y, x, _): &Row| (y - probability(x, beta)).abs();
+    let sides = rows.iter().all(|(y, x, _)| {
+        let eta: f64 = x.iter().zip(beta).map(|(a, b)| a * b).sum();
+        (eta > 0.0) == (*y == 1.0) && eta != 0.0
+    });
+    let exact = rows.iter().all(|r| miss(r) < 1e-8);
+    if !rows.is_empty() && sides && (exact || !converged) {
+        Some(Separation::Complete)
+    } else if !converged && rows.iter().any(|r| miss(r) < 1e-6) {
+        Some(Separation::Quasi)
+    } else {
+        None
+    }
+}
+
+/// What to say about a separation.
+pub(crate) fn separation_text(separation: Separation) -> String {
+    match separation {
+        Separation::Complete => tr!("o-logistic-complete-separation"),
+        Separation::Quasi => tr!("o-logistic-quasi-separation"),
+    }
 }
 
 pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError> {
@@ -177,10 +222,11 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
         Err((name, levels)) => return Ok(vec![Item::Warning(tr!("o-logistic-two-values", name = name.as_str(), n = levels))]),
     };
     let k = xs.len() + 1;
-    let Fit { n, p0: _, ll0, iterations, beta, ll, converged, covariance, .. } = fit(&rows, k, options.iterations);
+    let Fit { n, p0: _, ll0, iterations, beta, ll, converged, separation, covariance, .. } = fit(&rows, k, options.iterations);
     let iterations = iterations.len();
     let Some(covariance) = covariance else {
-        return Ok(vec![Item::Warning(tr!("o-logistic-collinear"))]);
+        // Under separation the information vanishes as the estimates grow: not collinearity.
+        return Ok(vec![Item::Warning(separation.map_or_else(|| tr!("o-logistic-collinear"), separation_text))]);
     };
 
     let chi = 2.0 * (ll - ll0);
@@ -285,7 +331,9 @@ pub fn logistic(ds: &Dataset, options: &Options) -> Result<Vec<Item>, StatsError
         Item::Table(classification),
         Item::Table(Table { title: tr!("o-variables-in-the-equation"), columns, rows: coefficients, categories: Vec::new() }),
     ];
-    if !converged {
+    if let Some(separation) = separation {
+        items.insert(0, Item::Warning(separation_text(separation)));
+    } else if !converged {
         items.insert(0, Item::Warning(tr!("o-logistic-no-convergence")));
     }
     Ok(items)
@@ -339,5 +387,54 @@ mod tests {
         }
         let items = logistic(&ds, &Options { dependent: "y".into(), covariates: vec!["x".into()], ..Options::default() }).unwrap();
         assert!(matches!(&items[0], Item::Warning(s) if s.contains("exactly two values")));
+    }
+
+    fn data(rows: &[(f64, f64)]) -> Dataset {
+        let mut ds = Dataset::new();
+        ds.add_variable(Variable::numeric("y")).unwrap();
+        ds.add_variable(Variable::numeric("x")).unwrap();
+        for (y, x) in rows {
+            ds.push_case(vec![Value::Num(*y), Value::Num(*x)]).unwrap();
+        }
+        ds
+    }
+
+    fn warnings(items: &[Item]) -> Vec<&str> {
+        items.iter().filter_map(|i| if let Item::Warning(s) = i { Some(s.as_str()) } else { None }).collect()
+    }
+
+    fn texts(items: &[Item]) -> Vec<&str> {
+        items.iter().filter_map(|i| if let Item::Text(s) = i { Some(s.as_str()) } else { None }).collect()
+    }
+
+    #[test]
+    fn complete_separation_is_reported_not_converged() {
+        // x = 1..6 with y = 0 0 0 1 1 1: x > 3.5 predicts y exactly, the slope has no maximum.
+        // With ITERATE(30) it used to "converge" at iteration 26 with B = 48.6 (#29).
+        let ds = data(&[(0.0, 1.0), (0.0, 2.0), (0.0, 3.0), (1.0, 4.0), (1.0, 5.0), (1.0, 6.0)]);
+        for iterations in [20, 30, 1000] {
+            let options = Options { dependent: "y".into(), covariates: vec!["x".into()], iterations, ..Options::default() };
+            let items = logistic(&ds, &options).unwrap();
+            assert_eq!(warnings(&items), [tr!("o-logistic-complete-separation")], "ITERATE({iterations}): {items:?}");
+            assert!(texts(&items).iter().all(|t| !t.contains("changed by less than")), "ITERATE({iterations}): {items:?}");
+            let explained = crate::explain::logistic(&ds, &options, false).unwrap();
+            assert!(format!("{:?}", explained.sections).contains(&tr!("o-logistic-complete-separation")));
+        }
+    }
+
+    #[test]
+    fn quasi_complete_separation_is_reported() {
+        // x ≤ 3 are all 0 and x ≥ 5 all 1; only at x = 4 are both values seen.
+        let ds = data(&[(0.0, 1.0), (0.0, 2.0), (0.0, 3.0), (0.0, 4.0), (1.0, 4.0), (1.0, 5.0), (1.0, 6.0), (1.0, 7.0)]);
+        let items = logistic(&ds, &Options { dependent: "y".into(), covariates: vec!["x".into()], ..Options::default() }).unwrap();
+        assert_eq!(warnings(&items), [tr!("o-logistic-quasi-separation")], "{items:?}");
+    }
+
+    #[test]
+    fn overlapping_values_still_converge() {
+        let ds = data(&[(0.0, 1.0), (1.0, 2.0), (0.0, 3.0), (1.0, 4.0), (0.0, 5.0), (1.0, 6.0), (1.0, 7.0), (0.0, 2.5)]);
+        let items = logistic(&ds, &Options { dependent: "y".into(), covariates: vec!["x".into()], ..Options::default() }).unwrap();
+        assert!(warnings(&items).is_empty(), "{items:?}");
+        assert!(texts(&items).iter().any(|t| t.contains("changed by less than")), "{items:?}");
     }
 }

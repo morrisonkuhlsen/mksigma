@@ -2166,7 +2166,7 @@ pub fn logistic(ds: &Dataset, options: &crate::LogisticOptions, full: bool) -> R
     let x_name = |j: usize| if p == 1 { var("x") } else { sub(var("x"), text(&j.to_string())) };
     let b_name = |j: usize| sub(var("b"), text(&j.to_string()));
     let b_at = |m: usize| sup(var("b"), text(&format!("({m})")));
-    let Fit { n: big_n, ones, p0, ll0, iterations, beta, ll, converged, information, covariance } = fit(&rows, k, options.iterations);
+    let Fit { n: big_n, ones, p0, ll0, iterations, beta, ll, converged, separation, information, covariance } = fit(&rows, k, options.iterations);
 
     // The data.
     let mut steps = Vec::new();
@@ -2354,8 +2354,7 @@ pub fn logistic(ds: &Dataset, options: &crate::LogisticOptions, full: bool) -> R
         ));
         let last = m == iterations.len();
         if last && converged {
-            let small = it.step.iter().zip(&it.to).all(|(s, b)| s.abs() <= 0.001 * b.abs().max(1e-8));
-            stop = Some(if small {
+            stop = Some({
                 let ratios: Vec<Math> = (0..k)
                     .map(|j| {
                         let ratio = item(&it.step, j).abs() / item(&it.to, j).abs().max(1e-8);
@@ -2366,14 +2365,15 @@ pub fn logistic(ds: &Dataset, options: &crate::LogisticOptions, full: bool) -> R
                     })
                     .collect();
                 step(&tr!("ex-logistic-stop-small", n = m), listed(ratios, true))
-            } else {
-                say(&tr!("ex-logistic-stop-flat", n = m))
             });
         } else if last {
             stop = Some(say(&tr!("ex-logistic-stop-max", n = m)));
         }
     }
     steps.extend(stop);
+    if let Some(separation) = separation {
+        steps.push(say(&crate::logistic::separation_text(separation)));
+    }
     sections.push((tr!("ex-logistic-newton"), steps));
     let Some(covariance) = covariance else {
         return Ok(Explanation { title, sections });
