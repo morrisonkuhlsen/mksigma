@@ -128,6 +128,10 @@ The CLI runs syntax against a file or the sample data and writes `.sav`, HTML re
 `apps/mksigma-mcp` serves the same engine to agents over MCP. Every step an agent takes is
 syntax, so it can be read back, rerun and reviewed.
 
+The MCP server reads and writes files only inside the folder it starts in, or the one given
+with `--root`: `claude mcp add mksigma -- mksigma-mcp --root ~/analyses`. Paths outside it are
+refused, and each export writes only its own kind of file.
+
 ## Architecture
 
 | Crate                                                  | Layer | What it holds                                                           |

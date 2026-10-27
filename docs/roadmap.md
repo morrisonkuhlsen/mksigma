@@ -196,7 +196,9 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   `describe_data` (the dictionary), `run_syntax` (returns only the new output, as text),
   `get_output` (text, HTML, LaTeX), `export` (html, pdf, latex, sav, the interactive dashboard,
   or syntax that rebuilds the session) and `history`. One session per connection, through the
-  same engine as the app.
+  same engine as the app. Files stay inside one folder (the working directory, or `--root DIR`):
+  paths outside it, through `..` or symbolic links too, are refused, `GET` and `SAVE TRANSLATE`
+  in syntax included, and each export writes only its format's extension.
 
 ## Next: the calculation shown by hand (Σ)
 - A **Σ** button beside every table and chart: it opens the whole calculation as it would be

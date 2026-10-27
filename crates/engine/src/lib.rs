@@ -102,6 +102,11 @@ pub struct Session {
     /// The folder relative paths in syntax start from: a syntax file's own, once it is
     /// opened, as `GET DATA /FILE='data.csv'` beside it means. `None`: the working directory.
     pub base_dir: Option<std::path::PathBuf>,
+    /// When set, the only folder syntax may read files from or write files to (`GET`, `SAVE
+    /// TRANSLATE`), checked after `..` and symbolic links are resolved; relative paths start
+    /// from it. A server that runs syntax from an agent sets it, so the agent can't reach files
+    /// it wasn't given. `None`: any path.
+    pub file_root: Option<std::path::PathBuf>,
     /// The dataset as opened; with the applied steps replayed on it, it gives `dataset`.
     base: Dataset,
     steps: Vec<AppliedStep>,
@@ -227,16 +232,33 @@ impl Session {
     }
 
     /// `GET DATA /TYPE=TXT`: reads the file into a new active dataset.
-    /// `path` as syntax wrote it, from the base folder when it is relative.
-    fn resolve(&self, path: &str) -> std::path::PathBuf {
-        match &self.base_dir {
-            Some(base) if std::path::Path::new(path).is_relative() => base.join(path),
-            _ => std::path::PathBuf::from(path),
-        }
+    /// `path` as syntax wrote it, from the base folder (or the file root) when it is relative.
+    /// Under a file root, the real path of the file, or of the folder a new file goes in, must
+    /// be inside the root, or the path is refused.
+    pub fn resolve(&self, path: &str) -> Result<std::path::PathBuf, EngineError> {
+        use std::path::Path;
+        let written = Path::new(path);
+        let joined = match self.base_dir.as_ref().or(self.file_root.as_ref()) {
+            Some(base) if written.is_relative() => base.join(written),
+            _ => written.to_path_buf(),
+        };
+        let Some(root) = &self.file_root else { return Ok(joined) };
+        let outside = || EngineError::File(tr!("err-path-outside-root", path = path, root = root.display().to_string()));
+        let root = root.canonicalize().map_err(|_| outside())?;
+        let real = match joined.canonicalize() {
+            Ok(real) => real,
+            // A file that doesn't exist yet is placed by its folder, which must exist.
+            Err(_) => {
+                let name = joined.file_name().ok_or_else(outside)?;
+                let folder = joined.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+                folder.canonicalize().map_err(|_| outside())?.join(name)
+            }
+        };
+        if real.starts_with(&root) { Ok(real) } else { Err(outside()) }
     }
 
     fn get_data(&mut self, spec: &mksigma_syntax::GetData) -> Result<(), EngineError> {
-        let bytes = std::fs::read(self.resolve(&spec.file)).map_err(|e| EngineError::File(format!("{}: {e}", spec.file)))?;
+        let bytes = std::fs::read(self.resolve(&spec.file)?).map_err(|e| EngineError::File(format!("{}: {e}", spec.file)))?;
         let mut variables = Vec::with_capacity(spec.variables.len());
         for (name, format) in &spec.variables {
             variables.push((name.clone(), format.parse().map_err(EngineError::Invalid)?));
@@ -267,7 +289,7 @@ impl Session {
 
     /// `GET FILE`: reads a system file into a new active dataset.
     fn get_file(&mut self, path: &str) -> Result<(), EngineError> {
-        let bytes = std::fs::read(self.resolve(path)).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        let bytes = std::fs::read(self.resolve(path)?).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
         let warnings = self.open_sav(&bytes)?;
         let ds = &self.dataset;
         self.notes.push(tr!("note-file-read", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
@@ -279,7 +301,11 @@ impl Session {
     /// `SAVE TRANSLATE /TYPE=STATA`: the active dataset as a Stata file, overwriting one only
     /// when asked. The data itself doesn't change.
     fn save_translate(&mut self, path: &str, replace: bool) -> Result<(), EngineError> {
-        let target = self.resolve(path);
+        let target = self.resolve(path)?;
+        // Under a file root, SAVE TRANSLATE writes Stata files only, never over other files.
+        if self.file_root.is_some() && !target.extension().is_some_and(|e| e.eq_ignore_ascii_case("dta")) {
+            return Err(EngineError::File(tr!("err-path-extension", path = path, extensions = ".dta")));
+        }
         if !replace && target.exists() {
             return Err(EngineError::File(tr!("err-file-exists", path = path)));
         }
@@ -314,7 +340,7 @@ impl Session {
 
     /// `GET SAS DATA`: a SAS transport file as the active dataset.
     fn get_sas(&mut self, path: &str) -> Result<(), EngineError> {
-        let bytes = std::fs::read(self.resolve(path)).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        let bytes = std::fs::read(self.resolve(path)?).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
         let warnings = self.open_xpt(&bytes)?;
         let ds = &self.dataset;
         self.notes.push(tr!("note-file-read", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
@@ -325,7 +351,7 @@ impl Session {
 
     /// `GET STATA FILE`: a Stata file as the active dataset.
     fn get_stata(&mut self, path: &str) -> Result<(), EngineError> {
-        let bytes = std::fs::read(self.resolve(path)).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
+        let bytes = std::fs::read(self.resolve(path)?).map_err(|e| EngineError::File(format!("{path}: {e}")))?;
         let warnings = self.open_dta(&bytes)?;
         let ds = &self.dataset;
         self.notes.push(tr!("note-file-read", path = path, cases = ds.n_cases(), variables = ds.variables().len()));
