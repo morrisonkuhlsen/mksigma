@@ -1795,6 +1795,10 @@ mod tests {
         assert!(s.run_syntax("COMPUTE nome = 'x'.").is_err(), "new string variables need STRING first");
         assert!(s.run_syntax("COMPUTE faixa = 1.").is_err(), "a number into a string variable");
         assert!(s.run_syntax("IF ('x') a = 1.").is_err());
+        // Parentheses are optional, and the condition can be any logical expression (#37).
+        s.run_syntax("IF score >= 75 nota = 2.\nIF (score < 60) OR (score > 85) extremo = 1.").unwrap();
+        assert_eq!(nums(&s, "nota"), [None, None, None, Some(2.0), None, None, Some(2.0), Some(2.0)]);
+        assert_eq!(nums(&s, "extremo"), [None, None, None, None, Some(1.0), None, Some(1.0), None]);
     }
 
     #[test]

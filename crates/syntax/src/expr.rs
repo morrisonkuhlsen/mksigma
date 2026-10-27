@@ -263,12 +263,19 @@ impl Parser<'_> {
 
 /// Parses a whole token slice as one expression.
 pub(crate) fn parse(tokens: &[Token]) -> Result<Expr, SyntaxError> {
-    let mut p = Parser { tokens, pos: 0, nesting: 0 };
-    let (e, _) = p.or()?;
-    if p.pos < tokens.len() {
+    let (e, rest) = prefix(tokens)?;
+    if !rest.is_empty() {
         return Err(SyntaxError::Expected { command: "expression", expected: "an operator or the end of the expression" });
     }
     Ok(e)
+}
+
+/// The longest expression `tokens` starts with, and the tokens after it (`IF`'s condition, then
+/// its assignment).
+pub(crate) fn prefix(tokens: &[Token]) -> Result<(Expr, &[Token]), SyntaxError> {
+    let mut p = Parser { tokens, pos: 0, nesting: 0 };
+    let (e, _) = p.or()?;
+    Ok((e, tokens.get(p.pos..).unwrap_or_default()))
 }
 
 #[cfg(test)]
