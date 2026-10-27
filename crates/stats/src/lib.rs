@@ -42,6 +42,8 @@ pub enum StatsError {
     UnknownVariable(String),
     #[error("{}", mksigma_i18n::tr!("err-not-numeric", name = .0.as_str()))]
     NotNumeric(String),
+    #[error("{}", mksigma_i18n::tr!("err-too-many-levels", name = .0.as_str(), max = crate::groups::MAX_LEVELS))]
+    TooManyLevels(String),
 }
 
 /// Running sum of weights, weighted mean and weighted sum of squared deviations (West's weighted

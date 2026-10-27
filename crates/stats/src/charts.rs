@@ -7,7 +7,7 @@ use mksigma_i18n::tr;
 use mksigma_output::chart::ticks;
 use mksigma_output::{Cases, Category, Chart, Item};
 
-use crate::groups::{moments, numeric, valid, valid_value};
+use crate::groups::{Categories, moments, numeric, valid, valid_value};
 use crate::{StatsError, category, value_text};
 
 /// A histogram of `name`. The bin count follows Sturges' rule (1 + log₂ n, 5 to 30 bins), on
@@ -67,14 +67,6 @@ pub enum BarValue {
     Mean(String),
 }
 
-fn compare(a: &Value, b: &Value) -> std::cmp::Ordering {
-    match (a, b) {
-        (Value::Num(x), Value::Num(y)) => x.total_cmp(y),
-        (Value::Str(x), Value::Str(y)) => x.cmp(y),
-        _ => std::cmp::Ordering::Equal,
-    }
-}
-
 /// The cases of each category of `by`, in ascending order of value: the measured variable's
 /// value (1 for a count) and the weight. With the measured variable, when there is one.
 pub(crate) type BarGroups<'a> = (&'a Variable, Option<&'a Variable>, Vec<(Value, Vec<(f64, f64)>)>);
@@ -85,7 +77,7 @@ pub(crate) fn bar_groups<'a>(ds: &'a Dataset, value: &BarValue, by: &str) -> Res
         BarValue::Count => None,
         BarValue::Mean(name) => Some(numeric(ds, name)?),
     };
-    let mut groups: Vec<(Value, Vec<(f64, f64)>)> = Vec::new();
+    let mut groups = Categories::<Vec<(f64, f64)>>::new(bvar);
     for case in 0..ds.n_cases() {
         let w = ds.case_weight(case);
         let Some(category) = valid_value(ds, bi, case) else { continue };
@@ -99,12 +91,9 @@ pub(crate) fn bar_groups<'a>(ds: &'a Dataset, value: &BarValue, by: &str) -> Res
         if w <= 0.0 {
             continue;
         }
-        match groups.iter_mut().find(|(v, _)| v == category) {
-            Some((_, list)) => list.push((x, w)),
-            None => groups.push((category.clone(), vec![(x, w)])),
-        }
+        groups.of(category)?.push((x, w));
     }
-    groups.sort_by(|a, b| compare(&a.0, &b.0));
+    let groups = groups.sorted();
     Ok((bvar, measured.map(|(_, v)| v), groups))
 }
 

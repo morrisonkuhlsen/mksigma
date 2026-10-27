@@ -698,19 +698,16 @@ pub fn oneway(ds: &Dataset, options: &crate::OnewayOptions, full: bool) -> Resul
     for name in &options.dependents {
         let (i, variable) = numeric(ds, name)?;
         // Groups by factor value, ascending, as the tables.
-        let mut groups: Vec<(f64, Vec<(f64, f64)>)> = Vec::new();
+        let mut categories = crate::groups::Categories::<Vec<(f64, f64)>>::new(fvar);
         for case in 0..ds.n_cases() {
             let weight = ds.case_weight(case);
             let (Some(level), Some(x)) = (valid(ds, fi, case), valid(ds, i, case)) else { continue };
             if weight <= 0.0 {
                 continue;
             }
-            match groups.iter_mut().find(|(l, _)| *l == level) {
-                Some((_, g)) => g.push((x, weight)),
-                None => groups.push((level, vec![(x, weight)])),
-            }
+            categories.of(&mksigma_core::Value::Num(level))?.push((x, weight));
         }
-        groups.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let groups: Vec<(f64, Vec<(f64, f64)>)> = categories.sorted().into_iter().map(|(level, g)| (level.as_num().unwrap_or(f64::NAN), g)).collect();
         let heading = |part: &str| tr!("ex-heading-by", variable = variable.display_name(), group = fvar.display_name(), part = part);
         let mut steps = Vec::new();
         let mut stats: Vec<(f64, f64, f64)> = Vec::new();
@@ -832,6 +829,11 @@ pub fn oneway(ds: &Dataset, options: &crate::OnewayOptions, full: bool) -> Resul
         }
         sections.push((heading(&tr!("ex-the-analysis-of-variance")), steps));
 
+        if !options.posthoc.is_empty() && groups.len() > crate::oneway::MAX_POSTHOC_GROUPS {
+            let note = tr!("o-posthoc-too-many-groups", max = crate::oneway::MAX_POSTHOC_GROUPS, name = fvar.display_name(), k = groups.len());
+            sections.push((heading(&tr!("o-multiple-comparisons", factor = fvar.display_name())), vec![say(&note)]));
+            continue;
+        }
         for test in &options.posthoc {
             sections.push((
                 heading(match test {
@@ -1349,7 +1351,7 @@ pub fn examine(ds: &Dataset, variables: &[String], by: Option<&str>, full: bool)
     let mut sections = Vec::new();
     for name in variables {
         let (vi, variable) = numeric(ds, name)?;
-        let (groups, _) = crate::examine::groups_of(ds, vi, by.map(|(bi, _)| bi));
+        let (groups, _) = crate::examine::groups_of(ds, vi, by.map(|(bi, _)| bi))?;
         for (key, values) in groups {
             let heading = match (&key, by) {
                 (Some(v), Some((_, bvar))) => {
@@ -2537,7 +2539,7 @@ pub fn crosstabs(ds: &Dataset, rows: &[String], columns: &[String], full: bool) 
         let (ri, row_var) = lookup(row_name)?;
         for column_name in columns {
             let (ci, column_var) = lookup(column_name)?;
-            let counts = crate::crosstabs::count(ds, ri, ci);
+            let counts = crate::crosstabs::count(ds, ri, ci)?;
             sections.push((
                 tr!("ex-heading-crosstab", rows = row_var.display_name(), columns = column_var.display_name()),
                 chi_square_steps(row_var, column_var, &counts, full),
@@ -3127,7 +3129,7 @@ pub fn bar_chart(ds: &Dataset, value: &crate::BarValue, by: &str, full: bool) ->
 pub fn boxplot(ds: &Dataset, variable: &str, by: Option<&str>, full: bool) -> Result<Explanation, StatsError> {
     let by = by.map(|b| ds.variable(b).ok_or_else(|| StatsError::UnknownVariable(b.to_string()))).transpose()?;
     let (vi, var_of) = numeric(ds, variable)?;
-    let (groups, _) = crate::examine::groups_of(ds, vi, by.map(|(bi, _)| bi));
+    let (groups, _) = crate::examine::groups_of(ds, vi, by.map(|(bi, _)| bi))?;
     let mut sections = Vec::new();
     for (key, values) in groups {
         let heading = match (&key, by) {
