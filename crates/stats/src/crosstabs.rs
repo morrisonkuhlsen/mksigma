@@ -117,6 +117,20 @@ pub(crate) fn count(ds: &Dataset, row: usize, column: usize) -> Result<Counts, S
     for cell in cells.iter_mut().flatten() {
         *cell = cell.round();
     }
+    // A category whose weight rounds to 0 leaves an empty row or column: it has no expected
+    // counts (0/0 in Pearson's sum) and isn't a category of the table's degrees of freedom, so
+    // it is dropped, as tables count only the categories with cases.
+    let keep_row: Vec<bool> = cells.iter().map(|row| row.iter().any(|c| *c > 0.0)).collect();
+    let keep_column: Vec<bool> = (0..columns.len()).map(|c| cells.iter().any(|row| row.get(c).is_some_and(|v| *v > 0.0))).collect();
+    let kept = |keep: &[bool], i: usize| keep.get(i).copied().unwrap_or(false);
+    let rows: Vec<Value> = rows.into_iter().enumerate().filter(|(i, _)| kept(&keep_row, *i)).map(|(_, v)| v).collect();
+    let columns: Vec<Value> = columns.into_iter().enumerate().filter(|(i, _)| kept(&keep_column, *i)).map(|(_, v)| v).collect();
+    let cells: Vec<Vec<f64>> = cells
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| kept(&keep_row, *i))
+        .map(|(_, row)| row.into_iter().enumerate().filter(|(c, _)| kept(&keep_column, *c)).map(|(_, v)| v).collect())
+        .collect();
     Ok(Counts::new(rows, columns, cells, missing))
 }
 
@@ -429,5 +443,28 @@ mod tests {
         ds.remove_cases(&(15..31).collect::<Vec<_>>()).unwrap();
         let items = crosstabs(&ds, &opts(Cells::default())).unwrap();
         assert!(matches!(&items[2], Item::Text(s) if s.contains("treatment is a constant")));
+    }
+
+    #[test]
+    fn a_category_whose_weight_rounds_to_zero_is_dropped() {
+        // The 2×2 trial plus one case of treatment 3 weighing 0.4: its row rounds to 0. It used to
+        // stay as an empty row: Pearson's 0/0 left the chi-square blank, df was 2, no Fisher (#30).
+        let plain = trial();
+        let mut ds = Dataset::new();
+        for v in plain.variables() {
+            ds.add_variable(v.clone()).unwrap();
+        }
+        ds.add_variable(Variable::numeric("w")).unwrap();
+        for case in 0..plain.n_cases() {
+            let mut values: Vec<Value> = (0..2).filter_map(|v| plain.column(v).and_then(|c| c.get(case)).cloned()).collect();
+            values.push(Value::Num(1.0));
+            ds.push_case(values).unwrap();
+        }
+        ds.push_case(vec![Value::Num(3.0), Value::Num(1.0), Value::Num(0.4)]).unwrap();
+        ds.weight = Some(2);
+        let weighted = crosstabs(&ds, &opts(Cells::default())).unwrap();
+        let plain = crosstabs(&plain, &opts(Cells::default())).unwrap();
+        assert_eq!(table_of(&weighted[1]).rows, table_of(&plain[1]).rows, "no row for treatment 3");
+        assert_eq!(table_of(&weighted[2]).rows, table_of(&plain[2]).rows, "the 2×2 tests, Fisher's among them");
     }
 }
