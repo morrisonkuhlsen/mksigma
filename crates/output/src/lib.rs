@@ -71,7 +71,15 @@ impl Cell {
 
     pub fn render(&self) -> String {
         match self {
-            Cell::Num { value, decimals } => mksigma_i18n::decimal(&format!("{value:.*}", usize::from(*decimals))),
+            Cell::Num { value, decimals } => {
+                let s = format!("{value:.*}", usize::from(*decimals));
+                // A negative that rounds to zero shows as zero, as the Σ and the charts show it.
+                let s = match s.strip_prefix('-') {
+                    Some(rest) if rest.bytes().all(|b| b == b'0' || b == b'.') => rest.to_string(),
+                    _ => s,
+                };
+                mksigma_i18n::decimal(&s)
+            }
             Cell::Sig(p) => Cell::Num { value: *p, decimals: Cell::SIG_DECIMALS }.render(),
             Cell::Int(n) => n.to_string(),
             Cell::Text(s) => s.clone(),
@@ -184,6 +192,14 @@ fn table_to_text(t: &Table) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn negative_zero_shows_as_zero() {
+        assert_eq!(Cell::Num { value: -0.0001, decimals: 3 }.render(), "0.000");
+        assert_eq!(Cell::Num { value: -0.0, decimals: 0 }.render(), "0");
+        assert_eq!(Cell::Num { value: -0.0006, decimals: 3 }.render(), "-0.001");
+        assert_eq!(Cell::Sig(-1e-12).render(), "0.000");
+    }
 
     #[test]
     fn renders_a_table_as_aligned_text() {
