@@ -203,10 +203,9 @@ pub(crate) fn parse(name: &str, rest: &[Token]) -> Option<Result<Command, Syntax
         return Some(recode(rest));
     }
     if name.eq_ignore_ascii_case("IF") {
-        return Some(parenthesized("IF", rest).and_then(|(cond, after)| {
-            let cond = expr::parse(cond)?;
-            assignment("IF", after).map(|(target, expr)| Command::If { cond, target, expr })
-        }));
+        // The condition is any expression, parentheses optional: it ends at the target, the first
+        // word that can't continue it.
+        return Some(expr::prefix(rest).and_then(|(cond, after)| assignment("IF", after).map(|(target, expr)| Command::If { cond, target, expr })));
     }
     if is_keyword(name, "SELECT") && word(rest.first()).is_some_and(|w| w.eq_ignore_ascii_case("IF")) {
         return Some(expr::parse(rest.get(1..).unwrap_or_default()).map(Command::SelectIf));
@@ -241,7 +240,19 @@ mod tests {
         assert!(matches!(one("IF (idade >= 60) idoso = 1."), Command::If { target, .. } if target == "idoso"));
         assert!(matches!(one("SELECT IF (sexo = 'F' AND idade > 17)."), Command::SelectIf(Expr::Binary(BinOp::And, _, _))));
         assert!(parse("COMPUTE x.").is_err());
-        assert!(parse("IF idade > 60 x = 1.").is_err());
+        // Any logical expression, parentheses optional (#37).
+        let target = |src: &str| match one(src) {
+            Command::If { cond, target, .. } => (cond, target),
+            other => panic!("not IF: {other:?}"),
+        };
+        assert!(matches!(target("IF (a = 1) OR (b = 2) x = 1."), (Expr::Binary(BinOp::Or, _, _), t) if t == "x"));
+        assert!(matches!(target("IF idade > 60 x = 1."), (Expr::Binary(BinOp::Gt, _, _), t) if t == "x"));
+        assert!(matches!(target("IF a = 1 b = 2."), (Expr::Binary(BinOp::Eq, _, _), t) if t == "b"), "= compares, then assigns");
+        assert!(matches!(target("IF NOT (a EQ 1) AND b x = -1."), (Expr::Binary(BinOp::And, _, _), t) if t == "x"));
+        assert!(matches!(target("IF (a > 1) & (b < 2) | MISSING(c) x = 1."), (Expr::Binary(BinOp::Or, _, _), _)));
+        for bad in ["IF x = 1.", "IF (a = 1).", "IF (a = 1) x.", "IF (a = 1) x = .", "IF (a = 1) OR x = 1.", "IF."] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

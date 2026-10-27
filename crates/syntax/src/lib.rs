@@ -86,7 +86,7 @@ pub enum Command {
     DeleteVariables(Vec<String>),
     /// `COMPUTE target = expression`
     Compute { target: String, expr: Expr },
-    /// `IF (condition) target = expression`
+    /// `IF condition target = expression`: any logical expression, parentheses optional
     If { cond: Expr, target: String, expr: Expr },
     /// `RECODE varlist (old = new)... [INTO varlist] [/...]`
     Recode(Vec<RecodeGroup>),
