@@ -144,6 +144,9 @@ collinearity diagnostics, categorical covariates, exact tests, more post hoc tes
   The filter is a view (not a step) and follows data changes; exports say they are filtered.
   To do: categories in `CROSSTABS`, `ONEWAY` and `T-TEST` group rows; several selections at once
   (Ctrl+click); highlighting instead of filtering inside charts of the same variable.
+- **The page — done (#96):** the Output is a sheet of paper on a desk, centred, at most 820
+  points wide, lifted by a wide, soft shadow and a close one at its edge; it grows as analyses
+  are added. The dashboard's cards stay on the paper.
 - To do: clustered bars, pie, stem-and-leaf; pivot layers; chart and table editing.
 - Pivot tables (transpose, move layers), charts (histogram, bar, scatter, boxplot)
 - **Cross-filtering:** items from one dataset share a filter; selecting a bar or a table

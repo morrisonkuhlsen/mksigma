@@ -1195,3 +1195,16 @@ fn opening_other_data_drops_the_sample_syntax_but_keeps_what_was_typed() {
     std::fs::remove_file(&path).unwrap();
     assert_eq!(h.state().syntax, "DESCRIPTIVES nota.");
 }
+
+#[test]
+fn the_output_lies_on_a_page_with_a_margin() {
+    let mut app = SigmaApp::new(Services::default());
+    app.session.run_syntax("DESCRIPTIVES age income.").unwrap();
+    let h = harness(app);
+    let header = h.get_by_label("Output").rect();
+    let title = h.get_by_label("Descriptive Statistics").rect();
+    // The desk around the page and the page's margin both stand between the header and the
+    // first item; with the items straight in the pane, a few points would.
+    assert!(title.top() - header.bottom() >= 36.0, "header {header:?}, first item {title:?}");
+    assert!(title.left() - header.left() >= 18.0, "header {header:?}, first item {title:?}");
+}

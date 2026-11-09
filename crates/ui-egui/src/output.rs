@@ -113,16 +113,52 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
         empty(ui, &tr!("out-empty"), &tr!("out-empty-sub"));
     }
     apply_style(ui, &session.output.style);
-    egui::ScrollArea::both().id_salt("output").stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
-        for (i, item) in output.items.iter().enumerate() {
-            if let Some(a) = show_item(ui, session, state, i, item, Some(session.is_pinned(i))) {
-                action = a;
-            }
-            // Air between items: each table or chart reads as its own block.
-            ui.add_space(20.0);
+    egui::ScrollArea::vertical().id_salt("output").stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
+        if output.items.is_empty() {
+            return;
         }
+        sheet(ui, &t, |ui| {
+            for (i, item) in output.items.iter().enumerate() {
+                if i > 0 {
+                    // Air between items: each table or chart reads as its own block.
+                    ui.add_space(SHEET_GAP);
+                }
+                if let Some(a) = show_item(ui, session, state, i, item, Some(session.is_pinned(i))) {
+                    action = a;
+                }
+            }
+        });
     });
     action
+}
+
+/// The widest the Output's page grows, so lines of a table stay within a reader's eye.
+const SHEET_MAX_WIDTH: f32 = 820.0;
+/// The page's margin, and the desk shown around it.
+const SHEET_MARGIN: i8 = 28;
+const DESK_MARGIN: f32 = 14.0;
+/// Space between the page's items.
+const SHEET_GAP: f32 = 24.0;
+
+/// The Output's page: a sheet of paper on the desk, centred, as wide as the pane allows up to
+/// [`SHEET_MAX_WIDTH`], lifted by a soft shadow; it grows as analyses are added.
+fn sheet(ui: &mut egui::Ui, t: &crate::theme::Tokens, add: impl FnOnce(&mut egui::Ui)) {
+    let room = (ui.available_width() - 2.0 * DESK_MARGIN).max(120.0);
+    let width = room.min(SHEET_MAX_WIDTH);
+    ui.add_space(DESK_MARGIN);
+    ui.horizontal(|ui| {
+        ui.add_space(DESK_MARGIN + ((room - width) / 2.0).max(0.0));
+        // A slot under the page for its shadow, filled once the page's size is known.
+        let under = ui.painter().add(egui::Shape::Noop);
+        let page = egui::Frame::new().fill(t.paper).inner_margin(egui::Margin::same(SHEET_MARGIN)).show(ui, |ui| {
+            let inner = width - 2.0 * f32::from(SHEET_MARGIN);
+            ui.set_width(inner);
+            ui.set_max_width(inner);
+            ui.vertical(add);
+        });
+        ui.painter().set(under, egui::Shape::Vec(crate::theme::sheet_shadow(t, page.response.rect)));
+    });
+    ui.add_space(DESK_MARGIN + 10.0);
 }
 
 /// The pinned items as cards, two columns when there is room. Each card can move or be unpinned.
@@ -511,40 +547,43 @@ fn table(
             click.select = Some(category.clone());
         }
     };
-    egui::Grid::new(("output-table", index)).striped(true).show(ui, |ui| {
-        ui.label("");
-        for (c, name) in shown.columns.iter().enumerate() {
-            if flipped && key(c).is_none() {
-                select(ui, c, name, true);
-            } else {
-                ui.strong(name);
-            }
-        }
-        ui.end_row();
-        for (r, (label, cells)) in shown.rows.iter().enumerate() {
-            if !flipped && key(r).is_none() {
-                select(ui, r, label, false);
-            } else {
-                ui.label(label);
-            }
-            for (c, cell) in cells.iter().enumerate() {
-                let (row, col) = if flipped { (c, r) } else { (r, c) };
-                // Text reads left to right; numbers line up on the right.
-                let layout = if matches!(cell, Cell::Text(_)) {
-                    egui::Layout::left_to_right(egui::Align::Center)
+    // A table wider than the page scrolls on its own, so the page keeps its width.
+    egui::ScrollArea::horizontal().id_salt(("output-table-scroll", index)).show(ui, |ui| {
+        egui::Grid::new(("output-table", index)).striped(true).show(ui, |ui| {
+            ui.label("");
+            for (c, name) in shown.columns.iter().enumerate() {
+                if flipped && key(c).is_none() {
+                    select(ui, c, name, true);
                 } else {
-                    egui::Layout::right_to_left(egui::Align::Center)
-                };
-                ui.with_layout(layout, |ui| {
-                    if key(row) == Some(col) {
-                        select(ui, row, &style.cell(cell), false);
-                    } else {
-                        ui.label(style.cell(cell));
-                    }
-                });
+                    ui.strong(name);
+                }
             }
             ui.end_row();
-        }
+            for (r, (label, cells)) in shown.rows.iter().enumerate() {
+                if !flipped && key(r).is_none() {
+                    select(ui, r, label, false);
+                } else {
+                    ui.label(label);
+                }
+                for (c, cell) in cells.iter().enumerate() {
+                    let (row, col) = if flipped { (c, r) } else { (r, c) };
+                    // Text reads left to right; numbers line up on the right.
+                    let layout = if matches!(cell, Cell::Text(_)) {
+                        egui::Layout::left_to_right(egui::Align::Center)
+                    } else {
+                        egui::Layout::right_to_left(egui::Align::Center)
+                    };
+                    ui.with_layout(layout, |ui| {
+                        if key(row) == Some(col) {
+                            select(ui, row, &style.cell(cell), false);
+                        } else {
+                            ui.label(style.cell(cell));
+                        }
+                    });
+                }
+                ui.end_row();
+            }
+        });
     });
     click
 }

@@ -29,6 +29,8 @@ pub struct Tokens {
     pub input_bg: Color32,
     /// The Output's page.
     pub paper: Color32,
+    /// The desk the Output's page lies on: a tone below the window, so the page stands out.
+    pub desk: Color32,
     /// Icon colours beside the accent, one meaning each: charts (blue, teal), running and adding
     /// (green), files and labels (orange), removing and PDF (red), relations between variables
     /// and Learn (violet).
@@ -64,6 +66,7 @@ impl Tokens {
             cell_text: Color32::from_rgb(0x14, 0x14, 0x18),
             input_bg: Color32::WHITE,
             paper: Color32::WHITE,
+            desk: Color32::from_rgb(0xE8, 0xE8, 0xEC),
             blue: Color32::from_rgb(0x1E, 0x7B, 0xC9),
             teal: Color32::from_rgb(0x0E, 0x93, 0x86),
             green: Color32::from_rgb(0x1D, 0x92, 0x5E),
@@ -95,6 +98,7 @@ impl Tokens {
             cell_text: Color32::from_rgb(0xEC, 0xEC, 0xF1),
             input_bg: Color32::from_rgb(0x1A, 0x1B, 0x20),
             paper: Color32::from_rgb(0x26, 0x27, 0x2D),
+            desk: Color32::from_rgb(0x19, 0x1A, 0x1E),
             blue: Color32::from_rgb(0x6C, 0xB0, 0xF5),
             teal: Color32::from_rgb(0x4F, 0xCF, 0xBF),
             green: Color32::from_rgb(0x5C, 0xCB, 0x92),
@@ -176,6 +180,21 @@ pub fn apply(ctx: &egui::Context) {
 /// A white (or dark) panel with a hairline border: the syntax editor, the Output, the Filters.
 pub fn card(t: &Tokens) -> egui::Frame {
     egui::Frame::new().fill(t.ribbon).stroke(Stroke::new(1.0, t.border)).inner_margin(egui::Margin::symmetric(12, 8))
+}
+
+/// Paints the shadow and hairline of a sheet lying at `rect` on the desk, as paper is lifted:
+/// a wide, soft shadow beneath and a close, crisp one at its edge. Call it before the sheet's fill
+/// is painted, or into a shape slot reserved before it.
+pub fn sheet_shadow(t: &Tokens, rect: egui::Rect) -> Vec<egui::Shape> {
+    let (wide, close) = if t.dark { (110, 140) } else { (28, 40) };
+    let shadow = |offset: [i8; 2], blur: u8, alpha: u8| {
+        egui::Shadow { offset, blur, spread: 0, color: Color32::from_black_alpha(alpha) }.as_shape(rect, egui::CornerRadius::ZERO)
+    };
+    vec![
+        shadow([0, 10], 36, wide).into(),
+        shadow([0, 1], 3, close).into(),
+        egui::Shape::rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::from_black_alpha(if t.dark { 90 } else { 18 })), egui::StrokeKind::Outside),
+    ]
 }
 
 /// Text and icons on the accent colour: white on the light theme's deep blue, near-black on the
