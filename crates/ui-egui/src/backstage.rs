@@ -76,23 +76,24 @@ pub(crate) const ON_INK: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xF
 pub(crate) const ON_INK_SOFT: egui::Color32 = egui::Color32::from_rgba_premultiplied(184, 184, 184, 184);
 pub(crate) const BRAND: egui::Color32 = egui::Color32::from_rgb(0x25, 0x40, 0xD8);
 
-/// A place in the column: a pill, blue when it is the page shown.
+/// A place in the column: a pill, in the accent when it is the page shown.
 fn place(ui: &mut egui::Ui, icon: Icon, label: &str, on: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
     let (slot, response) = ui.allocate_exact_size(egui::vec2(COLUMN, 38.0), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, label));
     let pill = slot.shrink2(egui::vec2(14.0, 3.0));
     if on {
-        ui.painter().rect_filled(pill, 0.0, BRAND);
+        ui.painter().rect_filled(pill, 0.0, t.accent);
     } else if response.hovered() {
         ui.painter().rect_filled(pill, 0.0, egui::Color32::from_white_alpha(18));
     }
-    let color = if on { ON_INK } else { ON_INK_SOFT };
+    let color = if on { crate::theme::on_accent(&t) } else { ON_INK_SOFT };
     icons::paint_mono(
         ui.painter(),
         egui::Rect::from_center_size(egui::pos2(pill.left() + 22.0, pill.center().y), egui::vec2(16.0, 16.0)),
         icon,
         color,
-        if on { BRAND } else { INK },
+        if on { t.accent } else { INK },
     );
     ui.painter().text(egui::pos2(pill.left() + 44.0, pill.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(14.5), color);
     response.clicked()
@@ -277,7 +278,11 @@ fn pages(ui: &mut egui::Ui, view: &View) -> Option<Action> {
         Page::Open => {
             heading(ui, &tr!("open"), &tr!("bs-open-sub"));
             if ui
-                .add(egui::Button::new(egui::RichText::new(tr!("bs-browse")).size(14.0).color(ON_INK)).fill(BRAND).min_size(egui::vec2(130.0, 34.0)))
+                .add(
+                    egui::Button::new(egui::RichText::new(tr!("bs-browse")).size(14.0).color(crate::theme::on_accent(&t)))
+                        .fill(t.accent)
+                        .min_size(egui::vec2(130.0, 34.0)),
+                )
                 .on_hover_text("Ctrl+O")
                 .clicked()
             {
@@ -292,11 +297,11 @@ fn pages(ui: &mut egui::Ui, view: &View) -> Option<Action> {
         Page::Info => {
             heading(ui, view.file_name.unwrap_or(&tr!("untitled")), &view.file_path.map_or_else(|| tr!("bs-not-saved"), |p| p.display().to_string()));
             if view.confirm_close {
-                egui::Frame::new().fill(t.accent_soft).stroke(egui::Stroke::new(1.0, BRAND)).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
+                egui::Frame::new().fill(t.accent_soft).stroke(egui::Stroke::new(1.0, t.accent)).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
                     ui.label(egui::RichText::new(tr!("bs-unsaved")).strong());
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Button::new(egui::RichText::new(tr!("save")).color(ON_INK)).fill(BRAND)).clicked() {
+                        if ui.add(egui::Button::new(egui::RichText::new(tr!("save")).color(crate::theme::on_accent(&t))).fill(t.accent)).clicked() {
                             action = Some(Action::Save);
                         }
                         if ui.add(egui::Button::new(tr!("bs-close-without"))).clicked() {
@@ -346,16 +351,16 @@ fn start_card(ui: &mut egui::Ui, icon: Icon, title: &str, text: &str) -> bool {
     let hot = response.hovered() && ui.is_enabled();
     let p = ui.painter();
     p.rect_filled(rect, 0.0, t.ribbon);
-    p.rect_stroke(rect, 0.0, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { BRAND } else { t.border }), egui::StrokeKind::Inside);
+    p.rect_stroke(rect, 0.0, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { t.accent } else { t.border }), egui::StrokeKind::Inside);
     let badge = egui::pos2(rect.left() + 34.0, rect.top() + 34.0);
-    p.circle_filled(badge, 18.0, if hot { BRAND } else { t.accent_soft });
+    p.circle_filled(badge, 18.0, if hot { t.accent } else { t.accent_soft });
     let mut painter = p.clone();
     if !ui.is_enabled() {
         painter.set_opacity(0.4);
     }
     let icon_rect = egui::Rect::from_center_size(badge, egui::vec2(18.0, 18.0));
     if hot {
-        icons::paint_mono(&painter, icon_rect, icon, ON_INK, BRAND);
+        icons::paint_mono(&painter, icon_rect, icon, crate::theme::on_accent(&t), t.accent);
     } else {
         icons::paint(&painter, icon_rect, icon, &t);
     }

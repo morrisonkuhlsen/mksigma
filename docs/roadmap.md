@@ -54,11 +54,13 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
 - Desktop app: File ▸ Open (native dialog, Ctrl+O), drag and drop, opening a file given on the
   command line, Data View (virtualized rows, value-labels toggle, missing values dimmed) and a
   Variable View — **done**.
-- Window layout — **done**: two slim rows at the top (#98): the title row holds the logo, File and
-  the tabs Home, Data, Transform, Analyze, Graphs, View, the document's name, search, theme and
-  export; the toolbar under it holds Undo and Redo, the tab's commands as small buttons with their
-  names beside (icons alone when the window is too narrow), grouped by space, and AutoSave; the
-  Output style opens from one button. The icons are drawn in code, in colour by meaning (duotone objects — a soft tint under a crisp line — and the window's controls in the text colour); Data View as a grid with headers and gridlines; a status bar with the data's size, weight and filter),
+- Window layout — **done**: the top as its sibling Pearl's (#98): a title row with AutoSave,
+  Save, Undo, Redo and more on the left, the logo and the document's name in the middle, search,
+  export and theme on the right; a row of menus (File in the accent, the tabs, the current one in
+  bold; a click on it folds the toolbar); the tab's toolbar in one slim row of small buttons with
+  their names (icons alone when the window is too narrow), groups set apart by short light lines;
+  one surface with the window. Pearl's palette (#98): its Pearl theme's ivory and mauve in light,
+  Morrison Kühlsen's ink and terracotta in dark. The icons are drawn in code, in colour by meaning (duotone objects — a soft tint under a crisp line — and the window's controls in the text colour); Data View as a grid with headers and gridlines; a status bar with the data's size, weight and filter),
   light and dark, indigo accented, square-cornered throughout (panels, buttons, tabs, dialogs).
   As in report designers, a view rail down the left is the one place that switches views
   (Data View and Variable View beside the Output, the Dashboard on the whole window), each with
