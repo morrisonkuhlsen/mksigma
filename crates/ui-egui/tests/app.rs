@@ -1195,3 +1195,48 @@ fn opening_other_data_drops_the_sample_syntax_but_keeps_what_was_typed() {
     std::fs::remove_file(&path).unwrap();
     assert_eq!(h.state().syntax, "DESCRIPTIVES nota.");
 }
+
+#[test]
+fn the_output_lies_on_a_page_with_a_margin() {
+    let mut app = SigmaApp::new(Services::default());
+    app.session.run_syntax("DESCRIPTIVES age income.").unwrap();
+    let h = harness(app);
+    let header = h.get_by_label("Output").rect();
+    let title = h.get_by_label("Descriptive Statistics").rect();
+    // The desk around the page and the page's margin both stand between the header and the
+    // first item; with the items straight in the pane, a few points would.
+    assert!(title.top() - header.bottom() >= 36.0, "header {header:?}, first item {title:?}");
+    assert!(title.left() - header.left() >= 18.0, "header {header:?}, first item {title:?}");
+}
+
+/// How much of `rect` in a rendered frame differs from the page's white: ink on it.
+fn ink_in(h: &mut Harness<'static, SigmaApp>, rect: egui::Rect) -> usize {
+    let ppp = h.ctx.pixels_per_point();
+    let image = h.render().unwrap();
+    let (width, height, rgba) = (image.width() as usize, image.height() as usize, image.as_raw());
+    let (x0, y0, x1, y1) = ((rect.left() * ppp) as usize, (rect.top() * ppp) as usize, (rect.right() * ppp) as usize, (rect.bottom() * ppp) as usize);
+    (y0..y1.min(height))
+        .flat_map(|y| (x0..x1.min(width)).map(move |x| (y * width + x) * 4))
+        .filter(|&i| rgba.get(i..i + 3).is_some_and(|px| px.iter().any(|&c| c < 200)))
+        .count()
+}
+
+#[test]
+fn a_tables_actions_show_when_the_pointer_comes_to_it() {
+    let mut app = SigmaApp::new(Services::default());
+    app.session.run_syntax("DESCRIPTIVES age income.").unwrap();
+    let mut h = harness(app);
+    let pivot = h.get_by_label("pivot").rect();
+    let title = h.get_by_label("Descriptive Statistics").rect();
+    // Away from the table, the actions are out of sight, yet there for the keyboard.
+    h.hover_at(egui::pos2(10.0, 790.0));
+    h.run_steps(20);
+    let away = ink_in(&mut h, pivot);
+    h.hover_at(title.center());
+    h.run_steps(20);
+    let over = ink_in(&mut h, pivot);
+    assert!(away == 0 && over > 0, "ink on the pivot action: {away} away, {over} over the table");
+    h.get_by_label("pivot").click();
+    h.run_steps(3);
+    assert!(h.state().output_state.transposed.contains(&0), "the hidden action still works");
+}

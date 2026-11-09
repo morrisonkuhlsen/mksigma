@@ -113,16 +113,52 @@ pub(crate) fn output_view(ui: &mut egui::Ui, session: &Session, state: &mut Outp
         empty(ui, &tr!("out-empty"), &tr!("out-empty-sub"));
     }
     apply_style(ui, &session.output.style);
-    egui::ScrollArea::both().id_salt("output").stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
-        for (i, item) in output.items.iter().enumerate() {
-            if let Some(a) = show_item(ui, session, state, i, item, Some(session.is_pinned(i))) {
-                action = a;
-            }
-            // Air between items: each table or chart reads as its own block.
-            ui.add_space(20.0);
+    egui::ScrollArea::vertical().id_salt("output").stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
+        if output.items.is_empty() {
+            return;
         }
+        sheet(ui, &t, |ui| {
+            for (i, item) in output.items.iter().enumerate() {
+                if i > 0 {
+                    // Air between items: each table or chart reads as its own block.
+                    ui.add_space(SHEET_GAP);
+                }
+                if let Some(a) = show_item(ui, session, state, i, item, Some(session.is_pinned(i))) {
+                    action = a;
+                }
+            }
+        });
     });
     action
+}
+
+/// The widest the Output's page grows, so lines of a table stay within a reader's eye.
+const SHEET_MAX_WIDTH: f32 = 820.0;
+/// The page's margin, and the desk shown around it.
+const SHEET_MARGIN: i8 = 28;
+const DESK_MARGIN: f32 = 14.0;
+/// Space between the page's items.
+const SHEET_GAP: f32 = 24.0;
+
+/// The Output's page: a sheet of paper on the desk, centred, as wide as the pane allows up to
+/// [`SHEET_MAX_WIDTH`], lifted by a soft shadow; it grows as analyses are added.
+fn sheet(ui: &mut egui::Ui, t: &crate::theme::Tokens, add: impl FnOnce(&mut egui::Ui)) {
+    let room = (ui.available_width() - 2.0 * DESK_MARGIN).max(120.0);
+    let width = room.min(SHEET_MAX_WIDTH);
+    ui.add_space(DESK_MARGIN);
+    ui.horizontal(|ui| {
+        ui.add_space(DESK_MARGIN + ((room - width) / 2.0).max(0.0));
+        // A slot under the page for its shadow, filled once the page's size is known.
+        let under = ui.painter().add(egui::Shape::Noop);
+        let page = egui::Frame::new().fill(t.paper).inner_margin(egui::Margin::same(SHEET_MARGIN)).show(ui, |ui| {
+            let inner = width - 2.0 * f32::from(SHEET_MARGIN);
+            ui.set_width(inner);
+            ui.set_max_width(inner);
+            ui.vertical(add);
+        });
+        ui.painter().set(under, egui::Shape::Vec(crate::theme::sheet_shadow(t, page.response.rect)));
+    });
+    ui.add_space(DESK_MARGIN + 10.0);
 }
 
 /// The pinned items as cards, two columns when there is room. Each card can move or be unpinned.
@@ -475,22 +511,39 @@ fn table(
     style: &Style,
 ) -> TableClick {
     let mut click = TableClick { pivot: false, pin: false, explain: false, learn: false, select: None };
-    // The title, then the item's quiet actions: pivot, its calculation, its article, the pin.
+    let tokens = crate::theme::Tokens::get(ui.ctx());
+    // The table's actions show while the pointer is over the table, or the keyboard is on one of
+    // them; out of sight they are still there, for the keyboard and screen readers. The table's
+    // area is known once it is laid out, so the last frame's is used.
+    let area_id = ui.id().with(("output-table-area", index));
+    let area: Option<egui::Rect> = ui.ctx().data(|d| d.get_temp(area_id));
+    let focused = ui.memory(|m| m.focused()).and_then(|id| ui.ctx().read_response(id)).map(|r| r.rect);
+    let near = area.is_some_and(|a| ui.rect_contains_pointer(a) || focused.is_some_and(|f| a.contains_rect(f)));
+    let reveal = ui.ctx().animate_bool_with_time(area_id, near, 0.15);
+    let top = ui.cursor().top();
+    // The title in italics, as APA sets it, then the item's quiet actions: pivot, its calculation,
+    // its article, the pin (which stays in sight while the item is pinned).
     ui.horizontal(|ui| {
-        let title = ui.add(egui::Label::new(egui::RichText::new(&t.title).size(14.0).strong()).sense(egui::Sense::click()));
+        let title = ui.add(egui::Label::new(egui::RichText::new(&t.title).size(14.0).italics().color(tokens.text)).sense(egui::Sense::click()));
         copy_as_latex(&title, &Item::Table(t.clone()), style);
         ui.add_space(6.0);
         ui.spacing_mut().item_spacing.x = 0.0;
-        let ghost = crate::theme::ghost;
-        click.pivot = ghost(ui, &tr!("out-pivot"), &tr!("out-pivot-tip"), true);
-        if explain {
-            click.explain = ghost(ui, "Σ", &tr!("out-sigma-tip"), true);
-        }
-        if learn {
-            click.learn = ghost(ui, "?", &tr!("learn-about-tip"), true);
-        }
+        ui.scope(|ui| {
+            ui.multiply_opacity(reveal);
+            let ghost = crate::theme::ghost;
+            click.pivot = ghost(ui, &tr!("out-pivot"), &tr!("out-pivot-tip"), true);
+            if explain {
+                click.explain = ghost(ui, "Σ", &tr!("out-sigma-tip"), true);
+            }
+            if learn {
+                click.learn = ghost(ui, "?", &tr!("learn-about-tip"), true);
+            }
+        });
         if let Some(pinned) = pin {
-            click.pin = pin_button(ui, pinned);
+            ui.scope(|ui| {
+                ui.multiply_opacity(if pinned { 1.0 } else { reveal });
+                click.pin = pin_button(ui, pinned);
+            });
         }
     });
     ui.add_space(2.0);
@@ -511,43 +564,63 @@ fn table(
             click.select = Some(category.clone());
         }
     };
-    egui::Grid::new(("output-table", index)).striped(true).show(ui, |ui| {
-        ui.label("");
-        for (c, name) in shown.columns.iter().enumerate() {
-            if flipped && key(c).is_none() {
-                select(ui, c, name, true);
-            } else {
-                ui.strong(name);
-            }
-        }
-        ui.end_row();
-        for (r, (label, cells)) in shown.rows.iter().enumerate() {
-            if !flipped && key(r).is_none() {
-                select(ui, r, label, false);
-            } else {
-                ui.label(label);
-            }
-            for (c, cell) in cells.iter().enumerate() {
-                let (row, col) = if flipped { (c, r) } else { (r, c) };
-                // Text reads left to right; numbers line up on the right.
-                let layout = if matches!(cell, Cell::Text(_)) {
-                    egui::Layout::left_to_right(egui::Align::Center)
+    // A table wider than the page scrolls on its own, so the page keeps its width.
+    let scrolled = egui::ScrollArea::horizontal().id_salt(("output-table-scroll", index)).show(ui, |ui| {
+        // Three rules, as APA tables have: above the header, under it and at the foot; no bands.
+        ui.add_space(RULE_AIR);
+        let mut header_foot = None;
+        let grid = egui::Grid::new(("output-table", index)).striped(false).spacing(egui::vec2(18.0, 6.0)).show(ui, |ui| {
+            ui.label("");
+            for (c, name) in shown.columns.iter().enumerate() {
+                if flipped && key(c).is_none() {
+                    select(ui, c, name, true);
                 } else {
-                    egui::Layout::right_to_left(egui::Align::Center)
-                };
-                ui.with_layout(layout, |ui| {
-                    if key(row) == Some(col) {
-                        select(ui, row, &style.cell(cell), false);
-                    } else {
-                        ui.label(style.cell(cell));
-                    }
-                });
+                    ui.strong(name);
+                }
             }
             ui.end_row();
+            header_foot = Some(ui.min_rect().bottom());
+            for (r, (label, cells)) in shown.rows.iter().enumerate() {
+                if !flipped && key(r).is_none() {
+                    select(ui, r, label, false);
+                } else {
+                    ui.label(label);
+                }
+                for (c, cell) in cells.iter().enumerate() {
+                    let (row, col) = if flipped { (c, r) } else { (r, c) };
+                    // Text reads left to right; numbers line up on the right.
+                    let layout = if matches!(cell, Cell::Text(_)) {
+                        egui::Layout::left_to_right(egui::Align::Center)
+                    } else {
+                        egui::Layout::right_to_left(egui::Align::Center)
+                    };
+                    ui.with_layout(layout, |ui| {
+                        if key(row) == Some(col) {
+                            select(ui, row, &style.cell(cell), false);
+                        } else {
+                            ui.label(style.cell(cell));
+                        }
+                    });
+                }
+                ui.end_row();
+            }
+        });
+        ui.add_space(RULE_AIR);
+        let rect = grid.response.rect.expand2(egui::vec2(0.0, RULE_AIR));
+        let rule = |y: f32, width: f32, color: egui::Color32| ui.painter().hline(rect.x_range(), y, egui::Stroke::new(width, color));
+        rule(rect.top(), 1.2, tokens.text);
+        if let Some(y) = header_foot {
+            rule(y + 3.0, 0.8, tokens.text_dim);
         }
+        rule(rect.bottom(), 1.2, tokens.text);
     });
+    let area = egui::Rect::from_min_max(egui::pos2(scrolled.inner_rect.left(), top), scrolled.inner_rect.max);
+    ui.ctx().data_mut(|d| d.insert_temp(area_id, area));
     click
 }
+
+/// The space between a table's rules and its text.
+const RULE_AIR: f32 = 4.0;
 
 /// Draws a chart; returns the category of the bin, bar or box clicked, if it has one. With
 /// `selected` among its categories, the others are dimmed.

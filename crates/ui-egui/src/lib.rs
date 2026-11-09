@@ -811,7 +811,9 @@ impl SigmaApp {
             ui.allocate_ui_with_layout(egui::vec2(right_width, body), top_down, |ui| {
                 ui.set_width(right_width);
                 ui.set_height(body);
-                theme::card(&t).fill(t.paper).show(ui, |ui| {
+                // The Output's page lies on a desk; the dashboard's cards lie on the paper.
+                let ground = if dashboard { t.paper } else { t.desk };
+                theme::card(&t).fill(ground).show(ui, |ui| {
                     ui.set_min_size(ui.available_size());
                     let action = output::output_view(ui, &self.session, &mut self.output_state);
                     self.output_action(action);
