@@ -511,22 +511,39 @@ fn table(
     style: &Style,
 ) -> TableClick {
     let mut click = TableClick { pivot: false, pin: false, explain: false, learn: false, select: None };
-    // The title, then the item's quiet actions: pivot, its calculation, its article, the pin.
+    let tokens = crate::theme::Tokens::get(ui.ctx());
+    // The table's actions show while the pointer is over the table, or the keyboard is on one of
+    // them; out of sight they are still there, for the keyboard and screen readers. The table's
+    // area is known once it is laid out, so the last frame's is used.
+    let area_id = ui.id().with(("output-table-area", index));
+    let area: Option<egui::Rect> = ui.ctx().data(|d| d.get_temp(area_id));
+    let focused = ui.memory(|m| m.focused()).and_then(|id| ui.ctx().read_response(id)).map(|r| r.rect);
+    let near = area.is_some_and(|a| ui.rect_contains_pointer(a) || focused.is_some_and(|f| a.contains_rect(f)));
+    let reveal = ui.ctx().animate_bool_with_time(area_id, near, 0.15);
+    let top = ui.cursor().top();
+    // The title in italics, as APA sets it, then the item's quiet actions: pivot, its calculation,
+    // its article, the pin (which stays in sight while the item is pinned).
     ui.horizontal(|ui| {
-        let title = ui.add(egui::Label::new(egui::RichText::new(&t.title).size(14.0).strong()).sense(egui::Sense::click()));
+        let title = ui.add(egui::Label::new(egui::RichText::new(&t.title).size(14.0).italics().color(tokens.text)).sense(egui::Sense::click()));
         copy_as_latex(&title, &Item::Table(t.clone()), style);
         ui.add_space(6.0);
         ui.spacing_mut().item_spacing.x = 0.0;
-        let ghost = crate::theme::ghost;
-        click.pivot = ghost(ui, &tr!("out-pivot"), &tr!("out-pivot-tip"), true);
-        if explain {
-            click.explain = ghost(ui, "Σ", &tr!("out-sigma-tip"), true);
-        }
-        if learn {
-            click.learn = ghost(ui, "?", &tr!("learn-about-tip"), true);
-        }
+        ui.scope(|ui| {
+            ui.multiply_opacity(reveal);
+            let ghost = crate::theme::ghost;
+            click.pivot = ghost(ui, &tr!("out-pivot"), &tr!("out-pivot-tip"), true);
+            if explain {
+                click.explain = ghost(ui, "Σ", &tr!("out-sigma-tip"), true);
+            }
+            if learn {
+                click.learn = ghost(ui, "?", &tr!("learn-about-tip"), true);
+            }
+        });
         if let Some(pinned) = pin {
-            click.pin = pin_button(ui, pinned);
+            ui.scope(|ui| {
+                ui.multiply_opacity(if pinned { 1.0 } else { reveal });
+                click.pin = pin_button(ui, pinned);
+            });
         }
     });
     ui.add_space(2.0);
@@ -548,8 +565,11 @@ fn table(
         }
     };
     // A table wider than the page scrolls on its own, so the page keeps its width.
-    egui::ScrollArea::horizontal().id_salt(("output-table-scroll", index)).show(ui, |ui| {
-        egui::Grid::new(("output-table", index)).striped(true).show(ui, |ui| {
+    let scrolled = egui::ScrollArea::horizontal().id_salt(("output-table-scroll", index)).show(ui, |ui| {
+        // Three rules, as APA tables have: above the header, under it and at the foot; no bands.
+        ui.add_space(RULE_AIR);
+        let mut header_foot = None;
+        let grid = egui::Grid::new(("output-table", index)).striped(false).spacing(egui::vec2(18.0, 6.0)).show(ui, |ui| {
             ui.label("");
             for (c, name) in shown.columns.iter().enumerate() {
                 if flipped && key(c).is_none() {
@@ -559,6 +579,7 @@ fn table(
                 }
             }
             ui.end_row();
+            header_foot = Some(ui.min_rect().bottom());
             for (r, (label, cells)) in shown.rows.iter().enumerate() {
                 if !flipped && key(r).is_none() {
                     select(ui, r, label, false);
@@ -584,9 +605,22 @@ fn table(
                 ui.end_row();
             }
         });
+        ui.add_space(RULE_AIR);
+        let rect = grid.response.rect.expand2(egui::vec2(0.0, RULE_AIR));
+        let rule = |y: f32, width: f32, color: egui::Color32| ui.painter().hline(rect.x_range(), y, egui::Stroke::new(width, color));
+        rule(rect.top(), 1.2, tokens.text);
+        if let Some(y) = header_foot {
+            rule(y + 3.0, 0.8, tokens.text_dim);
+        }
+        rule(rect.bottom(), 1.2, tokens.text);
     });
+    let area = egui::Rect::from_min_max(egui::pos2(scrolled.inner_rect.left(), top), scrolled.inner_rect.max);
+    ui.ctx().data_mut(|d| d.insert_temp(area_id, area));
     click
 }
+
+/// The space between a table's rules and its text.
+const RULE_AIR: f32 = 4.0;
 
 /// Draws a chart; returns the category of the bin, bar or box clicked, if it has one. With
 /// `selected` among its categories, the others are dimmed.
