@@ -1,6 +1,8 @@
-//! The top of the window: a title row (logo, quick-access Save, Undo and Redo, the document's
-//! name, the theme switch), a row of tabs and the ribbon under them. Buttons only report what
-//! was asked for; the app acts through the session.
+//! The top of the window, as its sibling Pearl's: a title row (AutoSave, Save, Undo, Redo and more
+//! on the left, the logo and the document's name in the middle, search, export and theme on the
+//! right), a row of menus (File, then the tabs) and the current tab's toolbar in one slim row,
+//! its groups set apart by short light lines. Buttons only report what was asked for; the app
+//! acts through the session.
 
 use crate::View;
 use crate::icons::{self, Icon};
@@ -79,8 +81,17 @@ pub(crate) struct State<'a> {
     pub style: mksigma_engine::output::Style,
 }
 
-pub(crate) const TITLE_HEIGHT: f32 = 36.0;
-const RIBBON_HEIGHT: f32 = 78.0;
+pub(crate) const TITLE_HEIGHT: f32 = 38.0;
+/// A control in the title row.
+const CONTROL_HEIGHT: f32 = 26.0;
+/// The row of menus, the space under it and the toolbar's row.
+const MENU_HEIGHT: f32 = 30.0;
+const MENU_GAP: f32 = 6.0;
+const TOOLBAR_HEIGHT: f32 = 34.0;
+/// A toolbar button.
+const BUTTON_HEIGHT: f32 = 23.0;
+/// The corners of buttons in the bars, as Pearl's.
+const RADIUS: f32 = 4.0;
 
 /// An undo label short enough for a tooltip.
 fn short(label: &str) -> String {
@@ -91,21 +102,18 @@ fn short(label: &str) -> String {
     s
 }
 
-/// A small square icon button with an accessible name; clicks count only when enabled.
+/// A frameless icon button of the title row, in one quiet colour, with an accessible name;
+/// clicks count only when enabled.
 fn icon_button(ui: &mut egui::Ui, icon: Icon, name: &str, enabled: bool) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(28.0, 26.0), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(28.0, CONTROL_HEIGHT), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
-    if enabled && response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, t.hover);
+    if enabled && (response.hovered() || response.is_pointer_button_down_on()) {
+        ui.painter().rect_filled(rect, RADIUS, if response.is_pointer_button_down_on() { t.pressed } else { t.hover });
     }
-    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0));
-    // Disabled: the same drawing, faded.
-    let mut painter = ui.painter().clone();
-    if !enabled {
-        painter.set_opacity(0.35);
-    }
-    icons::paint(&painter, icon_rect, icon, &t);
+    let color = if enabled { t.text_dim } else { t.text_dim.gamma_multiply(0.4) };
+    icons::paint_mono(ui.painter(), egui::Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0)), icon, color, t.window);
     response.on_hover_text(name)
 }
 
@@ -119,7 +127,7 @@ fn switch(ui: &mut egui::Ui, on: bool, name: &str) -> egui::Response {
     painter.rect_filled(r, 8.0, if on { t.accent } else { egui::Color32::TRANSPARENT });
     painter.rect_stroke(r, 8.0, egui::Stroke::new(1.0, if on { t.accent } else { t.text_dim }), egui::StrokeKind::Inside);
     let knob = if on { egui::pos2(r.right() - 8.0, r.center().y) } else { egui::pos2(r.left() + 8.0, r.center().y) };
-    painter.circle_filled(knob, 5.0, if on { egui::Color32::WHITE } else { t.text_dim });
+    painter.circle_filled(knob, 5.0, if on { crate::theme::on_accent(&t) } else { t.text_dim });
     response
 }
 
@@ -144,11 +152,14 @@ pub(crate) fn accent_button(ui: &mut egui::Ui, icon: Icon, text: &str) -> egui::
     response
 }
 
+/// The title row: AutoSave, Save, Undo, Redo and more on the left; the logo and the document's
+/// name in the middle, cut with "…" so it never runs under the controls; search, export and
+/// theme on the right. The row is the window's title bar: drag it to move the window,
+/// double-click to maximize.
 pub(crate) fn title_bar(ui: &mut egui::Ui, state: &State) -> Option<Action> {
     let t = Tokens::get(ui.ctx());
     let mut action = None;
     let (rect, background) = ui.allocate_exact_size(egui::vec2(ui.available_width(), TITLE_HEIGHT), egui::Sense::click_and_drag());
-    // The row is the window's title bar: drag it to move the window, double-click to maximize.
     if background.drag_started() {
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }
@@ -156,30 +167,16 @@ pub(crate) fn title_bar(ui: &mut egui::Ui, state: &State) -> Option<Action> {
         let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
     }
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, state.title, egui::FontId::proportional(13.5), t.text);
-    // Bold by drawing twice, half a point apart: the built-in fonts have no bold face.
-    ui.painter().text(rect.center() + egui::vec2(0.5, 0.0), egui::Align2::CENTER_CENTER, state.title, egui::FontId::proportional(13.5), t.text);
     let mut row =
-        ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    row.spacing_mut().item_spacing.x = 2.0;
-    match crate::logo::texture(row.ctx()) {
-        Some(texture) => {
-            let size = texture.size_vec2() * (22.0 / texture.size_vec2().y.max(1.0));
-            // In the accent, like every icon: the pale original disappears on a light window.
-            row.add(egui::Image::new((texture.id(), size)).tint(t.accent)).on_hover_text("MK Sigma");
-        }
-        None => {
-            icons::show(&mut row, Icon::Sigma, 18.0).on_hover_text("MK Sigma");
-        }
-    }
-    row.add_space(10.0);
+        ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(8.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    row.spacing_mut().item_spacing.x = 0.0;
     row.label(egui::RichText::new(tr!("autosave")).size(12.5).color(t.text_dim));
-    row.add_space(4.0);
+    row.add_space(6.0);
     let tip = if state.autosave { &tr!("autosave-on-tip") } else { &tr!("autosave-off-tip") };
     if switch(&mut row, state.autosave, &tr!("autosave")).on_hover_text(tip).clicked() {
         action = Some(Action::ToggleAutoSave);
     }
-    row.add_space(8.0);
+    row.add_space(6.0);
     if icon_button(&mut row, Icon::Save, &tr!("save"), true).clicked() {
         action = Some(Action::Save);
     }
@@ -191,25 +188,45 @@ pub(crate) fn title_bar(ui: &mut egui::Ui, state: &State) -> Option<Action> {
     if icon_button(&mut row, Icon::Redo, &redo, state.redo.is_some()).clicked() && state.redo.is_some() {
         action = Some(Action::Redo);
     }
+    let more = icon_button(&mut row, Icon::More, &tr!("more-commands"), true);
+    egui::Popup::menu(&more).show(|ui| {
+        ui.set_min_width(180.0);
+        for (name, then) in [
+            (tr!("open-ellipsis"), Action::Open),
+            (tr!("save"), Action::Save),
+            (tr!("save-as-ellipsis"), Action::SaveAs),
+            (tr!("run-syntax"), Action::Run),
+        ] {
+            if ui.button(name).clicked() {
+                action = Some(then);
+                ui.close();
+            }
+        }
+    });
+    let left_end = row.min_rect().right();
+    let mut right_start = rect.right();
     row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.spacing_mut().item_spacing.x = 0.0;
         if icon_button(ui, Icon::Search, &tr!("search-tip"), true).clicked() {
             action = Some(Action::Search);
         }
         let export = icon_button(ui, Icon::Share, &tr!("export-output-tip"), state.has_output);
         egui::Popup::menu(&export).show(|ui| {
-            if ui.button(tr!("export-html-menu")).clicked() {
-                action = Some(Action::Export(ExportFormat::Html));
-            }
-            if ui.button(tr!("export-pdf-menu")).clicked() {
-                action = Some(Action::Export(ExportFormat::Pdf));
+            ui.set_min_width(170.0);
+            for (name, format) in [
+                (tr!("export-html-menu"), ExportFormat::Html),
+                (tr!("export-pdf-menu"), ExportFormat::Pdf),
+                (tr!("export-latex-menu"), ExportFormat::Latex),
+            ] {
+                if ui.button(name).clicked() {
+                    action = Some(Action::Export(format));
+                    ui.close();
+                }
             }
         });
         let theme = icon_button(ui, Icon::Contrast, &tr!("theme-tip"), true);
-        if theme.clicked() {
-            action = Some(Action::Theme(if t.dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark }));
-        }
-        theme.context_menu(|ui| {
+        egui::Popup::menu(&theme).show(|ui| {
+            ui.set_min_width(120.0);
             for (preference, name) in [
                 (egui::ThemePreference::Light, &tr!("theme-light")),
                 (egui::ThemePreference::Dark, &tr!("theme-dark")),
@@ -217,81 +234,114 @@ pub(crate) fn title_bar(ui: &mut egui::Ui, state: &State) -> Option<Action> {
             ] {
                 if ui.button(name).clicked() {
                     action = Some(Action::Theme(preference));
+                    ui.close();
                 }
             }
         });
+        right_start = ui.min_rect().left();
     });
+    // The logo and the name in the middle, the name cut with "…" to fit between the two sides.
+    const MARK: f32 = 22.0;
+    let half = (rect.center().x - left_end).min(right_start - rect.center().x) - 12.0 - MARK;
+    let mut job = egui::text::LayoutJob::simple_singleline(state.title.to_string(), egui::FontId::proportional(13.0), t.text);
+    job.wrap = egui::text::TextWrapping::truncate_at_width((2.0 * half).max(0.0));
+    let galley = ui.painter().layout_job(job);
+    let at = rect.center() - galley.size() / 2.0;
+    if half > MARK {
+        let logo = egui::Rect::from_center_size(egui::pos2(at.x - 13.0, rect.center().y), egui::vec2(18.0, 18.0));
+        match crate::logo::texture(ui.ctx()) {
+            Some(texture) => {
+                let size = texture.size_vec2() * (18.0 / texture.size_vec2().y.max(1.0));
+                let logo = egui::Rect::from_center_size(egui::pos2(at.x - 4.0 - size.x / 2.0, rect.center().y), size);
+                egui::Image::new((texture.id(), size)).tint(t.accent).paint_at(ui, logo);
+            }
+            None => icons::paint_mono(ui.painter(), logo, Icon::Sigma, t.accent, t.window),
+        }
+    }
+    // Bold by drawing twice, half a point apart: the built-in fonts have no bold face.
+    ui.painter().galley(at, galley.clone(), t.text);
+    ui.painter().galley(at + egui::vec2(0.5, 0.0), galley, t.text);
     action
 }
 
-/// The tab row, with File as a menu at its start, and the ribbon of the current tab unless
-/// `collapsed`. The chevron at the row's end, a double-click on a tab or Ctrl+F1 hides or shows
-/// the ribbon; a tab clicked while it is hidden shows it again.
+/// A word in the row of menus: File or a tab. A quiet fill under the pointer.
+fn menu_word(ui: &mut egui::Ui, word: &str, color: egui::Color32, bold: bool) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let font = egui::FontId::proportional(13.0);
+    let galley = ui.painter().layout_no_wrap(word.to_string(), font, color);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(galley.size().x + 18.0, MENU_HEIGHT - 4.0), egui::Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.hover);
+    }
+    let at = rect.center() - galley.size() / 2.0;
+    if bold {
+        ui.painter().galley(at + egui::vec2(0.5, 0.0), galley.clone(), color);
+    }
+    ui.painter().galley(at, galley, color);
+    response
+}
+
+/// The row of menus — File in the accent, then the tabs, the current one in bold — and the
+/// current tab's toolbar under it unless `collapsed`. A click on the current tab, a double-click
+/// on any, or Ctrl+F1 folds the toolbar away; a tab clicked while it is folded brings it back.
+/// When the commands' names don't fit the window, the buttons show their icons alone and keep
+/// their names in the tooltip.
 pub(crate) fn ribbon(ui: &mut egui::Ui, tab: &mut Tab, collapsed: &mut bool, state: &State) -> Option<Action> {
     let t = Tokens::get(ui.ctx());
     let mut action = None;
-    ui.horizontal(|ui| {
-        ui.add_space(4.0);
-        ui.spacing_mut().item_spacing.x = 16.0;
-        // Rows centre what they hold on the height known so far: make it the tabs' from the start.
-        ui.set_min_height(28.0);
-        // File reads as a tab, not a framed button.
-        let widgets = &mut ui.visuals_mut().widgets;
-        widgets.inactive.bg_stroke = egui::Stroke::NONE;
-        widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-        let file = egui::RichText::new(tr!("file")).size(14.0).color(t.accent);
-        // File opens the backstage over the window: open, save, export, recent files.
-        if ui.add(egui::Button::new(file).frame(false).min_size(egui::vec2(0.0, 28.0))).on_hover_text(tr!("file-tip")).clicked() {
-            action = Some(Action::File);
-        }
-        ui.add_space(6.0);
-        for which in TABS {
-            let name = which.name();
-            let name = name.as_str();
-            let on = *tab == which;
-            let text = egui::RichText::new(name).size(14.0).color(if on { t.text } else { t.text_dim });
-            let response = ui.add(egui::Button::new(if on { text.strong() } else { text }).frame(false).min_size(egui::vec2(0.0, 28.0)));
-            if on {
-                let r = response.rect;
-                let bar = egui::Rect::from_min_max(egui::pos2(r.left() + 4.0, r.bottom() - 3.0), egui::pos2(r.right() - 4.0, r.bottom()));
-                ui.painter().rect_filled(bar, 0.0, t.accent);
-            }
-            if response.double_clicked() {
-                *collapsed = !*collapsed;
-            } else if response.clicked() {
+    let (bar, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), MENU_HEIGHT), egui::Sense::hover());
+    let mut row =
+        ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(egui::vec2(10.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    row.spacing_mut().item_spacing.x = 0.0;
+    let file = menu_word(&mut row, &tr!("file"), t.accent, false);
+    file.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("file")));
+    if file.on_hover_text(tr!("file-tip")).clicked() {
+        action = Some(Action::File);
+    }
+    for which in TABS {
+        let name = which.name();
+        let on = *tab == which;
+        let response = menu_word(&mut row, &name, if on { t.text } else { t.text_dim }, on);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &name));
+        if response.double_clicked() {
+            *collapsed = !*collapsed;
+        } else if response.clicked() {
+            if on && !*collapsed {
+                *collapsed = true;
+            } else {
                 *tab = which;
                 *collapsed = false;
             }
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(4.0);
-            let (icon, name) = if *collapsed { (Icon::ChevronDown, &tr!("ribbon-show")) } else { (Icon::ChevronUp, &tr!("ribbon-hide")) };
-            if icon_button(ui, icon, name, true).clicked() {
-                *collapsed = !*collapsed;
-            }
-        });
-    });
+    }
     if *collapsed {
         return action;
     }
-    // The buttons sit on the chrome itself, under the tabs, with no frame of their own.
-    egui::Frame::new().inner_margin(egui::Margin { left: 4, right: 4, top: 2, bottom: 6 }).show(ui, |ui| {
-        ui.set_min_size(egui::vec2(ui.available_width(), RIBBON_HEIGHT));
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            if let Some(a) = buttons(ui, *tab, state) {
-                action = Some(a);
-            }
-        });
-    });
+    ui.add_space(MENU_GAP);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), TOOLBAR_HEIGHT), egui::Sense::hover());
+    let mut row =
+        ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    row.spacing_mut().item_spacing.x = 2.0;
+    // The width the tab's buttons took with their names, the last time they had them.
+    let natural_id = egui::Id::new(("toolbar-natural-width", *tab as u8));
+    let natural: Option<f32> = row.ctx().data(|d| d.get_temp(natural_id));
+    let compact = natural.is_some_and(|w| w > rect.width() - 20.0);
+    let start = row.cursor().left();
+    if let Some(a) = buttons(&mut row, *tab, state, compact) {
+        action = Some(a);
+    }
+    if !compact {
+        let width = row.cursor().left() - start;
+        row.ctx().data_mut(|d| d.insert_temp(natural_id, width));
+    }
     action
 }
 
-/// One tab's buttons, in groups divided by thin lines.
-fn buttons(ui: &mut egui::Ui, tab: Tab, state: &State) -> Option<Action> {
+/// One tab's buttons, in groups set apart by space; `compact` leaves their names to the tooltip.
+fn buttons(ui: &mut egui::Ui, tab: Tab, state: &State, compact: bool) -> Option<Action> {
     let mut action = None;
     let mut go = |ui: &mut egui::Ui, icon: Icon, label: &str, tip: &str, enabled: bool, on: bool, then: Action| {
-        if large(ui, icon, label, tip, enabled, on) {
+        if small(ui, icon, label, tip, enabled, on, compact) {
             action = Some(then.clone());
         }
     };
@@ -300,9 +350,6 @@ fn buttons(ui: &mut egui::Ui, tab: Tab, state: &State) -> Option<Action> {
         Tab::Home => {
             go(ui, Icon::Open, &tr!("open"), &tr!("open-tip"), true, false, Action::Open);
             go(ui, Icon::Save, &tr!("save"), &tr!("save-tip"), true, false, Action::Save);
-            divider(ui);
-            go(ui, Icon::Undo, &tr!("undo"), state.undo.unwrap_or(&tr!("nothing-to-undo")), state.undo.is_some(), false, Action::Undo);
-            go(ui, Icon::Redo, &tr!("redo"), state.redo.unwrap_or(&tr!("nothing-to-redo")), state.redo.is_some(), false, Action::Redo);
             divider(ui);
             go(ui, Icon::Run, &tr!("run-syntax"), &tr!("run-syntax-tip"), true, false, Action::Run);
             divider(ui);
@@ -354,7 +401,7 @@ fn buttons(ui: &mut egui::Ui, tab: Tab, state: &State) -> Option<Action> {
             divider(ui);
             go(ui, Icon::Labels, &tr!("value-labels"), &tr!("value-labels-tip"), true, state.value_labels, Action::ToggleLabels);
             divider(ui);
-            if let Some(syntax) = output_style(ui, &state.style) {
+            if let Some(syntax) = output_style(ui, &state.style, compact) {
                 action = Some(Action::Syntax(syntax));
             }
             divider(ui);
@@ -371,10 +418,10 @@ fn language(ui: &mut egui::Ui) -> Option<mksigma_i18n::Lang> {
     let t = Tokens::get(ui.ctx());
     let current = mksigma_i18n::current();
     let mut chosen = None;
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 4.0;
-        ui.label(egui::RichText::new(tr!("language-menu")).size(11.0).color(t.text_dim));
-        egui::ComboBox::from_id_salt("language").selected_text(current.name()).width(150.0).show_ui(ui, |ui| {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.label(egui::RichText::new(tr!("language-menu")).size(12.0).color(t.text_dim));
+        egui::ComboBox::from_id_salt("language").selected_text(current.name()).width(130.0).show_ui(ui, |ui| {
             for lang in mksigma_i18n::Lang::ALL {
                 if ui.selectable_label(lang == current, lang.name()).clicked() && lang != current {
                     chosen = Some(lang);
@@ -387,62 +434,65 @@ fn language(ui: &mut egui::Ui) -> Option<mksigma_i18n::Lang> {
 
 /// The Output style's controls: font, size, palette, decimals. A change is the `OUTPUT STYLE`
 /// command that makes it.
-fn output_style(ui: &mut egui::Ui, style: &mksigma_engine::output::Style) -> Option<String> {
+fn output_style(ui: &mut egui::Ui, style: &mksigma_engine::output::Style, compact: bool) -> Option<String> {
     use mksigma_engine::output::style::{Family, Palette};
     let t = Tokens::get(ui.ctx());
     let mut syntax = None;
-    let title = |f: &str| {
-        let mut chars = f.chars();
-        chars.next().map_or(String::new(), |c| c.to_string() + &chars.as_str().to_lowercase())
-    };
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 4.0;
-        ui.label(egui::RichText::new(tr!("output-style")).size(11.0).color(t.text_dim)).on_hover_text(tr!("output-style-tip"));
-        egui::Grid::new("output-style").num_columns(4).spacing([6.0, 4.0]).show(ui, |ui| {
-            ui.label(tr!("font"));
-            egui::ComboBox::from_id_salt("style-font").selected_text(title(style.family.name())).width(80.0).show_ui(ui, |ui| {
-                for f in Family::ALL {
-                    if ui.selectable_label(style.family == f, title(f.name())).clicked() && style.family != f {
-                        syntax = Some(format!("OUTPUT STYLE /FONT={}.", f.name()));
+    // A button that opens the controls, so the toolbar stays one row.
+    let button = small_response(ui, Icon::Page, &tr!("output-style"), &tr!("output-style-tip"), true, false, compact);
+    egui::Popup::menu(&button).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        let title = |f: &str| {
+            let mut chars = f.chars();
+            chars.next().map_or(String::new(), |c| c.to_string() + &chars.as_str().to_lowercase())
+        };
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            egui::Grid::new("output-style").num_columns(4).spacing([6.0, 4.0]).show(ui, |ui| {
+                ui.label(tr!("font"));
+                egui::ComboBox::from_id_salt("style-font").selected_text(title(style.family.name())).width(80.0).show_ui(ui, |ui| {
+                    for f in Family::ALL {
+                        if ui.selectable_label(style.family == f, title(f.name())).clicked() && style.family != f {
+                            syntax = Some(format!("OUTPUT STYLE /FONT={}.", f.name()));
+                        }
                     }
-                }
-            });
-            ui.label(tr!("size"));
-            egui::ComboBox::from_id_salt("style-size").selected_text(format!("{} pt", style.size)).width(64.0).show_ui(ui, |ui| {
-                for size in [8u8, 9, 10, 11, 12, 14, 16, 18] {
-                    if ui.selectable_label(style.size == size, format!("{size} pt")).clicked() && style.size != size {
-                        syntax = Some(format!("OUTPUT STYLE /SIZE={size}."));
+                });
+                ui.label(tr!("size"));
+                egui::ComboBox::from_id_salt("style-size").selected_text(format!("{} pt", style.size)).width(64.0).show_ui(ui, |ui| {
+                    for size in [8u8, 9, 10, 11, 12, 14, 16, 18] {
+                        if ui.selectable_label(style.size == size, format!("{size} pt")).clicked() && style.size != size {
+                            syntax = Some(format!("OUTPUT STYLE /SIZE={size}."));
+                        }
                     }
-                }
-            });
-            ui.end_row();
-            ui.label(tr!("palette"));
-            egui::ComboBox::from_id_salt("style-palette").selected_text(title(style.palette.name())).width(80.0).show_ui(ui, |ui| {
-                for p in Palette::ALL {
-                    let label = ui
-                        .horizontal(|ui| {
-                            let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-                            let [r, g, b] = p.colors().map_or([t.accent.r(), t.accent.g(), t.accent.b()], |(bar, _)| bar);
-                            ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgb(r, g, b));
-                            ui.selectable_label(style.palette == p, title(p.name()))
-                        })
-                        .inner;
-                    if label.clicked() && style.palette != p {
-                        syntax = Some(format!("OUTPUT STYLE /PALETTE={}.", p.name()));
+                });
+                ui.end_row();
+                ui.label(tr!("palette"));
+                egui::ComboBox::from_id_salt("style-palette").selected_text(title(style.palette.name())).width(80.0).show_ui(ui, |ui| {
+                    for p in Palette::ALL {
+                        let label = ui
+                            .horizontal(|ui| {
+                                let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                                let [r, g, b] = p.colors().map_or([t.accent.r(), t.accent.g(), t.accent.b()], |(bar, _)| bar);
+                                ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgb(r, g, b));
+                                ui.selectable_label(style.palette == p, title(p.name()))
+                            })
+                            .inner;
+                        if label.clicked() && style.palette != p {
+                            syntax = Some(format!("OUTPUT STYLE /PALETTE={}.", p.name()));
+                        }
                     }
-                }
-            });
-            ui.label(tr!("decimals"));
-            let shown = style.decimals.map_or(tr!("decimals-auto"), |d| d.to_string());
-            egui::ComboBox::from_id_salt("style-decimals").selected_text(shown).width(64.0).show_ui(ui, |ui| {
-                for d in std::iter::once(None).chain((0..=6).map(Some)) {
-                    let name = d.map_or(tr!("decimals-auto"), |d: u8| d.to_string());
-                    if ui.selectable_label(style.decimals == d, &name).clicked() && style.decimals != d {
-                        syntax = Some(format!("OUTPUT STYLE /DECIMALS={}.", d.map_or("AUTO".to_string(), |d| d.to_string())));
+                });
+                ui.label(tr!("decimals"));
+                let shown = style.decimals.map_or(tr!("decimals-auto"), |d| d.to_string());
+                egui::ComboBox::from_id_salt("style-decimals").selected_text(shown).width(64.0).show_ui(ui, |ui| {
+                    for d in std::iter::once(None).chain((0..=6).map(Some)) {
+                        let name = d.map_or(tr!("decimals-auto"), |d: u8| d.to_string());
+                        if ui.selectable_label(style.decimals == d, &name).clicked() && style.decimals != d {
+                            syntax = Some(format!("OUTPUT STYLE /DECIMALS={}.", d.map_or("AUTO".to_string(), |d| d.to_string())));
+                        }
                     }
-                }
+                });
+                ui.end_row();
             });
-            ui.end_row();
         });
     });
     syntax
@@ -492,41 +542,46 @@ pub(crate) fn commands() -> Vec<(String, Action)> {
     ]
 }
 
+/// The end of a group of buttons: a short, light line to the next.
 fn divider(ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(13.0, RIBBON_HEIGHT - 8.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(13.0, 28.0), egui::Sense::hover());
     ui.painter().vline(rect.center().x, rect.y_range().shrink(6.0), egui::Stroke::new(1.0, t.border));
 }
 
-/// A large ribbon button: a 32-point icon over its name. `on` marks a toggle that is on.
-fn large(ui: &mut egui::Ui, icon: Icon, label: &str, tip: &str, enabled: bool, on: bool) -> bool {
+/// A toolbar button: a 16-point icon with its name beside it, or the icon alone when
+/// `compact` (the name then in the tooltip). `on` marks a toggle that is on.
+fn small(ui: &mut egui::Ui, icon: Icon, label: &str, tip: &str, enabled: bool, on: bool, compact: bool) -> bool {
+    small_response(ui, icon, label, tip, enabled, on, compact).clicked() && enabled
+}
+
+/// [`small`]'s button, for a caller that needs its response (to hang a menu on it).
+fn small_response(ui: &mut egui::Ui, icon: Icon, label: &str, tip: &str, enabled: bool, on: bool, compact: bool) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let font = egui::FontId::proportional(12.0);
-    // Names of two words go on two lines, as ribbons set them.
-    let text = match label.split_once(' ') {
-        Some((a, b)) if label.len() > 9 => format!("{a}\n{b}"),
-        _ => label.to_string(),
-    };
-    let mut job = egui::text::LayoutJob::simple(text, font, if enabled { t.text } else { t.text_dim }, f32::INFINITY);
-    job.halign = egui::Align::Center;
-    let galley = ui.painter().layout_job(job);
-    let width = (galley.size().x + 14.0).max(52.0);
+    let galley = (!compact).then(|| ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(12.5), t.text));
+    let width = galley.as_ref().map_or(24.0, |g| g.size().x + 30.0);
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(width, RIBBON_HEIGHT - 4.0), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
+        ui.allocate_exact_size(egui::vec2(width, BUTTON_HEIGHT), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, label));
     let painter = ui.painter();
-    if on {
-        painter.rect_filled(rect, 0.0, t.accent_soft);
+    if on || (enabled && response.is_pointer_button_down_on()) {
+        painter.rect_filled(rect, RADIUS, t.pressed);
     } else if enabled && response.hovered() {
-        painter.rect_filled(rect, 0.0, if response.is_pointer_button_down_on() { t.pressed } else { t.hover });
+        painter.rect_filled(rect, RADIUS, t.hover);
     }
-    let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.top() + 22.0), egui::vec2(30.0, 30.0));
+    if on {
+        painter.rect_stroke(rect, RADIUS, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    }
     let mut icon_painter = painter.clone();
     if !enabled {
         icon_painter.set_opacity(0.35);
     }
+    let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 12.0, rect.center().y), egui::vec2(16.0, 16.0));
     icons::paint(&icon_painter, icon_rect, icon, &t);
-    // Centred lines are laid out around x = 0.
-    painter.galley(egui::pos2(rect.center().x, rect.top() + 42.0), galley, t.text);
-    response.on_hover_text(tip).clicked() && enabled
+    if let Some(galley) = galley {
+        let at = egui::pos2(rect.left() + 24.0, rect.center().y - galley.size().y / 2.0);
+        painter.galley(at, galley, if enabled { t.text } else { t.text_dim });
+    }
+    let tip = if compact { format!("{label}\n{tip}") } else { tip.to_string() };
+    response.on_hover_text(tip)
 }
