@@ -61,6 +61,10 @@ pub(crate) fn data_view(
     let case_width = column_width(ui, &n.to_string()).max(48.0);
     let widths: Vec<f32> = vars.iter().map(|v| column_width(ui, &v.name).max(80.0)).collect();
     let t = Tokens::get(ui.ctx());
+    // The blank row after the last case shows under the pointer, while it's edited, or when there
+    // are no cases yet; otherwise it is not drawn, but stays there for the keyboard.
+    let blank_shown =
+        n == 0 || ui.ui_contains_pointer() || editing.as_ref().is_some_and(|e| matches!(e.target, Target::Cell { case, .. } if case == n));
     egui::ScrollArea::horizontal().id_salt("data-h").auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
         let header_height = ROW_HEIGHT + 4.0;
@@ -81,11 +85,14 @@ pub(crate) fn data_view(
         egui::ScrollArea::vertical().id_salt("data-v").auto_shrink([false, false]).show_rows(ui, ROW_HEIGHT, rows_shown, |ui, rows| {
             for case in rows {
                 let min = ui.cursor().min;
-                ui.painter().rect_filled(egui::Rect::from_min_size(min, egui::vec2(case_width, ROW_HEIGHT)), 0.0, t.header_bg);
+                let shown = case < n || blank_shown;
+                if shown {
+                    ui.painter().rect_filled(egui::Rect::from_min_size(min, egui::vec2(case_width, ROW_HEIGHT)), 0.0, t.header_bg);
+                }
                 ui.horizontal(|ui| {
                     if case == n {
-                        ui.add_sized([case_width, ROW_HEIGHT], egui::Label::new(egui::RichText::new("+").weak()))
-                            .on_hover_text(tr!("vw-type-to-add-case"));
+                        let plus = egui::RichText::new("+").color(if shown { t.text_dim } else { egui::Color32::TRANSPARENT });
+                        ui.add_sized([case_width, ROW_HEIGHT], egui::Label::new(plus)).on_hover_text(tr!("vw-type-to-add-case"));
                     } else {
                         let number = egui::Label::new(egui::RichText::new((case + 1).to_string()).color(t.header_text)).sense(egui::Sense::click());
                         ui.add_sized([case_width, ROW_HEIGHT], number).context_menu(|ui| {
@@ -114,7 +121,9 @@ pub(crate) fn data_view(
                         editable(ui, editing, edits, Target::Cell { case, var: i }, rich, || edit_text(value), *w, ROW_HEIGHT, right);
                     }
                 });
-                row_lines(ui, &t, min, ROW_HEIGHT, case_width, &widths);
+                if shown {
+                    row_lines(ui, &t, min, ROW_HEIGHT, case_width, &widths);
+                }
             }
         });
     });
@@ -149,6 +158,12 @@ pub(crate) fn variable_view(
     commits: &mut Vec<Commit>,
 ) {
     const H: f32 = 22.0;
+    let next = ds.variables().len();
+    // As in Data View, the blank row's mark shows under the pointer, while it's edited, or when
+    // there are no variables yet.
+    let blank_shown =
+        next == 0 || ui.ui_contains_pointer() || editing.as_ref().is_some_and(|e| matches!(e.target, Target::Variable(i, _) if i == next));
+    let plus_color = if blank_shown { Tokens::get(ui.ctx()).text_dim } else { egui::Color32::TRANSPARENT };
     egui::ScrollArea::both().id_salt("variables").auto_shrink([false, false]).show(ui, |ui| {
         egui::Grid::new("variable-view").striped(true).num_columns(8).spacing([8.0, 2.0]).show(ui, |ui| {
             for h in [
@@ -213,8 +228,7 @@ pub(crate) fn variable_view(
                 ui.end_row();
             }
             // Typing a name in the blank last row adds a numeric variable.
-            let next = ds.variables().len();
-            ui.label(egui::RichText::new("+").weak()).on_hover_text(tr!("vw-type-to-add-variable"));
+            ui.label(egui::RichText::new("+").color(plus_color)).on_hover_text(tr!("vw-type-to-add-variable"));
             editable(ui, editing, edits, Target::Variable(next, Field::Name), egui::RichText::new(""), String::new, 110.0, H, false);
             ui.end_row();
         });

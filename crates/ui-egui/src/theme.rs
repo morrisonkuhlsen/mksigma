@@ -178,9 +178,13 @@ pub fn apply(ctx: &egui::Context) {
     });
 }
 
-/// A white (or dark) panel with a hairline border: the syntax editor, the Output, the Filters.
+/// Corner radius of a pane.
+pub const PANE_RADIUS: u8 = 6;
+
+/// A pane: the syntax editor, the Output. No border: the space around it and its tone, a step
+/// lighter (or darker) than the window's, set it apart.
 pub fn card(t: &Tokens) -> egui::Frame {
-    egui::Frame::new().fill(t.ribbon).stroke(Stroke::new(1.0, t.border)).inner_margin(egui::Margin::symmetric(12, 8))
+    egui::Frame::new().fill(t.ribbon).corner_radius(PANE_RADIUS).inner_margin(egui::Margin::symmetric(12, 8))
 }
 
 /// Paints the shadow and hairline of a sheet lying at `rect` on the desk, as paper is lifted:
