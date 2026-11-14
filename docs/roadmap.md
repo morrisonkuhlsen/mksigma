@@ -69,9 +69,9 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   switches views (Data View and Variable View beside the Output, the Dashboard on the whole
   window); then the status line with the data's size, weight and filter, and the zoom. The blank
   row that adds a case or a variable shows its mark only under the pointer or while edited (the
-  keyboard keeps it); Applied steps appears once there is a step. The icons are drawn in code, in
-  colour by meaning (duotone objects — a soft tint under a crisp line — and the window's controls
-  in the text colour); square-cornered buttons, tabs and dialogs. Analyze and Graphs buttons
+  keyboard keeps it); Applied steps appears once there is a step. The icons are drawn in code as line
+  drawings of one weight in the text colour, with no fills, as MK Matrix's (the σ alone keeps the
+  accent; on a coloured button they are drawn solid in its text colour); square-cornered buttons, tabs and dialogs. Analyze and Graphs buttons
   paste the procedure's syntax for suggested variables into the editor and run it; when no
   variable fits they paste a template.
 - File backstage — **done**: File opens a page over the window: a column in Morrison

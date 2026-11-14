@@ -113,7 +113,7 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, name: &str, enabled: bool) -> egui
         ui.painter().rect_filled(rect, RADIUS, if response.is_pointer_button_down_on() { t.pressed } else { t.hover });
     }
     let color = if enabled { t.text_dim } else { t.text_dim.gamma_multiply(0.4) };
-    icons::paint_mono(ui.painter(), egui::Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0)), icon, color, t.window);
+    icons::paint_ink(ui.painter(), egui::Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0)), icon, color);
     response.on_hover_text(name)
 }
 

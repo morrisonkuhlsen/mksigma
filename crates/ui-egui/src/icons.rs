@@ -82,24 +82,35 @@ struct Hues {
     red: Color32,
     violet: Color32,
     knock: Color32,
+    /// The σ's tile, the one mark of colour, and the σ on it.
+    mark: Color32,
+    on_mark: Color32,
+    /// Solid shapes are filled (on a coloured background); otherwise they are drawn as outlines,
+    /// so every icon is a line drawing of one weight.
+    solid: bool,
     /// How strongly a hue tints a shape's fill.
     tint: f32,
 }
 
 impl Hues {
-    fn color(t: &Tokens) -> Hues {
+    /// Line icons in one ink, as MK Matrix's: every hue is the text colour and shapes have no
+    /// tint beneath them; the σ keeps the accent, the one mark of colour.
+    fn line(t: &Tokens) -> Hues {
         Hues {
             ink: t.text,
             dim: t.text_dim,
-            accent: t.accent,
-            blue: t.blue,
-            teal: t.teal,
-            green: t.green,
-            orange: t.orange,
-            red: t.red,
-            violet: t.violet,
-            knock: crate::theme::on_accent(t),
-            tint: if t.dark { 0.28 } else { 0.16 },
+            accent: t.text,
+            blue: t.text,
+            teal: t.text,
+            green: t.text,
+            orange: t.text,
+            red: t.text,
+            violet: t.text,
+            knock: t.text,
+            mark: t.accent,
+            on_mark: crate::theme::on_accent(t),
+            solid: false,
+            tint: 0.0,
         }
     }
 
@@ -115,15 +126,17 @@ impl Hues {
             red: color,
             violet: color,
             knock: behind,
+            mark: color,
+            on_mark: behind,
+            solid: true,
             tint: 0.25,
         }
     }
 }
 
-/// Draws `icon` in `rect` (square) in colour: objects in duotone (a soft tint of their hue under
-/// a crisp line of it), the window's controls (arrows, close, search) in the text colour.
+/// Draws `icon` in `rect` (square) as a line drawing in the text colour.
 pub fn paint(painter: &Painter, rect: Rect, icon: Icon, t: &Tokens) {
-    draw(painter, rect, icon, &Hues::color(t));
+    draw(painter, rect, icon, &Hues::line(t));
 }
 
 /// Draws `icon` in one colour, for icons on a filled background (`behind`), such as the accent
@@ -132,12 +145,21 @@ pub fn paint_mono(painter: &Painter, rect: Rect, icon: Icon, color: Color32, beh
     draw(painter, rect, icon, &Hues::mono(color, behind));
 }
 
+/// Draws `icon` as a line drawing in one colour (a quiet or disabled control), with no fills.
+pub fn paint_ink(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
+    let mut hues = Hues::mono(color, Color32::TRANSPARENT);
+    hues.solid = false;
+    hues.tint = 0.0;
+    hues.knock = color;
+    draw(painter, rect, icon, &hues);
+}
+
 fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
     let s = rect.width().min(rect.height()) / 16.0;
     let o = rect.center() - vec2(8.0 * s, 8.0 * s);
     let p = |x: f32, y: f32| -> Pos2 { o + vec2(x * s, y * s) };
     let r = |x0: f32, y0: f32, x1: f32, y1: f32| Rect::from_min_max(p(x0, y0), p(x1, y1));
-    let w = (1.25 * s).max(1.0);
+    let w = (1.1 * s).max(1.0);
     let tint = |c: Color32| c.gamma_multiply(h.tint);
     let line = |a: (f32, f32), b: (f32, f32), color: Color32, k: f32| {
         painter.line_segment([p(a.0, a.1), p(b.0, b.1)], Stroke::new(w * k, color));
@@ -146,9 +168,22 @@ fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
         painter.add(PathShape::line(points.iter().map(|(x, y)| p(*x, *y)).collect(), Stroke::new(w * k, color)));
     };
     let fill = |points: &[(f32, f32)], color: Color32| {
-        painter.add(PathShape::convex_polygon(points.iter().map(|(x, y)| p(*x, *y)).collect(), color, Stroke::NONE));
+        let pts: Vec<Pos2> = points.iter().map(|(x, y)| p(*x, *y)).collect();
+        if h.solid {
+            painter.add(PathShape::convex_polygon(pts, color, Stroke::NONE));
+        } else if color.a() > 0 {
+            painter.add(PathShape::closed_line(pts, Stroke::new(w, color)));
+        }
     };
-    // A convex outline over a tint of its colour: the duotone shape most icons are made of.
+    // A filled rectangle, or its outline in a line drawing.
+    let solid_rect = |rect: Rect, radius: f32, color: Color32| {
+        if h.solid {
+            painter.rect_filled(rect, radius, color);
+        } else {
+            painter.rect_stroke(rect, radius, Stroke::new(w, color), egui::StrokeKind::Middle);
+        }
+    };
+    // A convex outline, over a tint of its colour when the icon is drawn solid.
     let duo = |points: &[(f32, f32)], color: Color32| {
         let pts: Vec<Pos2> = points.iter().map(|(x, y)| p(*x, *y)).collect();
         painter.add(PathShape::convex_polygon(pts.clone(), tint(color), Stroke::NONE));
@@ -161,7 +196,11 @@ fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
         painter.rect_stroke(rect, 1.4 * s, Stroke::new(w, color), egui::StrokeKind::Middle);
     };
     let block = |rect: Rect, color: Color32| {
-        painter.rect_filled(rect, 0.6 * s, color);
+        if h.solid {
+            painter.rect_filled(rect, 0.6 * s, color);
+        } else if color.a() > 0 {
+            painter.rect_stroke(rect, 0.6 * s, Stroke::new(w * 0.9, color), egui::StrokeKind::Inside);
+        }
     };
     let dot = |x: f32, y: f32, radius: f32, color: Color32| {
         painter.circle_filled(p(x, y), radius * s, color);
@@ -170,8 +209,8 @@ fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
     let page = |color: Color32| duo(&[(3.5, 1.5), (9.5, 1.5), (12.5, 4.5), (12.5, 14.5), (3.5, 14.5)], color);
     match icon {
         Icon::Sigma => {
-            painter.rect_filled(r(1.0, 1.0, 15.0, 15.0), 3.5 * s, h.accent);
-            poly(&[(11.0, 4.5), (5.0, 4.5), (8.5, 8.0), (5.0, 11.5), (11.0, 11.5)], h.knock, 1.4);
+            painter.rect_filled(r(1.0, 1.0, 15.0, 15.0), 3.5 * s, h.mark);
+            poly(&[(11.0, 4.5), (5.0, 4.5), (8.5, 8.0), (5.0, 11.5), (11.0, 11.5)], h.on_mark, 1.4);
         }
         Icon::Open => {
             duo(&[(1.5, 13.0), (1.5, 3.5), (5.8, 3.5), (7.3, 5.0), (13.0, 5.0), (13.0, 13.0)], h.orange);
@@ -204,7 +243,7 @@ fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
         }
         Icon::Pdf => {
             page(h.red);
-            painter.rect_filled(r(1.5, 8.0, 11.0, 12.5), 1.0 * s, h.red);
+            solid_rect(r(1.5, 8.0, 11.0, 12.5), 1.0 * s, h.red);
             line((3.5, 9.6), (8.5, 9.6), h.knock, 0.8);
             line((3.5, 11.0), (7.0, 11.0), h.knock, 0.8);
         }
@@ -225,7 +264,11 @@ fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
             let hue = h.accent;
             card(r(1.5, 2.5, 14.5, 13.5), hue, false);
             if icon == Icon::Table {
-                painter.rect_filled(r(1.5, 2.5, 14.5, 5.5), egui::CornerRadius { nw: (1.4 * s) as u8, ne: (1.4 * s) as u8, sw: 0, se: 0 }, hue);
+                if h.solid {
+                    painter.rect_filled(r(1.5, 2.5, 14.5, 5.5), egui::CornerRadius { nw: (1.4 * s) as u8, ne: (1.4 * s) as u8, sw: 0, se: 0 }, hue);
+                } else {
+                    line((1.5, 5.5), (14.5, 5.5), hue, 1.0);
+                }
             } else {
                 painter.rect_filled(r(1.5, 2.5, 14.5, 5.5), 0.0, tint(hue));
             }
@@ -311,7 +354,8 @@ fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
         Icon::Ranks => {
             for (i, height) in [3.0f32, 6.0, 9.0, 12.0].iter().enumerate() {
                 let x = 2.0 + 3.3 * i as f32;
-                block(r(x, 14.0 - height, x + 2.4, 14.0), h.teal.gamma_multiply(0.4 + 0.2 * i as f32));
+                let hue = if h.solid { h.teal.gamma_multiply(0.4 + 0.2 * i as f32) } else { h.teal };
+                block(r(x, 14.0 - height, x + 2.4, 14.0), hue);
             }
         }
         Icon::Boxplot => {
@@ -354,9 +398,15 @@ fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
             let band = if icon == Icon::InsertCase { r(1.5, 5.0, 11.5, 8.0) } else { r(5.0, 1.5, 8.0, 11.5) };
             painter.rect_filled(band, 0.0, tint(h.accent));
             painter.rect_stroke(band, 0.0, Stroke::new(w * 0.8, h.accent), egui::StrokeKind::Middle);
-            dot(12.0, 12.0, 3.6, h.green);
-            line((10.2, 12.0), (13.8, 12.0), h.knock, 1.0);
-            line((12.0, 10.2), (12.0, 13.8), h.knock, 1.0);
+            if h.solid {
+                dot(12.0, 12.0, 3.6, h.green);
+                line((10.2, 12.0), (13.8, 12.0), h.knock, 1.0);
+                line((12.0, 10.2), (12.0, 13.8), h.knock, 1.0);
+            } else {
+                // A bare plus at the corner, in the line's weight.
+                line((10.0, 12.75), (15.0, 12.75), h.green, 1.0);
+                line((12.5, 10.25), (12.5, 15.25), h.green, 1.0);
+            }
         }
         Icon::Labels => {
             duo(&[(2.0, 8.5), (8.5, 2.0), (14.0, 2.0), (14.0, 7.5), (7.5, 14.0)], h.orange);
@@ -477,7 +527,7 @@ fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
             line((8.0, 3.0), (8.0, 13.0), h.ink, 1.2);
         }
         Icon::Dictionary => {
-            painter.rect_filled(r(3.0, 1.5, 13.0, 13.0), 1.4 * s, h.accent);
+            solid_rect(r(3.0, 1.5, 13.0, 13.0), 1.4 * s, h.accent);
             poly(&[(3.0, 12.0), (3.0, 14.5), (13.0, 14.5)], h.accent, 1.0);
             line((5.5, 5.0), (10.5, 5.0), h.knock, 0.9);
             line((5.5, 7.5), (9.0, 7.5), h.knock, 0.9);
@@ -604,14 +654,16 @@ mod tests {
     }
 
     #[test]
-    fn icons_are_coloured_by_meaning() {
-        let t = Tokens::light();
-        let ttest = colors(Icon::TTest, &t);
-        assert!(ttest.contains(&t.blue) && ttest.contains(&t.orange), "the two groups' curves differ in colour");
-        assert!(colors(Icon::Run, &t).contains(&t.green));
-        assert!(colors(Icon::Pdf, &t).contains(&t.red));
-        assert!(colors(Icon::Correlations, &t).contains(&t.violet));
-        // The window's controls stay in the text colour.
-        assert!(colors(Icon::Close, &t).iter().all(|c| *c == t.text || *c == Color32::TRANSPARENT));
+    fn icons_are_drawn_in_one_ink() {
+        for t in [Tokens::light(), Tokens::dark()] {
+            for icon in ALL.into_iter().filter(|i| *i != Icon::Sigma) {
+                // Some strokes are the ink made lighter; none is another colour.
+                let found = colors(icon, &t);
+                let near = |a: [u8; 4], b: [u8; 4]| a.iter().zip(&b).take(3).all(|(x, y)| x.abs_diff(*y) <= 3);
+                let inked =
+                    |c: &Color32| c.a() == 0 || [t.text, t.text_dim].iter().any(|ink| near(ink.to_srgba_unmultiplied(), c.to_srgba_unmultiplied()));
+                assert!(found.iter().all(inked), "{icon:?}: {found:?}");
+            }
+        }
     }
 }
