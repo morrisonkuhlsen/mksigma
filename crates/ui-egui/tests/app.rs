@@ -810,7 +810,8 @@ fn a_dashboard_needs_data_from_a_file() {
 fn the_ribbon_hides_and_comes_back() {
     let mut h = harness(SigmaApp::default());
     assert!(shows(&h, "Run Syntax"));
-    h.get_by_label("Hide the ribbon (Ctrl+F1)").click();
+    // A click on the current tab folds the toolbar away, as in Pearl.
+    h.get_by_label("Home").click();
     h.run_steps(3);
     assert!(h.state().ribbon_collapsed && !shows(&h, "Run Syntax"), "only the tabs are left");
     // A tab clicked while it is hidden shows it again, on that tab.
@@ -1239,4 +1240,39 @@ fn a_tables_actions_show_when_the_pointer_comes_to_it() {
     h.get_by_label("pivot").click();
     h.run_steps(3);
     assert!(h.state().output_state.transposed.contains(&0), "the hidden action still works");
+}
+
+#[test]
+fn the_top_of_the_window_is_pearls_three_slim_rows() {
+    let h = harness(SigmaApp::default());
+    // The title row with AutoSave and the quick commands, the row of menus, the toolbar.
+    let autosave = h.get_all_by_label("AutoSave").next().unwrap().rect();
+    let tab = h.get_by_label("Analyze").rect();
+    let open = h.get_by_label("Open").rect();
+    assert!(autosave.bottom() <= tab.top() && tab.bottom() <= open.top(), "{autosave:?} over {tab:?} over {open:?}");
+    assert!(open.bottom() - autosave.top() <= 100.0 && open.height() <= 24.0, "slim: {autosave:?} to {open:?}");
+    assert!(open.width() > 40.0, "with its name beside the icon: {open:?}");
+}
+
+#[test]
+fn a_narrow_window_keeps_the_toolbar_to_icons() {
+    let mut h = sized(SigmaApp::default(), 760.0);
+    h.get_by_label("Analyze").click();
+    h.run_steps(4);
+    let descriptives = h.get_by_label("Descriptives");
+    assert!(descriptives.rect().width() <= 30.0, "icon alone: {:?}", descriptives.rect());
+    descriptives.click();
+    h.run_steps(3);
+    assert!(h.state().procedure_dialog.is_some(), "and it still opens its dialog");
+}
+
+#[test]
+fn the_output_style_opens_from_one_button() {
+    let mut h = harness(SigmaApp::default());
+    h.get_by_label("View").click();
+    h.run_steps(3);
+    assert!(!shows(&h, "Decimals"), "the controls wait behind their button");
+    h.get_by_label("Output Style").click();
+    h.run_steps(3);
+    assert!(shows(&h, "Font") && shows(&h, "Decimals"), "they open under it");
 }

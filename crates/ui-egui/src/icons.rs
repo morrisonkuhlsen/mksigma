@@ -45,10 +45,10 @@ pub enum Icon {
     Contrast,
     Share,
     Minus,
+    /// More commands: three dots in a row.
+    More,
     Plus,
     Pin,
-    ChevronUp,
-    ChevronDown,
     ChevronLeft,
     ChevronRight,
     House,
@@ -454,8 +454,6 @@ fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
             line((3.5, 3.5), (12.5, 12.5), h.ink, 1.1);
             line((12.5, 3.5), (3.5, 12.5), h.ink, 1.1);
         }
-        Icon::ChevronUp => poly(&[(3.5, 10.5), (8.0, 6.0), (12.5, 10.5)], h.ink, 1.2),
-        Icon::ChevronDown => poly(&[(3.5, 6.0), (8.0, 10.5), (12.5, 6.0)], h.ink, 1.2),
         Icon::ChevronLeft => poly(&[(10.5, 3.5), (6.0, 8.0), (10.5, 12.5)], h.ink, 1.2),
         Icon::ChevronRight => poly(&[(6.0, 3.5), (10.5, 8.0), (6.0, 12.5)], h.ink, 1.2),
         Icon::Pin => {
@@ -465,6 +463,11 @@ fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
             line((7.5, 8.5), (2.0, 14.0), h.dim, 1.1);
         }
         Icon::Minus => line((3.0, 8.0), (13.0, 8.0), h.ink, 1.2),
+        Icon::More => {
+            for x in [3.5, 8.0, 12.5] {
+                dot(x, 8.0, 1.2, h.ink);
+            }
+        }
         Icon::Plus => {
             line((3.0, 8.0), (13.0, 8.0), h.ink, 1.2);
             line((8.0, 3.0), (8.0, 13.0), h.ink, 1.2);
@@ -487,7 +490,7 @@ pub fn show(ui: &mut egui::Ui, icon: Icon, size: f32) -> egui::Response {
 
 /// For tests: every icon stays inside its square.
 #[cfg(test)]
-pub(crate) const ALL: [Icon; 51] = [
+pub(crate) const ALL: [Icon; 50] = [
     Icon::Book,
     Icon::Dashboard,
     Icon::Sigma,
@@ -525,11 +528,10 @@ pub(crate) const ALL: [Icon; 51] = [
     Icon::Contrast,
     Icon::Share,
     Icon::Minus,
+    Icon::More,
     Icon::Plus,
     Icon::Pin,
     Icon::Latex,
-    Icon::ChevronUp,
-    Icon::ChevronDown,
     Icon::ChevronLeft,
     Icon::ChevronRight,
     Icon::House,

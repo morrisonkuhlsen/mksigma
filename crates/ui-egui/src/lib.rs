@@ -732,8 +732,8 @@ impl SigmaApp {
         let paint_chrome = |ui: &egui::Ui| {
             let bottom = ui.cursor().top();
             let rect = egui::Rect::from_min_max(whole.min, egui::pos2(whole.right(), bottom));
-            ui.painter().set(chrome, egui::Shape::rect_filled(rect, 0.0, t.ribbon));
-            ui.painter().hline(whole.x_range(), bottom, egui::Stroke::new(1.0, t.border));
+            // One surface with the window, as Pearl's: no band, no line under it.
+            ui.painter().set(chrome, egui::Shape::rect_filled(rect, 0.0, t.window));
         };
         ui.spacing_mut().item_spacing.y = 0.0;
 
