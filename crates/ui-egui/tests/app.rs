@@ -242,6 +242,14 @@ fn with_steps() -> Harness<'static, SigmaApp> {
 }
 
 #[test]
+fn an_empty_steps_list_is_not_shown() {
+    let h = harness(SigmaApp::default());
+    assert!(!shows(&h, "Applied steps (0)"), "nothing to list yet");
+    // The blank row's mark is drawn only under the pointer, but the keyboard and screen readers keep it.
+    assert!(shows(&h, "+"));
+}
+
+#[test]
 fn the_steps_panel_lists_data_changes_only() {
     let h = with_steps();
     assert!(shows(&h, "Applied steps (3)"), "DESCRIPTIVES is not a step");

@@ -323,8 +323,7 @@ pub(crate) fn filters_pane(ui: &mut egui::Ui, session: &Session, state: &mut Out
     use crate::icons::{self, Icon};
     let t = crate::theme::Tokens::get(ui.ctx());
     let rect = ui.max_rect();
-    ui.painter().rect_filled(rect, 0.0, t.ribbon);
-    ui.painter().vline(rect.left(), rect.y_range(), egui::Stroke::new(1.0, t.border));
+    ui.painter().rect_filled(rect, crate::theme::PANE_RADIUS, t.ribbon);
     let ds = &session.dataset;
     state.pending.retain(|v| ds.variable(v).is_some() && !session.slicers().iter().any(|s| &s.variable == v));
     let count = session.slicers().len() + usize::from(session.cross_filter().is_some());
@@ -362,7 +361,7 @@ pub(crate) fn filters_pane(ui: &mut egui::Ui, session: &Session, state: &mut Out
     if crate::theme::pane_header(ui, Icon::Filter, &tr!("filters"), "", |ui| crate::icon_button(ui, Icon::ChevronRight, &tr!("filters-hide"))) {
         *open = false;
     }
-    let card = egui::Frame::new().fill(t.paper).stroke(egui::Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(8));
+    let card = egui::Frame::new().fill(t.paper).corner_radius(4).inner_margin(egui::Margin::same(8));
     egui::ScrollArea::vertical().id_salt("filters").auto_shrink([false, false]).show(ui, |ui| {
         let names: Vec<String> = session.slicers().iter().map(|s| s.variable.clone()).chain(state.pending.iter().cloned()).collect();
         if !names.is_empty() {

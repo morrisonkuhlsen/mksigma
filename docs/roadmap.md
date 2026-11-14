@@ -60,8 +60,11 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   bold; a click on it folds the toolbar); the tab's toolbar in one slim row of small buttons with
   their names (icons alone when the window is too narrow), groups set apart by short light lines;
   one surface with the window. Pearl's palette (#98): its Pearl theme's ivory and mauve in light,
-  Morrison Kühlsen's ink and terracotta in dark. The icons are drawn in code, in colour by meaning (duotone objects — a soft tint under a crisp line — and the window's controls in the text colour); Data View as a grid with headers and gridlines; a status bar with the data's size, weight and filter),
-  light and dark, indigo accented, square-cornered throughout (panels, buttons, tabs, dialogs).
+  Morrison Kühlsen's ink and terracotta in dark. The panes have no borders (#99): space and a
+  tone a step off the window's set them apart, with 6 pt corners; the blank row that adds a case
+  or a variable shows its mark only under the pointer or while edited (the keyboard keeps it), and
+  Applied steps appears once there is a step. The icons are drawn in code, in colour by meaning (duotone objects — a soft tint under a crisp line — and the window's controls in the text colour); Data View as a grid with headers and gridlines; a status bar with the data's size, weight and filter),
+  light and dark, square-cornered buttons, tabs and dialogs.
   As in report designers, a view rail down the left is the one place that switches views
   (Data View and Variable View beside the Output, the Dashboard on the whole window), each with
   an icon of its own, and a Filters pane down the right that starts collapsed to a strip with

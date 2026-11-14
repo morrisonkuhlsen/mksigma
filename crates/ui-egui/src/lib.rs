@@ -871,7 +871,7 @@ impl SigmaApp {
         let width = 380.0;
         let at = egui::pos2(ctx.content_rect().right() - width - 12.0, ribbon::TITLE_HEIGHT);
         egui::Area::new(egui::Id::new("search")).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| {
-            theme::card(&t).shadow(ui.visuals().popup_shadow).show(ui, |ui| {
+            theme::card(&t).stroke(egui::Stroke::new(1.0, t.border)).shadow(ui.visuals().popup_shadow).show(ui, |ui| {
                 ui.set_width(width);
                 ui.horizontal(|ui| {
                     icons::show(ui, Icon::Search, 16.0);
@@ -1018,8 +1018,7 @@ impl SigmaApp {
     fn view_rail(&mut self, ui: &mut egui::Ui, height: f32) {
         let t = Tokens::get(ui.ctx());
         let (rect, _) = ui.allocate_exact_size(egui::vec2(RAIL_WIDTH, height), egui::Sense::hover());
-        ui.painter().rect_filled(rect, 0.0, t.ribbon);
-        ui.painter().vline(rect.right(), rect.y_range(), egui::Stroke::new(1.0, t.border));
+        ui.painter().rect_filled(rect, theme::PANE_RADIUS, t.ribbon);
         let dashboard = self.output_state.dashboard;
         let views = [
             (Icon::Grid, tr!("data-view"), tr!("data-view-tip"), !dashboard && self.view == View::Data, Some(View::Data)),
@@ -1108,7 +1107,7 @@ impl SigmaApp {
         let table_height = (ui.available_height() - syntax_height).max(120.0);
         let mut edits = Vec::new();
         let mut commits = Vec::new();
-        let grid = egui::Frame::new().fill(t.grid_bg).stroke(egui::Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(1));
+        let grid = egui::Frame::new().fill(t.grid_bg).corner_radius(theme::PANE_RADIUS).inner_margin(egui::Margin::same(1));
         grid.show(ui, |ui| {
             let size = egui::vec2(ui.available_width(), table_height - 2.0);
             ui.allocate_ui(size, |ui| {
@@ -1170,6 +1169,10 @@ impl SigmaApp {
         let mut paste = false;
         let steps = self.session.steps();
         let count = steps.len();
+        // Nothing to list until the data changes: the header would only take room.
+        if count == 0 {
+            return;
+        }
         egui::CollapsingHeader::new(tr!("steps-title", n = count)).id_salt("steps").default_open(true).show(ui, |ui| {
             if steps.iter().any(|s| s.enabled && s.syntax().is_some()) && theme::ghost(ui, &tr!("steps-paste"), "", true) {
                 paste = true;
@@ -1293,7 +1296,6 @@ impl SigmaApp {
     fn status_line(&mut self, ui: &mut egui::Ui) {
         let t = Tokens::get(ui.ctx());
         let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), STATUS_HEIGHT), egui::Sense::hover());
-        ui.painter().hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, t.border));
         let mut row = ui
             .new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
         let ready = tr!("status-ready");
