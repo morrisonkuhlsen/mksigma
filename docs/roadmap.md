@@ -54,22 +54,26 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
 - Desktop app: File ▸ Open (native dialog, Ctrl+O), drag and drop, opening a file given on the
   command line, Data View (virtualized rows, value-labels toggle, missing values dimmed) and a
   Variable View — **done**.
-- Window layout — **done**: the top as its sibling Pearl's (#98): a title row with AutoSave,
-  Save, Undo, Redo and more on the left, the logo and the document's name in the middle, search,
-  export and theme on the right; a row of menus (File in the accent, the tabs, the current one in
-  bold; a click on it folds the toolbar); the tab's toolbar in one slim row of small buttons with
-  their names (icons alone when the window is too narrow), groups set apart by short light lines;
-  one surface with the window. Pearl's palette (#98): its Pearl theme's ivory and mauve in light,
-  Morrison Kühlsen's ink and terracotta in dark. The panes have no borders (#99): space and a
-  tone a step off the window's set them apart, with 6 pt corners; the blank row that adds a case
-  or a variable shows its mark only under the pointer or while edited (the keyboard keeps it), and
-  Applied steps appears once there is a step. The icons are drawn in code, in colour by meaning (duotone objects — a soft tint under a crisp line — and the window's controls in the text colour); Data View as a grid with headers and gridlines; a status bar with the data's size, weight and filter),
-  light and dark, square-cornered buttons, tabs and dialogs.
-  As in report designers, a view rail down the left is the one place that switches views
-  (Data View and Variable View beside the Output, the Dashboard on the whole window), each with
-  an icon of its own, and a Filters pane down the right that starts collapsed to a strip with
-  its name and how many filters are on. Analyze and Graphs buttons paste the procedure's syntax for
-  suggested variables into the editor and run it; when no variable fits they paste a template.
+- Window layout — **done**: the look of its sibling MK Matrix. The top (#98): a title row with
+  AutoSave, Save, Undo, Redo and more on the left, the logo and the document's name in the
+  middle, search, export and theme on the right; a row of menus (File in the accent, the tabs, the
+  current one in bold; a click on it folds the toolbar); the tab's toolbar in one slim row of
+  small buttons with their names (icons alone when the window is too narrow), groups set apart by
+  short light lines; one surface with the window, a hairline under it. MK Matrix's palette: white
+  chrome and neutral greys with terracotta (#A0522D) the only colour in light, Morrison Kühlsen's
+  ink with a lighter terracotta in dark. Below the top, edge to edge: Data View or Variable View
+  as a sheet whose gridlines run on to the pane's edges, over a Syntax pane that folds to its
+  header row; the Output on its desk at the right (40% of the width), the Filters pane beside it
+  (collapsed to a strip with its name and how many filters are on); panes set apart by hairlines,
+  not frames (#99). View tabs along the bottom, as a workbook's sheet tabs (the current one marked by the accent alone), are the one place that
+  switches views (Data View and Variable View beside the Output, the Dashboard on the whole
+  window); then the status line with the data's size, weight and filter, and the zoom. The blank
+  row that adds a case or a variable shows its mark only under the pointer or while edited (the
+  keyboard keeps it); Applied steps appears once there is a step. The icons are drawn in code as line
+  drawings of one weight in the text colour, with no fills, as MK Matrix's (the σ alone keeps the
+  accent; on a coloured button they are drawn solid in its text colour); square-cornered buttons, tabs and dialogs. Analyze and Graphs buttons
+  paste the procedure's syntax for suggested variables into the editor and run it; when no
+  variable fits they paste a template.
 - File backstage — **done**: File opens a page over the window: a column in Morrison
   Kühlsen's ink with its logo, MK Sigma's name and motto, and the places grouped (Start: Home,
   New, Open; This data: Info, Save, Save As, Export, Close), and the page beside it with "Back

@@ -323,7 +323,8 @@ pub(crate) fn filters_pane(ui: &mut egui::Ui, session: &Session, state: &mut Out
     use crate::icons::{self, Icon};
     let t = crate::theme::Tokens::get(ui.ctx());
     let rect = ui.max_rect();
-    ui.painter().rect_filled(rect, crate::theme::PANE_RADIUS, t.ribbon);
+    ui.painter().rect_filled(rect, 0.0, t.ribbon);
+    ui.painter().vline(rect.left() + 0.5, rect.y_range(), egui::Stroke::new(1.0, t.border));
     let ds = &session.dataset;
     state.pending.retain(|v| ds.variable(v).is_some() && !session.slicers().iter().any(|s| &s.variable == v));
     let count = session.slicers().len() + usize::from(session.cross_filter().is_some());

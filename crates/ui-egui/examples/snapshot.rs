@@ -3,7 +3,7 @@
 //!
 //! `cargo run -p mksigma-ui-egui --example snapshot -- [--in data.sav] [--variables] [--labels]
 //!  [--run 'SYNTAX'] [--disable N]... [--select ITEM:PART] [--pin ITEM]... [--dashboard] [--no-ribbon] [--filters] [--dark] [--tab NAME] [--splash] [--lang CODE] [--learn ID|list] [--explain ITEM [--every-term]] [--backstage] [--dialog KIND [--dialog-vars 'SLOT:VAR...']]
-//!  [--size 1280x800] out.png` (`--disable` switches off applied step N, counting from 1, after
+//!  [--size 1280x800] [--scale 2] out.png` (`--scale` sets pixels per point, to look at detail; `--disable` switches off applied step N, counting from 1, after
 //!  `--run`; `--select` cross-filters by category PART of Output item ITEM, both counting from 1:
 //!  a bar, bin or box, or a table row; `--pin` pins Output item ITEM to the dashboard and
 //!  `--dashboard` shows it; `--explain` opens the Σ window of Output item ITEM; `--splash`
@@ -27,6 +27,7 @@ fn main() -> Result<(), String> {
     let mut splash = false;
     let mut every_term = false;
     let mut dark = false;
+    let mut scale = 1.0f32;
     let mut i = 0;
     while let Some(arg) = args.get(i) {
         match arg.as_str() {
@@ -119,6 +120,10 @@ fn main() -> Result<(), String> {
                     size = (w.parse().map_err(|_| "bad width")?, h.parse().map_err(|_| "bad height")?);
                 }
             }
+            "--scale" => {
+                i += 1;
+                scale = args.get(i).and_then(|s| s.parse().ok()).ok_or("bad scale")?;
+            }
             other => out = other.to_string(),
         }
         i += 1;
@@ -174,7 +179,7 @@ fn main() -> Result<(), String> {
     }
     let mut harness = egui_kittest::Harness::builder()
         .with_size(egui::vec2(size.0, size.1))
-        .with_pixels_per_point(1.0)
+        .with_pixels_per_point(scale)
         .wgpu()
         .build_ui_state(|ui, app: &mut SigmaApp| app.ui(ui), app);
     if dark {

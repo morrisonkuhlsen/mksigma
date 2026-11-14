@@ -1138,7 +1138,7 @@ fn learn_shows_articles_runs_their_examples_and_opens_from_a_table() {
 }
 
 #[test]
-fn the_view_rail_is_the_one_place_that_switches_views() {
+fn the_view_tabs_are_the_one_place_that_switch_views() {
     let mut h = harness(SigmaApp::default());
     h.get_by_label("Dashboard").click();
     h.run_steps(3);
