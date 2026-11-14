@@ -65,7 +65,7 @@ desktop app (Data View, syntax box, Output Viewer) and CLI on a sample dataset.
   as a sheet whose gridlines run on to the pane's edges, over a Syntax pane that folds to its
   header row; the Output on its desk at the right (40% of the width), the Filters pane beside it
   (collapsed to a strip with its name and how many filters are on); panes set apart by hairlines,
-  not frames (#99). View tabs along the bottom, as a workbook's sheet tabs, are the one place that
+  not frames (#99). View tabs along the bottom, as a workbook's sheet tabs (the current one marked by the accent alone), are the one place that
   switches views (Data View and Variable View beside the Output, the Dashboard on the whole
   window); then the status line with the data's size, weight and filter, and the zoom. The blank
   row that adds a case or a variable shows its mark only under the pointer or while edited (the

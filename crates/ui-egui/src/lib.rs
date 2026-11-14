@@ -1022,7 +1022,8 @@ impl SigmaApp {
 
     /// The view tabs along the window's bottom, as a workbook's sheet tabs, and the one place
     /// that switches views: Data View and Variable View, each beside the Output, and the dashboard
-    /// on the whole window. The current tab lies on the grid's colour, its name in the accent.
+    /// on the whole window. The current tab is marked by its colour alone: its icon and name in the
+    /// accent, the name in bold.
     fn view_tabs(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
         let t = Tokens::get(ui.ctx());
         let painter = ui.painter().clone();
@@ -1044,15 +1045,11 @@ impl SigmaApp {
             x += width;
             let response = ui.interact(slot, ui.id().with(("view-tab", k)), egui::Sense::click());
             response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &name));
-            if on {
-                painter.rect_filled(slot, 0.0, t.grid_bg);
-                painter.vline(slot.left() + 0.5, slot.y_range(), egui::Stroke::new(1.0, t.border));
-                painter.vline(slot.right() - 0.5, slot.y_range(), egui::Stroke::new(1.0, t.border));
-            } else if response.hovered() {
-                painter.rect_filled(slot, 0.0, t.hover);
+            if !on && response.hovered() {
+                painter.rect_filled(slot.shrink2(egui::vec2(2.0, 3.0)), 4.0, t.hover);
             }
             let icon_rect = egui::Rect::from_center_size(egui::pos2(slot.left() + 20.0, slot.center().y), egui::vec2(14.0, 14.0));
-            icons::paint(&painter, icon_rect, icon, &t);
+            icons::paint_ink(&painter, icon_rect, icon, color);
             let at = egui::pos2(slot.left() + 32.0, slot.center().y - galley.size().y / 2.0);
             if on {
                 // Bold is drawn twice, a hair apart: the default font has no bold face.

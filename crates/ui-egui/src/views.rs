@@ -18,7 +18,7 @@ fn row_lines(ui: &egui::Ui, t: &Tokens, min: egui::Pos2, height: f32, first: f32
     let edge = ui.clip_rect().right();
     painter.hline(min.x..=edge, min.y + height - 0.5, egui::Stroke::new(1.0, t.gridline));
     let mut x = min.x + first;
-    painter.vline(x - 0.5, min.y..=min.y + height, egui::Stroke::new(1.0, t.header_line));
+    painter.vline(x - 0.5, min.y..=min.y + height, egui::Stroke::new(1.0, t.gridline));
     for w in widths {
         x += w;
         painter.vline(x - 0.5, min.y..=min.y + height, egui::Stroke::new(1.0, t.gridline));
@@ -86,7 +86,7 @@ pub(crate) fn data_view(
             }
         });
         row_lines(ui, &t, top, header_height, case_width, &widths);
-        ui.painter().hline(header.x_range(), header.bottom() - 0.5, egui::Stroke::new(1.0, t.header_line));
+        ui.painter().hline(header.x_range(), header.bottom() - 0.5, egui::Stroke::new(1.0, t.gridline));
         // Only the visible rows are laid out, so large files stay fast.
         let rows_shown = if vars.is_empty() { 0 } else { n + 1 };
         egui::ScrollArea::vertical().id_salt("data-v").auto_shrink([false, false]).show_rows(ui, ROW_HEIGHT, rows_shown, |ui, rows| {

@@ -131,24 +131,20 @@ fn switch(ui: &mut egui::Ui, on: bool, name: &str) -> egui::Response {
     response
 }
 
-/// A filled accent button with a white icon shape and text, for the one main action of a panel.
+/// The pane's main action (Run): no fill, its icon and name in the accent, a soft tint of it
+/// under the pointer.
 pub(crate) fn accent_button(ui: &mut egui::Ui, icon: Icon, text: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let ink = crate::theme::on_accent(&t);
-    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(13.0), ink);
-    let size = egui::vec2(galley.size().x + 36.0, 26.0);
+    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(13.0), t.accent);
+    let size = egui::vec2(galley.size().x + 32.0, 24.0);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
-    let fill = if response.hovered() { t.accent.gamma_multiply(0.85) } else { t.accent };
-    ui.painter().rect_filled(rect, 0.0, fill);
-    icons::paint_mono(
-        ui.painter(),
-        egui::Rect::from_center_size(egui::pos2(rect.left() + 15.0, rect.center().y), egui::vec2(12.0, 12.0)),
-        icon,
-        ink,
-        fill,
-    );
-    ui.painter().galley(egui::pos2(rect.left() + 26.0, rect.center().y - galley.size().y / 2.0), galley, ink);
+    if response.hovered() || response.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect, RADIUS, t.accent_soft);
+    }
+    let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 13.0, rect.center().y), egui::vec2(12.0, 12.0));
+    icons::paint_ink(ui.painter(), icon_rect, icon, t.accent);
+    ui.painter().galley(egui::pos2(rect.left() + 24.0, rect.center().y - galley.size().y / 2.0), galley, t.accent);
     response
 }
 
