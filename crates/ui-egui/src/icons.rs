@@ -51,6 +51,8 @@ pub enum Icon {
     Pin,
     ChevronLeft,
     ChevronRight,
+    ChevronUp,
+    ChevronDown,
     House,
     Page,
     /// Measurement levels, beside a variable's name.
@@ -456,6 +458,8 @@ fn draw(painter: &Painter, rect: Rect, icon: Icon, h: &Hues) {
         }
         Icon::ChevronLeft => poly(&[(10.5, 3.5), (6.0, 8.0), (10.5, 12.5)], h.ink, 1.2),
         Icon::ChevronRight => poly(&[(6.0, 3.5), (10.5, 8.0), (6.0, 12.5)], h.ink, 1.2),
+        Icon::ChevronUp => poly(&[(3.5, 10.5), (8.0, 6.0), (12.5, 10.5)], h.ink, 1.2),
+        Icon::ChevronDown => poly(&[(3.5, 6.0), (8.0, 10.5), (12.5, 6.0)], h.ink, 1.2),
         Icon::Pin => {
             // A pushpin, tilted: head, collar and needle.
             fill(&[(9.0, 1.5), (14.5, 7.0), (12.0, 8.0), (8.0, 4.0)], h.red);
@@ -490,7 +494,7 @@ pub fn show(ui: &mut egui::Ui, icon: Icon, size: f32) -> egui::Response {
 
 /// For tests: every icon stays inside its square.
 #[cfg(test)]
-pub(crate) const ALL: [Icon; 50] = [
+pub(crate) const ALL: [Icon; 52] = [
     Icon::Book,
     Icon::Dashboard,
     Icon::Sigma,
@@ -534,6 +538,8 @@ pub(crate) const ALL: [Icon; 50] = [
     Icon::Latex,
     Icon::ChevronLeft,
     Icon::ChevronRight,
+    Icon::ChevronUp,
+    Icon::ChevronDown,
     Icon::House,
     Icon::Page,
     Icon::Scale,

@@ -8,16 +8,23 @@ use crate::ROW_HEIGHT;
 use crate::edit::{Commit, Editing, Field, Target, editable, missing_text};
 use crate::theme::Tokens;
 
+/// Width of the empty columns drawn past the last variable.
+const FILLER_WIDTH: f32 = 80.0;
+
 /// Lines between the cells of a row starting at `min`: under the row, after the case number
-/// and after each column.
+/// and after each column, then on in empty columns to the visible edge, as a sheet runs on.
 fn row_lines(ui: &egui::Ui, t: &Tokens, min: egui::Pos2, height: f32, first: f32, widths: &[f32]) {
     let painter = ui.painter();
-    let right = min.x + first + widths.iter().sum::<f32>();
-    painter.hline(min.x..=right, min.y + height - 0.5, egui::Stroke::new(1.0, t.gridline));
+    let edge = ui.clip_rect().right();
+    painter.hline(min.x..=edge, min.y + height - 0.5, egui::Stroke::new(1.0, t.gridline));
     let mut x = min.x + first;
     painter.vline(x - 0.5, min.y..=min.y + height, egui::Stroke::new(1.0, t.header_line));
     for w in widths {
         x += w;
+        painter.vline(x - 0.5, min.y..=min.y + height, egui::Stroke::new(1.0, t.gridline));
+    }
+    while x < edge {
+        x += FILLER_WIDTH;
         painter.vline(x - 0.5, min.y..=min.y + height, egui::Stroke::new(1.0, t.gridline));
     }
 }
@@ -83,6 +90,9 @@ pub(crate) fn data_view(
         // Only the visible rows are laid out, so large files stay fast.
         let rows_shown = if vars.is_empty() { 0 } else { n + 1 };
         egui::ScrollArea::vertical().id_salt("data-v").auto_shrink([false, false]).show_rows(ui, ROW_HEIGHT, rows_shown, |ui, rows| {
+            let rows_end = rows.end;
+            // The rows' own pitch, which the empty rows below keep.
+            let mut pitch = ROW_HEIGHT;
             for case in rows {
                 let min = ui.cursor().min;
                 let shown = case < n || blank_shown;
@@ -121,8 +131,16 @@ pub(crate) fn data_view(
                         editable(ui, editing, edits, Target::Cell { case, var: i }, rich, || edit_text(value), *w, ROW_HEIGHT, right);
                     }
                 });
-                if shown {
-                    row_lines(ui, &t, min, ROW_HEIGHT, case_width, &widths);
+                row_lines(ui, &t, min, ROW_HEIGHT, case_width, &widths);
+                pitch = (ui.cursor().top() - min.y).max(ROW_HEIGHT);
+            }
+            // Past the last row the sheet runs on, empty, to the pane's bottom.
+            if rows_end == rows_shown {
+                let mut y = ui.cursor().top();
+                let x = ui.cursor().left();
+                while y < ui.clip_rect().bottom() {
+                    row_lines(ui, &t, egui::pos2(x, y), pitch, case_width, &widths);
+                    y += pitch;
                 }
             }
         });

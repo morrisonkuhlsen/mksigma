@@ -38,8 +38,14 @@ use icons::Icon;
 use theme::Tokens;
 
 const STATUS_HEIGHT: f32 = 24.0;
-/// The view rail at the left, and the Filters pane at the right, open and collapsed.
-const RAIL_WIDTH: f32 = 44.0;
+/// The row of view tabs over the status line.
+const TABS_HEIGHT: f32 = 30.0;
+/// The Syntax pane under the grid: its header row alone when folded, at most this tall open.
+const SYNTAX_FOLDED: f32 = 36.0;
+const SYNTAX_OPEN: f32 = 260.0;
+/// The Output's share of the width beside Data View and Variable View.
+const OUTPUT_SHARE: f32 = 0.40;
+/// The Filters pane at the right, open and collapsed.
 const FILTERS_WIDTH: f32 = 240.0;
 const FILTERS_STRIP: f32 = 30.0;
 
@@ -135,6 +141,8 @@ pub struct SigmaApp {
     pub zoom: u32,
     /// The Filters pane is open (not only its strip); it starts collapsed.
     pub filters_open: bool,
+    /// The Syntax pane under the grid is open (not only its header).
+    pub syntax_open: bool,
     services: Services,
     title: String,
     themed: bool,
@@ -184,6 +192,7 @@ impl SigmaApp {
             search: None,
             zoom: 100,
             filters_open: false,
+            syntax_open: true,
             services,
             title: String::new(),
             themed: false,
@@ -732,8 +741,9 @@ impl SigmaApp {
         let paint_chrome = |ui: &egui::Ui| {
             let bottom = ui.cursor().top();
             let rect = egui::Rect::from_min_max(whole.min, egui::pos2(whole.right(), bottom));
-            // One surface with the window, as Pearl's: no band, no line under it.
+            // One surface with the window, a hairline under it, as MK Matrix's.
             ui.painter().set(chrome, egui::Shape::rect_filled(rect, 0.0, t.window));
+            ui.painter().hline(rect.x_range(), bottom - 0.5, egui::Stroke::new(1.0, t.border));
         };
         ui.spacing_mut().item_spacing.y = 0.0;
 
@@ -786,48 +796,46 @@ impl SigmaApp {
             self.act(ui.ctx(), action);
         }
 
-        let bottom = STATUS_HEIGHT;
-        let body = (ui.available_height() - bottom - 8.0).max(100.0);
-        ui.add_space(6.0);
-        // Between the view rail and the Filters pane, Data and Variable View get 62% of the width
-        // and the Output Viewer the rest; the dashboard, like a report canvas, takes it all.
-        let gap = 6.0;
+        // Below the chrome, edge to edge as in MK Matrix: the data (the grid over the Syntax pane)
+        // beside the Output, the Filters at the right, then the view tabs and the status line.
+        // The dashboard, like a report canvas, takes the data's place too.
+        let screen = ui.ctx().content_rect();
+        let top = ui.cursor().top();
+        let body_bottom = (screen.bottom() - STATUS_HEIGHT - TABS_HEIGHT).max(top + 100.0);
+        let body = egui::Rect::from_min_max(egui::pos2(screen.left(), top), egui::pos2(screen.right(), body_bottom));
         let dashboard = self.output_state.dashboard;
         let filters_width = if self.filters_open { FILTERS_WIDTH } else { FILTERS_STRIP };
-        let room = ui.available_width() - RAIL_WIDTH - filters_width - 2.0 * gap;
-        let left_width = if dashboard { 0.0 } else { ((room - gap) * 0.62).floor() };
-        let right_width = room - if dashboard { 0.0 } else { gap + left_width };
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(gap, 0.0);
-            let top_down = egui::Layout::top_down(egui::Align::Min);
-            self.view_rail(ui, body);
+        let room = (body.width() - filters_width).max(0.0);
+        let left_width = if dashboard { 0.0 } else { (room * (1.0 - OUTPUT_SHARE)).floor() };
+        let left = egui::Rect::from_min_size(body.min, egui::vec2(left_width, body.height()));
+        let right = egui::Rect::from_min_max(egui::pos2(left.right(), body.top()), egui::pos2(body.right() - filters_width, body.bottom()));
+        let filters = egui::Rect::from_min_max(egui::pos2(right.right(), body.top()), body.max);
+        let pane = |ui: &mut egui::Ui, rect: egui::Rect| {
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::top_down(egui::Align::Min)));
+            child.set_clip_rect(rect.intersect(ui.clip_rect()));
+            child
+        };
+        if !dashboard {
+            self.left_pane(&mut pane(ui, left));
+        }
+        {
+            // The Output's page lies on a desk; the dashboard's cards lie on the paper.
+            ui.painter().rect_filled(right, 0.0, if dashboard { t.paper } else { t.desk });
             if !dashboard {
-                ui.allocate_ui_with_layout(egui::vec2(left_width, body), top_down, |ui| {
-                    ui.set_width(left_width);
-                    ui.set_height(body);
-                    self.left_pane(ui);
-                });
+                ui.painter().vline(right.left() + 0.5, right.y_range(), egui::Stroke::new(1.0, t.border));
             }
-            ui.allocate_ui_with_layout(egui::vec2(right_width, body), top_down, |ui| {
-                ui.set_width(right_width);
-                ui.set_height(body);
-                // The Output's page lies on a desk; the dashboard's cards lie on the paper.
-                let ground = if dashboard { t.paper } else { t.desk };
-                theme::card(&t).fill(ground).show(ui, |ui| {
-                    ui.set_min_size(ui.available_size());
-                    let action = output::output_view(ui, &self.session, &mut self.output_state);
-                    self.output_action(action);
-                });
-            });
-            ui.allocate_ui_with_layout(egui::vec2(filters_width, body), top_down, |ui| {
-                ui.set_width(filters_width);
-                ui.set_height(body);
-                let action = output::filters_pane(ui, &self.session, &mut self.output_state, &mut self.filters_open);
-                self.output_action(action);
-            });
-        });
-        ui.add_space(2.0);
-        self.status_line(ui);
+            let mut out = pane(ui, right.shrink2(egui::vec2(12.0, 6.0)));
+            let action = output::output_view(&mut out, &self.session, &mut self.output_state);
+            self.output_action(action);
+        }
+        let action = output::filters_pane(&mut pane(ui, filters), &self.session, &mut self.output_state, &mut self.filters_open);
+        self.output_action(action);
+        ui.allocate_rect(body, egui::Sense::hover());
+        self.view_tabs(ui, egui::Rect::from_min_size(egui::pos2(screen.left(), body.bottom()), egui::vec2(screen.width(), TABS_HEIGHT)));
+        self.status_line(
+            ui,
+            egui::Rect::from_min_size(egui::pos2(screen.left(), body.bottom() + TABS_HEIGHT), egui::vec2(screen.width(), STATUS_HEIGHT)),
+        );
         self.dialogs(ui.ctx());
         self.search_box(ui.ctx());
         let zoom = self.zoom as f32 / 100.0;
@@ -1012,31 +1020,45 @@ impl SigmaApp {
         });
     }
 
-    /// The view rail down the window's left, as in report designers, and the one place that
-    /// switches views: Data View and Variable View, each beside the Output, and the dashboard on
-    /// the whole window.
-    fn view_rail(&mut self, ui: &mut egui::Ui, height: f32) {
+    /// The view tabs along the window's bottom, as a workbook's sheet tabs, and the one place
+    /// that switches views: Data View and Variable View, each beside the Output, and the dashboard
+    /// on the whole window. The current tab lies on the grid's colour, its name in the accent.
+    fn view_tabs(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
         let t = Tokens::get(ui.ctx());
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(RAIL_WIDTH, height), egui::Sense::hover());
-        ui.painter().rect_filled(rect, theme::PANE_RADIUS, t.ribbon);
+        let painter = ui.painter().clone();
+        painter.rect_filled(rect, 0.0, t.window);
+        painter.hline(rect.x_range(), rect.top() + 0.5, egui::Stroke::new(1.0, t.border));
         let dashboard = self.output_state.dashboard;
         let views = [
             (Icon::Grid, tr!("data-view"), tr!("data-view-tip"), !dashboard && self.view == View::Data, Some(View::Data)),
             (Icon::List, tr!("variable-view"), tr!("variable-view-tip"), !dashboard && self.view == View::Variables, Some(View::Variables)),
             (Icon::Dashboard, tr!("out-dashboard"), tr!("rail-dashboard-tip"), dashboard, None),
         ];
+        let mut x = rect.left() + 12.0;
         for (k, (icon, name, tip, on, view)) in views.into_iter().enumerate() {
-            let slot = egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 4.0 + 42.0 * k as f32), egui::vec2(RAIL_WIDTH - 1.0, 40.0));
-            let response = ui.interact(slot, ui.id().with(("rail", k)), egui::Sense::click());
+            let font = egui::FontId::proportional(13.0);
+            let color = if on { t.accent } else { t.text_dim };
+            let galley = painter.layout_no_wrap(name.clone(), font, color);
+            let width = galley.size().x + 44.0;
+            let slot = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 1.0), egui::vec2(width, rect.height() - 1.0));
+            x += width;
+            let response = ui.interact(slot, ui.id().with(("view-tab", k)), egui::Sense::click());
             response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &name));
-            let painter = ui.painter();
             if on {
-                painter.rect_filled(slot, 0.0, t.accent_soft);
-                painter.rect_filled(egui::Rect::from_min_size(slot.min, egui::vec2(3.0, slot.height())), 0.0, t.accent);
+                painter.rect_filled(slot, 0.0, t.grid_bg);
+                painter.vline(slot.left() + 0.5, slot.y_range(), egui::Stroke::new(1.0, t.border));
+                painter.vline(slot.right() - 0.5, slot.y_range(), egui::Stroke::new(1.0, t.border));
             } else if response.hovered() {
                 painter.rect_filled(slot, 0.0, t.hover);
             }
-            icons::paint(painter, egui::Rect::from_center_size(slot.center(), egui::vec2(20.0, 20.0)), icon, &t);
+            let icon_rect = egui::Rect::from_center_size(egui::pos2(slot.left() + 20.0, slot.center().y), egui::vec2(14.0, 14.0));
+            icons::paint(&painter, icon_rect, icon, &t);
+            let at = egui::pos2(slot.left() + 32.0, slot.center().y - galley.size().y / 2.0);
+            if on {
+                // Bold is drawn twice, a hair apart: the default font has no bold face.
+                painter.galley(at + egui::vec2(0.4, 0.0), galley.clone(), color);
+            }
+            painter.galley(at, galley, color);
             if response.on_hover_text(tip).clicked() {
                 self.output_state.dashboard = view.is_none();
                 if let Some(view) = view {
@@ -1101,23 +1123,31 @@ impl SigmaApp {
         }
     }
 
+    /// Data View or Variable View edge to edge, over the Syntax pane (folded to its header row
+    /// when it isn't wanted).
     fn left_pane(&mut self, ui: &mut egui::Ui) {
         let t = Tokens::get(ui.ctx());
-        let syntax_height = 300.0;
-        let table_height = (ui.available_height() - syntax_height).max(120.0);
+        let rect = ui.max_rect();
+        // Open, it takes what the editor needs, and room for the steps once there are some.
+        let open_height = if self.session.steps().is_empty() { SYNTAX_OPEN - 80.0 } else { SYNTAX_OPEN };
+        let syntax_height = if self.syntax_open { (rect.height() * 0.45).clamp(SYNTAX_FOLDED, open_height) } else { SYNTAX_FOLDED };
+        let grid = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), (rect.bottom() - syntax_height).max(rect.top())));
+        let syntax = egui::Rect::from_min_max(egui::pos2(rect.left(), grid.bottom()), rect.max);
+        let child = |ui: &mut egui::Ui, r: egui::Rect| {
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::top_down(egui::Align::Min)));
+            child.set_clip_rect(r.intersect(ui.clip_rect()));
+            child
+        };
+        ui.painter().rect_filled(grid, 0.0, t.grid_bg);
         let mut edits = Vec::new();
         let mut commits = Vec::new();
-        let grid = egui::Frame::new().fill(t.grid_bg).corner_radius(theme::PANE_RADIUS).inner_margin(egui::Margin::same(1));
-        grid.show(ui, |ui| {
-            let size = egui::vec2(ui.available_width(), table_height - 2.0);
-            ui.allocate_ui(size, |ui| {
-                ui.set_min_size(size);
-                match self.view {
-                    View::Data => views::data_view(ui, &self.session.dataset, self.value_labels, &mut self.editing, &mut edits, &mut commits),
-                    View::Variables => views::variable_view(ui, &self.session.dataset, &mut self.editing, &mut edits, &mut commits),
-                }
-            });
-        });
+        {
+            let mut ui = child(ui, grid);
+            match self.view {
+                View::Data => views::data_view(&mut ui, &self.session.dataset, self.value_labels, &mut self.editing, &mut edits, &mut commits),
+                View::Variables => views::variable_view(&mut ui, &self.session.dataset, &mut self.editing, &mut edits, &mut commits),
+            }
+        }
         for (target, text) in edits {
             self.apply_edit(target, &text);
         }
@@ -1125,20 +1155,31 @@ impl SigmaApp {
             self.apply_commit(commit);
         }
 
-        ui.add_space(6.0);
-        theme::card(&t).show(ui, |ui| {
-            ui.set_min_size(ui.available_size());
-            ui.spacing_mut().item_spacing.y = 4.0;
-            let run = theme::pane_header(ui, Icon::List, &tr!("syntax"), "", |ui| {
-                ribbon::accent_button(ui, Icon::Run, &tr!("run")).on_hover_text(tr!("run-tip")).clicked()
-            });
-            if run {
-                self.run_syntax();
-            }
-            let hint = egui::RichText::new(tr!("syntax-hint")).color(t.text_dim);
-            ui.add(egui::TextEdit::multiline(&mut self.syntax).code_editor().hint_text(hint).desired_rows(5).desired_width(f32::INFINITY));
-            self.steps_panel(ui);
+        ui.painter().rect_filled(syntax, 0.0, t.ribbon);
+        ui.painter().hline(syntax.x_range(), syntax.top() + 0.5, egui::Stroke::new(1.0, t.border));
+        let mut ui = child(ui, syntax.shrink2(egui::vec2(12.0, 4.0)));
+        ui.spacing_mut().item_spacing.y = 4.0;
+        let open = self.syntax_open;
+        let (run, fold) = theme::pane_header(&mut ui, Icon::List, &tr!("syntax"), "", |ui| {
+            let (chevron, name) = if open { (Icon::ChevronDown, tr!("syntax-hide")) } else { (Icon::ChevronUp, tr!("syntax-show")) };
+            let fold = icon_button(ui, chevron, &name);
+            ui.add_space(6.0);
+            let run = ribbon::accent_button(ui, Icon::Run, &tr!("run")).on_hover_text(tr!("run-tip")).clicked();
+            (run, fold)
         });
+        if fold {
+            self.syntax_open = !open;
+        }
+        if run {
+            self.run_syntax();
+        }
+        if open {
+            egui::ScrollArea::vertical().id_salt("syntax-pane").auto_shrink([false, false]).show(&mut ui, |ui| {
+                let hint = egui::RichText::new(tr!("syntax-hint")).color(t.text_dim);
+                ui.add(egui::TextEdit::multiline(&mut self.syntax).code_editor().hint_text(hint).desired_rows(5).desired_width(f32::INFINITY));
+                self.steps_panel(ui);
+            });
+        }
     }
 
     fn apply_commit(&mut self, commit: Commit) {
@@ -1293,9 +1334,9 @@ impl SigmaApp {
     }
 
     /// The last message on the left; the data's size, weight and filter on the right.
-    fn status_line(&mut self, ui: &mut egui::Ui) {
+    fn status_line(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
         let t = Tokens::get(ui.ctx());
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), STATUS_HEIGHT), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 0.0, t.window);
         let mut row = ui
             .new_child(egui::UiBuilder::new().max_rect(rect.shrink2(egui::vec2(10.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
         let ready = tr!("status-ready");

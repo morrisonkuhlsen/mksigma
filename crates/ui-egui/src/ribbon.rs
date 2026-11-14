@@ -1,4 +1,4 @@
-//! The top of the window, as its sibling Pearl's: a title row (AutoSave, Save, Undo, Redo and more
+//! The top of the window, as its sibling MK Matrix's: a title row (AutoSave, Save, Undo, Redo and more
 //! on the left, the logo and the document's name in the middle, search, export and theme on the
 //! right), a row of menus (File, then the tabs) and the current tab's toolbar in one slim row,
 //! its groups set apart by short light lines. Buttons only report what was asked for; the app
@@ -90,7 +90,7 @@ const MENU_GAP: f32 = 6.0;
 const TOOLBAR_HEIGHT: f32 = 34.0;
 /// A toolbar button.
 const BUTTON_HEIGHT: f32 = 23.0;
-/// The corners of buttons in the bars, as Pearl's.
+/// The corners of buttons in the bars.
 const RADIUS: f32 = 4.0;
 
 /// An undo label short enough for a tooltip.
