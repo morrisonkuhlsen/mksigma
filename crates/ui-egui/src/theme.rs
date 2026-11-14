@@ -1,8 +1,8 @@
 //! Design tokens: the colours every part of the window is painted with, light and dark. The
-//! layout follows modern desktop office suites (a title row, a ribbon of tabs, a grid with
-//! headers, tabs and a status bar at the bottom); the palette is its sibling Pearl's: in light,
-//! the Pearl theme's warm ivory in layers with mauve the only colour; in dark, Morrison Kühlsen's
-//! ink (#14161C) in cool layers with terracotta. The icons keep their colours by meaning.
+//! look is its sibling MK Matrix's: in light, white chrome and neutral greys with terracotta
+//! (#A0522D) the only colour; in dark, Morrison Kühlsen's ink in cool layers with a lighter
+//! terracotta (#E08A5F). Panes are set apart by hairlines, the data grid runs edge to edge. The
+//! icons keep one colour per meaning.
 
 use egui::{Color32, Stroke, Visuals};
 
@@ -32,10 +32,9 @@ pub struct Tokens {
     pub paper: Color32,
     /// The desk the Output's page lies on: a tone below the window, so the page stands out.
     pub desk: Color32,
-    /// Icon colours beside the accent, one meaning each, in Pearl's vintage inks: charts and pages
-    /// (blue: slate; teal: mustard), running and adding (green: olive), files and labels (orange:
-    /// terracotta), removing and PDF (red: oxblood), relations between variables and Learn
-    /// (violet: mauve).
+    /// Icon colours beside the accent, one meaning each: charts and pages (blue, teal), running
+    /// and adding (green), files and labels (orange), removing and PDF (red), relations between
+    /// variables and Learn (violet).
     pub blue: Color32,
     pub teal: Color32,
     pub green: Color32,
@@ -50,30 +49,30 @@ impl Tokens {
     pub fn light() -> Tokens {
         Tokens {
             dark: false,
-            window: Color32::from_rgb(0xF4, 0xEF, 0xE7),
-            ribbon: Color32::from_rgb(0xFB, 0xF8, 0xF2),
-            border: Color32::from_rgb(0xE6, 0xDD, 0xD0),
-            text: Color32::from_rgb(0x2A, 0x26, 0x22),
-            text_dim: Color32::from_rgb(0x65, 0x5D, 0x54),
-            accent: Color32::from_rgb(0x8A, 0x4F, 0x7D),
-            accent_soft: Color32::from_rgb(0xF0, 0xDF, 0xEA),
-            hover: Color32::from_rgb(0xED, 0xE5, 0xD9),
-            pressed: Color32::from_rgb(0xE3, 0xD9, 0xCA),
-            grid_bg: Color32::from_rgb(0xFF, 0xFD, 0xF9),
-            gridline: Color32::from_rgb(0xE9, 0xE1, 0xD5),
-            header_bg: Color32::from_rgb(0xF4, 0xEF, 0xE7),
-            header_text: Color32::from_rgb(0x5C, 0x54, 0x4B),
-            header_line: Color32::from_rgb(0xDD, 0xD3, 0xC5),
-            cell_text: Color32::from_rgb(0x2A, 0x26, 0x22),
-            input_bg: Color32::from_rgb(0xFF, 0xFD, 0xF9),
-            paper: Color32::from_rgb(0xFF, 0xFD, 0xF9),
-            desk: Color32::from_rgb(0xED, 0xE6, 0xDB),
-            blue: Color32::from_rgb(0x3E, 0x5C, 0x76),
-            teal: Color32::from_rgb(0x9A, 0x6B, 0x12),
-            green: Color32::from_rgb(0x6B, 0x7A, 0x3A),
-            orange: Color32::from_rgb(0xA0, 0x52, 0x2D),
-            red: Color32::from_rgb(0x7B, 0x2D, 0x35),
-            violet: Color32::from_rgb(0x8A, 0x4F, 0x7D),
+            window: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            ribbon: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            border: Color32::from_rgb(0xE0, 0xE0, 0xE0),
+            text: Color32::from_rgb(0x24, 0x24, 0x24),
+            text_dim: Color32::from_rgb(0x61, 0x61, 0x61),
+            accent: Color32::from_rgb(0xA0, 0x52, 0x2D),
+            accent_soft: Color32::from_rgb(0xF5, 0xE3, 0xD8),
+            hover: Color32::from_rgb(0xEB, 0xEB, 0xEB),
+            pressed: Color32::from_rgb(0xDD, 0xDD, 0xDD),
+            grid_bg: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            gridline: Color32::from_rgb(0xE9, 0xE7, 0xE4),
+            header_bg: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            header_text: Color32::from_rgb(0x6F, 0x6B, 0x66),
+            header_line: Color32::from_rgb(0xE0, 0xDE, 0xDB),
+            cell_text: Color32::from_rgb(0x1F, 0x1F, 0x1F),
+            input_bg: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            paper: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+            desk: Color32::from_rgb(0xEF, 0xEF, 0xEF),
+            blue: Color32::from_rgb(0x2F, 0x6F, 0xCF),
+            teal: Color32::from_rgb(0x13, 0x80, 0x8A),
+            green: Color32::from_rgb(0x1E, 0x8A, 0x4C),
+            orange: Color32::from_rgb(0xC8, 0x60, 0x1A),
+            red: Color32::from_rgb(0xC8, 0x37, 0x2D),
+            violet: Color32::from_rgb(0x83, 0x50, 0xC8),
             danger: Color32::from_rgb(0xC4, 0x2B, 0x1C),
             warn: Color32::from_rgb(0xA3, 0x62, 0x00),
         }
@@ -82,31 +81,31 @@ impl Tokens {
     pub fn dark() -> Tokens {
         Tokens {
             dark: true,
-            window: Color32::from_rgb(0x14, 0x16, 0x1C),
-            ribbon: Color32::from_rgb(0x1B, 0x1E, 0x25),
-            border: Color32::from_rgb(0x26, 0x2A, 0x33),
+            window: Color32::from_rgb(0x1B, 0x1E, 0x25),
+            ribbon: Color32::from_rgb(0x1F, 0x23, 0x2B),
+            border: Color32::from_rgb(0x34, 0x38, 0x41),
             text: Color32::from_rgb(0xE6, 0xE8, 0xEC),
             text_dim: Color32::from_rgb(0x9A, 0xA1, 0xAD),
             accent: Color32::from_rgb(0xE0, 0x8A, 0x5F),
             accent_soft: Color32::from_rgb(0x4A, 0x2A, 0x1E),
-            hover: Color32::from_rgb(0x23, 0x27, 0x31),
-            pressed: Color32::from_rgb(0x2B, 0x30, 0x3B),
-            grid_bg: Color32::from_rgb(0x1B, 0x1E, 0x25),
-            gridline: Color32::from_rgb(0x2E, 0x33, 0x3D),
-            header_bg: Color32::from_rgb(0x14, 0x16, 0x1C),
-            header_text: Color32::from_rgb(0x8B, 0x93, 0xA1),
-            header_line: Color32::from_rgb(0x26, 0x2A, 0x33),
+            hover: Color32::from_rgb(0x2A, 0x2E, 0x37),
+            pressed: Color32::from_rgb(0x34, 0x38, 0x41),
+            grid_bg: Color32::from_rgb(0x2B, 0x2F, 0x38),
+            gridline: Color32::from_rgb(0x34, 0x38, 0x41),
+            header_bg: Color32::from_rgb(0x2B, 0x2F, 0x38),
+            header_text: Color32::from_rgb(0x9A, 0xA1, 0xAD),
+            header_line: Color32::from_rgb(0x3A, 0x3F, 0x4A),
             cell_text: Color32::from_rgb(0xE6, 0xE8, 0xEC),
             input_bg: Color32::from_rgb(0x10, 0x12, 0x17),
             paper: Color32::from_rgb(0x2A, 0x2E, 0x37),
-            desk: Color32::from_rgb(0x0F, 0x11, 0x15),
-            blue: Color32::from_rgb(0x8F, 0xB0, 0xCC),
-            teal: Color32::from_rgb(0xE0, 0xB0, 0x4F),
-            green: Color32::from_rgb(0xAE, 0xBB, 0x7A),
-            orange: Color32::from_rgb(0xE0, 0x8A, 0x5F),
-            red: Color32::from_rgb(0xD9, 0x82, 0x8B),
-            violet: Color32::from_rgb(0xC9, 0xA2, 0xBE),
-            danger: Color32::from_rgb(0xF1, 0x70, 0x5F),
+            desk: Color32::from_rgb(0x15, 0x17, 0x1C),
+            blue: Color32::from_rgb(0x6E, 0xA8, 0xF7),
+            teal: Color32::from_rgb(0x4C, 0xC7, 0xCF),
+            green: Color32::from_rgb(0x5C, 0xC5, 0x87),
+            orange: Color32::from_rgb(0xF0, 0x96, 0x5A),
+            red: Color32::from_rgb(0xF0, 0x7B, 0x6E),
+            violet: Color32::from_rgb(0xB3, 0x94, 0xEE),
+            danger: Color32::from_rgb(0xFF, 0x95, 0x85),
             warn: Color32::from_rgb(0xF0, 0xC0, 0x60),
         }
     }
